@@ -216,6 +216,13 @@ app = FastAPI(title='VolCAD Prototype', version='0.1.0')
 
 app.mount('/static', StaticFiles(directory='static'), name='static')
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 @app.middleware('http')
 async def auth_middleware(request: Request, call_next):
     if request.method in ('GET', 'OPTIONS', 'HEAD') or request.url.path.startswith('/static/'):
@@ -341,13 +348,6 @@ def require_admin(request: Request):
     if user.get('role') != 'admin':
         raise HTTPException(status_code=403, detail='Admin required')
     return user
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 # Pydantic schemas
 class AgencyCreate(BaseModel):
