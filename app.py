@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import List, Optional
 import os
 import re
-import ssl
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,12 +15,7 @@ DATABASE_URL = os.getenv('SUPABASE_DB_URL', 'sqlite:///./volcad.db')
 if DATABASE_URL.startswith('sqlite'):
     engine = create_engine(DATABASE_URL, connect_args={'check_same_thread': False})
 else:
-    db_url = DATABASE_URL.split('?')[0]
-    if db_url.startswith('postgresql+psycopg2://'):
-        db_url = db_url.replace('postgresql+psycopg2://', 'postgresql+pg8000://', 1)
-    elif db_url.startswith('postgresql://'):
-        db_url = db_url.replace('postgresql://', 'postgresql+pg8000://', 1)
-    engine = create_engine(db_url, pool_pre_ping=True, connect_args={'ssl_context': ssl.create_default_context()})
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
