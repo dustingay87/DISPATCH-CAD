@@ -215,6 +215,10 @@ def calls_screen():
 def mdt():
     return FileResponse('static/mdt.html')
 
+@app.get('/avl')
+def avl():
+    return FileResponse('static/avl.html')
+
 @app.get('/health')
 def health():
     return {'status': 'ok'}
@@ -333,6 +337,23 @@ class MessageOut(BaseModel):
     method: Optional[str] = None
     sent_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+class TaipPositionOut(BaseModel):
+    id: int
+    unit_id: Optional[int] = None
+    taip_id: Optional[str] = None
+    raw_sentence: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    speed: Optional[float] = None
+    heading: Optional[float] = None
+    ignition: Optional[bool] = None
+    odometer: Optional[float] = None
+    fix_quality: Optional[str] = None
+    reported_at: Optional[datetime] = None
+    received_at: Optional[datetime] = None
     class Config:
         from_attributes = True
 
@@ -606,6 +627,13 @@ def ingest_taip(body: TaipIngest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(pos)
     return {'taip_id': taip_id, 'parsed': data, 'unit_id': pos.unit_id}
+
+@app.get('/taip/positions', response_model=List[TaipPositionOut])
+def list_taip_positions(unit_id: Optional[int] = Query(None), limit: int = 50, db: Session = Depends(get_db)):
+    q = db.query(TaipPosition)
+    if unit_id:
+        q = q.filter(TaipPosition.unit_id == unit_id)
+    return q.order_by(TaipPosition.received_at.desc()).limit(limit).all()
 
 @app.post('/units/{unit_id}/camera', response_model=UnitOut)
 def set_unit_camera(unit_id: int, body: UnitCamera, db: Session = Depends(get_db)):

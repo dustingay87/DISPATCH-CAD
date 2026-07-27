@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>VolCAD AVL</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
+<script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' crossorigin=''></script>
+<style>
+  html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, system-ui, sans-serif; }
+  #map { height:100%; width:100%; background:#0f172a; }
+  .selected { background:#334155; border-left:4px solid #60a5fa; }
+</style>
+</head>
+<body class='bg-slate-900 text-slate-200 h-screen flex flex-col'>
+  <header class='h-16 bg-slate-950 border-b border-slate-700 flex items-center justify-between px-4 shrink-0'>
+    <div class='text-xl font-bold text-white'>VolCAD <span class='text-slate-500 font-normal text-base ml-2'>AVL</span></div>
+    <div class='flex items-center space-x-3'>
+      <label class='flex items-center space-x-1'><input id='trailsToggle' type='checkbox' class='accent-blue-500'> <span>Trails</span></label>
+      <label class='flex items-center space-x-1'><input id='liveToggle' type='checkbox' checked class='accent-blue-500'> <span>Live</span></label>
+      <button id='refreshBtn' class='bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded'>Refresh</button>
+    </div>
+  </header>
+  <div class='flex-1 flex overflow-hidden'>
+    <aside class='w-80 border-r border-slate-700 flex flex-col shrink-0'>
+      <div class='p-3 bg-slate-800 border-b border-slate-700 font-semibold'>Units</div>
+      <div id='unitList' class='flex-1 overflow-y-auto p-2 space-y-2'></div>
+      <div class='p-3 bg-slate-800 border-t border-slate-700'>
+        <div class='text-sm font-semibold mb-1'>TAIP Simulator</div>
+        <select id='simUnit' class='bg-slate-700 border border-slate-600 rounded p-1 w-full mb-1'></select>
+        <div class='grid grid-cols-2 gap-1 mb-1'>
+          <button id='simMoveBtn' class='bg-green-700 hover:bg-green-600 p-1 rounded text-xs'>Move</button>
+          <button id='simStopBtn' class='bg-red-700 hover:bg-red-600 p-1 rounded text-xs'>Stop</button>
+        </div>
+        <textarea id='simRaw' rows='3' class='bg-slate-900 border border-slate-600 rounded p-1 w-full text-xs font-mono' placeholder='raw TAIP sentence'></textarea>
+        <button id='simSendBtn' class='bg-blue-700 hover:bg-blue-600 p-1 rounded w-full mt-1 text-xs'>Send Raw</button>
+      </div>
+    </aside>
+    <main class='flex-1 relative'>
+      <div id='map'></div>
+      <div id='telemetry' class='absolute bottom-4 left-4 bg-slate-950/90 border border-slate-700 rounded p-3 min-w-[16rem] hidden'>
+        <div class='text-lg font-bold text-white' id='tCallsign'>--</div>
+        <div class='text-sm text-slate-300' id='tStatus'>--</div>
+        <div class='grid grid-cols-2 gap-x-4 text-sm text-slate-400 mt-1'>
+          <div>Speed: <span id='tSpeed' class='text-white'>--</span></div>
+          <div>Heading: <span id='tHeading' class='text-white'>--</span></div>
+          <div>Lat: <span id='tLat' class='text-white'>--</span></div>
+          <div>Lng: <span id='tLng' class='text-white'>--</span></div>
+          <div class='col-span-2'>Last seen: <span id='tLast' class='text-white'>--</span></div>
+        </div>
+      </div>
+    </main>
+  </div>
+<script>
+const CENTER = [39.9612, -82.9988];
+let state = { agencies:[], units:[], positions:{}, selected:null, trails:false };
+let map, layers={};
+
+function api(path, opts={}){ return fetch(path, opts).then(r=>{ if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+
+function initMap(){
+  map = L.map('map', { center: CENTER, zoom: 11 });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+  layers.units = L.layerGroup().addTo(map);
+  layers.trails = L.layerGroup().addTo(map);
+}
+
+function unitColor(st){ if(st==='OS') return '#ef4444'; if(st==='ER'||st==='TR'||st==='DEL') return '#eab308'; if(st==='AQ') return '#22c55e'; return '#64748b'; }
+function arrowIcon(color, heading){
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='${color}' width='24' height='24'><path d='M12 2 L22 20 L12 16 L2 20 Z' transform='rotate(${heading||0} 12 12)'/></svg>`;
+  return L.divIcon({ className:'', html: svg, iconSize:[24,24], iconAnchor:[12,12] });
+}
+
+async function load(){
+  try {
+    const [agencies, units] = await Promise.all([api('/agencies'), api('/units')]);
+    state.agencies = agencies; state.units = units;
+    const ids = state.units.map(u=>u.id).join(',');
+    if(ids) state.positions = await api(`/taip/positions?limit=100&unit_id=${ids.indexOf(',')===-1 ? ids : ''}`).then(r=>r?{all:r}:{}).catch(()=>({}));
+    renderUnitList(); renderMap(); updateTelemetry();
+  } catch(e){ document.getElementById('unitList').innerHTML = `<div class='p-4 text-red-400'>Error: ${e.message}</div>`; }
+}
+
+function agencyMap(){ const m={}; state.agencies.forEach(a=>m[a.id]=a); return m; }
+
+function renderUnitList(){
+  const am=agencyMap();
+  const html = state.units.map(u=>{
+    const selectedClass = state.selected===u.id ? 'selected' : 'bg-slate-800';
+    return `<div class='p-2 rounded cursor-pointer ${selectedClass} hover:bg-slate-700' onclick='selectUnit(${u.id})'>
+      <div class='flex justify-between'><b>${u.call_sign}</b> <span class='text-xs text-slate-400'>${u.current_status}</span></div>
+      <div class='text-xs text-slate-400'>${am[u.agency_id]?.agency_type?.toUpperCase()||'-'}</div>
+      <div class='text-xs'>Spd ${u.speed??'-'} | Hdg ${u.heading??'-'}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('unitList').innerHTML = html || '<div class="p-4 text-slate-500">No units</div>';
+  const sim = document.getElementById('simUnit'); sim.innerHTML = state.units.map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
+}
+
+function renderMap(){
+  layers.units.clearLayers(); layers.trails.clearLayers();
+  const am=agencyMap();
+  state.units.forEach(u=>{
+    if(u.lat==null || u.lng==null) return;
+    const col = unitColor(u.current_status);
+    const marker = L.marker([u.lat,u.lng], {icon: arrowIcon(col, u.heading||0)}).addTo(layers.units);
+    marker.on('click',()=>selectUnit(u.id));
+    marker.bindPopup(`<b>${u.call_sign}</b><br>${u.current_status}<br>${am[u.agency_id]?.name||''}<br>Spd: ${u.speed??'-'} Hdg: ${u.heading??'-'}`);
+    if(state.selected===u.id) marker.openPopup();
+  });
+  if(document.getElementById('trailsToggle').checked) drawTrails();
+}
+
+function drawTrails(){
+  if(!state.positions || !state.positions.length) return;
+  const positions = Array.isArray(state.positions) ? state.positions : (state.positions.all || []);
+  const grouped = {};
+  positions.forEach(p=>{ if(!p.unit_id || p.lat==null || p.lng==null) return; if(!grouped[p.unit_id]) grouped[p.unit_id]=[]; grouped[p.unit_id].push([p.lat,p.lng]); });
+  Object.entries(grouped).forEach(([uid, pts])=>{
+    if(pts.length<2) return;
+    const u = state.units.find(x=>x.id==uid); const col = u ? unitColor(u.current_status) : '#38bdf8';
+    L.polyline(pts,{color:col,weight:2,opacity:.7}).addTo(layers.trails);
+  });
+}
+
+function selectUnit(id){
+  state.selected = id; renderUnitList(); renderMap();
+  const u = state.units.find(x=>x.id===id); if(u && u.lat!=null && u.lng!=null) map.setView([u.lat,u.lng],16);
+  updateTelemetry();
+}
+
+function updateTelemetry(){
+  const u = state.units.find(x=>x.id===state.selected); const el=document.getElementById('telemetry');
+  if(!u){ el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  document.getElementById('tCallsign').textContent = u.call_sign;
+  document.getElementById('tStatus').textContent = u.current_status;
+  document.getElementById('tSpeed').textContent = u.speed!=null ? u.speed.toFixed(1) : '--';
+  document.getElementById('tHeading').textContent = u.heading!=null ? u.heading.toFixed(0) : '--';
+  document.getElementById('tLat').textContent = u.lat!=null ? u.lat.toFixed(5) : '--';
+  document.getElementById('tLng').textContent = u.lng!=null ? u.lng.toFixed(5) : '--';
+  document.getElementById('tLast').textContent = fmtTime(u.last_seen_at);
+}
+
+async function sendTaip(body){
+  try { const r=await api('/taip/ingest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); load(); return r; } catch(e){ alert('TAIP error: '+e.message); }
+}
+
+function generateTaipSentence(unitId, move){
+  const u = state.units.find(x=>x.id===parseInt(unitId));
+  const lat = (u && u.lat!=null ? u.lat : CENTER[0]);
+  const lng = (u && u.lng!=null ? u.lng : CENTER[1]);
+  const d = move ? (Math.random()*360) : 0;
+  const newLat = lat + (move ? Math.cos(d*Math.PI/180)*0.001 : 0);
+  const newLng = lng + (move ? Math.sin(d*Math.PI/180)*0.001 : 0);
+  const speed = move ? (Math.random()*40+10).toFixed(1) : '0.0';
+  const heading = move ? Math.floor(Math.random()*360) : 0;
+  return `$>lat=${newLat.toFixed(6)};lng=${newLng.toFixed(6)};spd=${speed};hdg=${heading};id=${u ? u.taip_id || u.call_sign : 'SIM'}`;
+}
+
+document.getElementById('refreshBtn').addEventListener('click', load);
+document.getElementById('trailsToggle').addEventListener('change', renderMap);
+document.getElementById('simMoveBtn').addEventListener('click', ()=>{
+  const raw = generateTaipSentence(document.getElementById('simUnit').value, true);
+  document.getElementById('simRaw').value = raw;
+  sendTaip({raw});
+});
+document.getElementById('simStopBtn').addEventListener('click', ()=>{
+  const raw = generateTaipSentence(document.getElementById('simUnit').value, false);
+  document.getElementById('simRaw').value = raw;
+  sendTaip({raw});
+});
+document.getElementById('simSendBtn').addEventListener('click', ()=>{
+  const raw = document.getElementById('simRaw').value; if(!raw) return; sendTaip({raw});
+});
+
+window.selectUnit = selectUnit;
+initMap();
+load();
+setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); }, 5000);
+</script>
+</body>
+</html>
