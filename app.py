@@ -89,8 +89,8 @@ class Unit(Base):
     station_location_id = Column(Integer, ForeignKey('locations.id'), nullable=True)
     current_status = Column(String(50), default='AQ')
     current_incident_id = Column(Integer, ForeignKey('incidents.id'), nullable=True)
-    current_lat = Column(Float)
-    current_lng = Column(Float)
+    lat = Column(Float)
+    lng = Column(Float)
     heading = Column(Float)
     speed = Column(Float)
     last_seen_at = Column(DateTime)
@@ -223,8 +223,8 @@ class UnitOut(BaseModel):
     call_sign: str
     unit_type: str
     current_status: str
-    current_lat: Optional[float] = None
-    current_lng: Optional[float] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     heading: Optional[float] = None
     speed: Optional[float] = None
     last_seen_at: Optional[datetime] = None
@@ -467,9 +467,9 @@ def ingest_taip(body: TaipIngest, db: Session = Depends(get_db)):
     if unit:
         pos.unit_id = unit.id
         if data.get('lat') is not None:
-            unit.current_lat = data['lat']
+            unit.lat = data['lat']
         if data.get('lng') is not None:
-            unit.current_lng = data['lng']
+            unit.lng = data['lng']
         if data.get('speed') is not None:
             unit.speed = data['speed']
         if data.get('heading') is not None:

@@ -94,7 +94,7 @@
           : '<li class="text-slate-400 text-sm">No incidents</li>';
         clearMarkers();
         agencies.forEach(a => addMarker(a.lat, a.lng, `<b>${a.name}</b><br>${a.agency_type}`, 'blue'));
-        units.forEach(u => addMarker(u.current_lat, u.current_lng, `<b>${u.call_sign}</b><br>${u.current_status}`, 'green'));
+        units.forEach(u => addMarker(u.lat, u.lng, `<b>${u.call_sign}</b><br>${u.current_status}`, 'green'));
         incidents.forEach(i => addMarker(i.lat, i.lng, `<b>${i.incident_number}</b><br>${i.call_type}`, 'red'));
       } catch (e) {
         showStatus('Error: ' + e.message);
