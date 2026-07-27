@@ -57,7 +57,7 @@ const CENTER = [39.9612, -82.9988];
 let state = { agencies:[], units:[], positions:{}, selected:null, trails:false };
 let map, layers={};
 
-function api(path, opts={}){ return fetch(path, opts).then(r=>{ if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 
 function initMap(){

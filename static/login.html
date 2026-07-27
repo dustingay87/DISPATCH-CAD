@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>VolCAD Login</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  html,body { height:100%; margin:0; font-family: ui-sans-serif, system-ui, sans-serif; }
+</style>
+</head>
+<body class='bg-slate-900 text-slate-100 flex items-center justify-center h-screen'>
+  <div class='bg-slate-800 border border-slate-700 rounded-xl p-8 w-full max-w-md shadow-2xl'>
+    <h1 class='text-3xl font-bold text-white mb-2 text-center'>VolCAD</h1>
+    <p class='text-slate-400 text-center mb-6'>Dispatcher / Responder Login</p>
+    <form id='loginForm' class='space-y-4'>
+      <div>
+        <label class='block text-sm text-slate-300 mb-1'>Email</label>
+        <input id='email' type='email' required class='w-full bg-slate-900 border border-slate-600 rounded p-3 text-white'>
+      </div>
+      <div>
+        <label class='block text-sm text-slate-300 mb-1'>Password</label>
+        <input id='password' type='password' required class='w-full bg-slate-900 border border-slate-600 rounded p-3 text-white'>
+      </div>
+      <button type='submit' class='w-full bg-blue-700 hover:bg-blue-600 text-white font-bold py-3 rounded transition'>Log In</button>
+    </form>
+    <div id='error' class='mt-4 text-red-400 text-sm text-center hidden'></div>
+  </div>
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  try {
+    const res = await fetch('/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({email, password})
+    });
+    if (!res.ok) { throw new Error('Invalid credentials'); }
+    window.location.href = '/';
+  } catch (err) { document.getElementById('error').textContent = err.message; document.getElementById('error').classList.remove('hidden'); }
+});
+</script>
+</body>
+</html>

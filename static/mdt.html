@@ -63,7 +63,7 @@ const CONFIG = {
 };
 function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
 function elapsed(iso){ return iso ? (Date.now()-new Date(iso).getTime())/1000 : 0; }
-function api(path, opts={}){ return fetch(path, opts).then(r=>{ if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 
 const url = new URL(window.location.href);
 let unitId = parseInt(url.searchParams.get('unit_id'));
