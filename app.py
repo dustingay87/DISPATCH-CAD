@@ -223,6 +223,16 @@ def get_db():
     finally:
         db.close()
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class UserMe(BaseModel):
+    user_id: int
+    role: str
+    email: Optional[str] = None
+    agency_id: Optional[int] = None
+
 @app.middleware('http')
 async def auth_middleware(request: Request, call_next):
     if request.method in ('GET', 'OPTIONS', 'HEAD') or request.url.path.startswith('/static/'):
@@ -471,16 +481,6 @@ class CustomerConfigOut(CustomerConfigCreate):
     updated_at: Optional[datetime] = None
     class Config:
         from_attributes = True
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-class UserMe(BaseModel):
-    user_id: int
-    role: str
-    email: Optional[str] = None
-    agency_id: Optional[int] = None
 
 class TaipPositionOut(BaseModel):
     id: int
