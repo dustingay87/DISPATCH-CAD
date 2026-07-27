@@ -174,6 +174,10 @@ if DATABASE_URL.startswith('sqlite'):
 
 app = FastAPI(title='VolCAD Prototype', version='0.1.0')
 
+@app.get('/health')
+def health():
+    return {'status': 'ok'}
+
 def get_db():
     db = SessionLocal()
     try:
