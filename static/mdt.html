@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>VolCAD MDT</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .mdt-btn { padding:1.25rem; border-radius:0.75rem; font-size:1.25rem; font-weight:600; text-transform:uppercase; letter-spacing:0.03em; }
+  .incident-card { background:#1e293b; border-left:8px solid; border-radius:0.75rem; padding:1.5rem; }
+  .priority-1 { border-color:#ef4444; }
+  .priority-2 { border-color:#f97316; }
+  .priority-3 { border-color:#eab308; }
+  .priority-4 { border-color:#22c55e; }
+  .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:0.875rem; }
+</style>
+</head>
+<body class='bg-slate-900 text-slate-100 h-screen flex flex-col'>
+  <header class='h-20 bg-slate-950 border-b border-slate-700 flex items-center justify-between px-6'>
+    <div class='flex items-center space-x-4'>
+      <div class='text-3xl font-bold text-white' id='unitCallsign'>--</div>
+      <div class='text-slate-400 text-lg' id='unitAgency'>--</div>
+    </div>
+    <div class='flex items-center space-x-6 text-lg'>
+      <div id='clock' class='font-mono text-2xl'></div>
+      <label class='flex items-center space-x-2'><input id='liveToggle' type='checkbox' checked class='accent-blue-500 w-5 h-5'> <span>Live</span></label>
+    </div>
+  </header>
+
+  <div class='flex-1 p-4 grid grid-cols-3 gap-4 overflow-hidden'>
+    <section class='col-span-2 flex flex-col space-y-4 overflow-hidden'>
+      <div class='flex items-center justify-between bg-slate-800 rounded-lg p-4'>
+        <div class='text-xl'>Status: <span id='unitStatus' class='font-bold text-white'>--</span></div>
+        <div class='text-xl'>Shift: <span id='shiftTimer' class='font-mono text-green-400'>--</span></div>
+        <div class='text-xl'>On Call: <span id='callTimer' class='font-mono text-yellow-400'>--</span></div>
+      </div>
+      <div id='callPanel' class='flex-1 overflow-y-auto space-y-4'></div>
+    </section>
+
+    <section class='col-span-1 flex flex-col space-y-4 overflow-hidden'>
+      <div class='card bg-slate-800 rounded-lg p-4 flex-1 flex flex-col min-h-0'>
+        <div class='text-lg font-semibold border-b border-slate-600 pb-2 mb-2'>Status Buttons</div>
+        <div id='statusButtons' class='grid grid-cols-2 gap-3 overflow-y-auto'></div>
+      </div>
+      <div class='card bg-slate-800 rounded-lg p-4 flex-1 flex flex-col min-h-0'>
+        <div class='text-lg font-semibold border-b border-slate-600 pb-2 mb-2'>Messages</div>
+        <div id='messages' class='flex-1 overflow-y-auto log space-y-1 text-slate-300'></div>
+      </div>
+      <div class='card bg-slate-800 rounded-lg p-4'>
+        <div class='text-lg font-semibold border-b border-slate-600 pb-2 mb-2'>Crew</div>
+        <div id='crew' class='text-slate-300'>--</div>
+      </div>
+    </section>
+  </div>
+
+  <div id='loading' class='absolute inset-0 bg-slate-950/90 flex items-center justify-center text-2xl font-bold'>Select unit with ?unit_id=</div>
+<script>
+const CONFIG = {
+  police: { statuses: [{label:'AQ', code:'AQ'},{label:'CAN', code:'CAN'},{label:'Lunch', code:'LUN'},{label:'AFR', code:'AFR'},{label:'OS', code:'OS'},{label:'ER', code:'ER'},{label:'TR', code:'TR'}] },
+  fire: { statuses: [{label:'AQ', code:'AQ'},{label:'CAN', code:'CAN'},{label:'OS', code:'OS'},{label:'ER', code:'ER'},{label:'OOS', code:'OOS'},{label:'AFR', code:'AFR'},{label:'Maint', code:'MAINT'}] },
+  ems: { statuses: [{label:'AQ', code:'AQ'},{label:'ER', code:'ER'},{label:'OS', code:'OS'},{label:'TR', code:'TR'},{label:'CAN', code:'CAN'},{label:'NPF', code:'NPF'},{label:'DEL', code:'DEL'},{label:'AFR', code:'AFR'}] }
+};
+function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
+function elapsed(iso){ return iso ? (Date.now()-new Date(iso).getTime())/1000 : 0; }
+function api(path, opts={}){ return fetch(path, opts).then(r=>{ if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+
+const url = new URL(window.location.href);
+let unitId = parseInt(url.searchParams.get('unit_id'));
+if(!unitId){ url.searchParams.set('unit_id','1'); unitId=1; history.replaceState(null,'',url); }
+let state = { unit:null, incident:null, messages:[], crew:[], agencyMap:{} };
+
+function showLoading(msg){ const el=document.getElementById('loading'); el.textContent=msg; el.classList.remove('hidden'); }
+function hideLoading(){ document.getElementById('loading').classList.add('hidden'); }
+
+async function load(){
+  try {
+    const [agencies, unit, personnel] = await Promise.all([api('/agencies'), api(`/units/${unitId}`), api(`/personnel?unit_id=${unitId}`)]);
+    state.agencyMap={}; agencies.forEach(a=>state.agencyMap[a.id]=a);
+    state.unit=unit; state.crew=personnel;
+    if(unit.current_incident_id){ state.incident = await api(`/incidents/${unit.current_incident_id}`); state.messages = await api(`/units/${unitId}/messages`); }
+    else { state.incident=null; state.messages = await api(`/units/${unitId}/messages`); }
+    render();
+  } catch(e){ document.getElementById('callPanel').innerHTML = `<div class='text-red-400 p-4 text-xl'>Error: ${e.message}</div>`; }
+}
+
+function render(){
+  const u = state.unit; const a=state.agencyMap[u.agency_id] || {}; const cfg=CONFIG[a.agency_type] || {statuses:[]};
+  document.getElementById('unitCallsign').textContent = u.call_sign;
+  document.getElementById('unitAgency').textContent = a.name || a.agency_type || '';
+  document.getElementById('unitStatus').textContent = u.current_status;
+  document.getElementById('shiftTimer').textContent = u.in_service_at ? fmtDur(elapsed(u.in_service_at)) : '--';
+  const onCall = ['OS','ER','TR','AK','dispatched'].includes(u.current_status) && u.last_assigned_at;
+  document.getElementById('callTimer').textContent = onCall ? fmtDur(elapsed(u.last_assigned_at)) : '--';
+
+  const type=a.agency_type;
+  document.getElementById('statusButtons').innerHTML = cfg.statuses.map(s=>{
+    let color='bg-slate-700 hover:bg-slate-600';
+    if(s.code==='OS') color='bg-red-700 hover:bg-red-600';
+    else if(s.code==='ER'||s.code==='TR'||s.code==='DEL') color='bg-yellow-700 hover:bg-yellow-600';
+    else if(s.code==='AQ') color='bg-green-700 hover:bg-green-600';
+    else if(s.code==='CAN'||s.code==='NPF'||s.code==='OOS'||s.code==='MAINT'||s.code==='LUN'||s.code==='AFR') color='bg-slate-600 hover:bg-slate-500';
+    return `<button class='mdt-btn ${color} text-white' onclick='setStatus("${s.code}")'>${s.label}</button>`;
+  }).join('') + `<button class='mdt-btn bg-indigo-700 hover:bg-indigo-600 text-white' onclick='toggleShift()'>Start/End Shift</button>`;
+
+  document.getElementById('crew').innerHTML = state.crew.length ? state.crew.map(p=>`${p.first_name||''} ${p.last_name||''}`).join('<br>') : 'No crew assigned';
+
+  if(state.messages.length){
+    document.getElementById('messages').innerHTML = state.messages.map(m=>{
+      const t=m.sent_at ? new Date(m.sent_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
+      return `<div class='border-l-4 border-blue-500 pl-2'><span class='text-slate-500'>${t}</span> ${m.message_text||''}</div>`;
+    }).join('');
+  } else document.getElementById('messages').innerHTML = '<div class=\'text-slate-500\'>No messages</div>';
+
+  const call = state.incident;
+  if(call){
+    document.getElementById('callPanel').innerHTML = `
+      <div class='incident-card priority-${Math.min(Math.max(call.priority||2,1),4)}'>
+        <div class='flex justify-between items-start'>
+          <div>
+            <div class='text-3xl font-bold text-white'>${call.call_number||call.incident_number}</div>
+            <div class='text-2xl text-slate-200 mt-1'>${call.call_type}</div>
+          </div>
+          <div class='text-4xl font-bold'>P${call.priority}</div>
+        </div>
+        <div class='mt-4 grid grid-cols-2 gap-4 text-lg'>
+          <div><span class='text-slate-400'>Location:</span> <span class='font-semibold'>${call.location_text||'-'}</span></div>
+          <div><span class='text-slate-400'>Caller:</span> ${call.caller_name||'-'} ${call.callback||''}</div>
+          <div class='col-span-2'><span class='text-slate-400'>Narrative:</span> ${call.narrative||'-'}</div>
+          ${extraHtml(call.extra)}
+        </div>
+      </div>`;
+  } else {
+    document.getElementById('callPanel').innerHTML = `<div class='flex-1 flex items-center justify-center text-2xl text-slate-500'>No active call assigned</div>`;
+  }
+  hideLoading();
+}
+
+function extraHtml(extra){
+  if(!extra || typeof extra!=='object') return '';
+  return Object.entries(extra).map(([k,v])=>`<div class='col-span-1'><span class='text-slate-400 capitalize'>${k}:</span> ${v}</div>`).join('');
+}
+
+window.setStatus = async function(code){
+  const u=state.unit; if(!u.current_incident_id){ alert('No active call'); return; }
+  let extra={status_code:code};
+  if(code==='TR' || code==='CAN'){ const pc=prompt('Passenger/Patient count?'); if(pc) extra.passenger_count=parseInt(pc); }
+  const a=state.agencyMap[u.agency_id]; const cfg=CONFIG[a.agency_type];
+  if(a.agency_type==='ems' && (code==='CAN' || code==='TR' || code==='NPF')){ const d=prompt('Disposition?\n'+(cfg.dispositions||[]).join('\n')); if(d) extra.disposition=d; }
+  try { await api(`/incidents/${u.current_incident_id}/units/${u.id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); await load(); } catch(e){ alert(e.message); }
+};
+
+window.toggleShift = async function(){
+  try { const action = state.unit.in_service_at ? 'end' : 'start'; await api(`/units/${unitId}/shift`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})}); await load(); } catch(e){ alert(e.message); }
+};
+
+function updateClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+updateClock(); setInterval(updateClock,1000);
+load();
+setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); }, 10000);
+</script>
+</body>
+</html>

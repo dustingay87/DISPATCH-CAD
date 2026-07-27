@@ -367,6 +367,7 @@ function renderUnitBoard(){
         <div class='flex space-x-2 pt-1'>
           <button class='btn-sm bg-green-800 hover:bg-green-700' onclick='startShift(${u.id})'>Start Shift</button>
           <button class='btn-sm bg-red-800 hover:bg-red-700' onclick='endShift(${u.id})'>End Shift</button>
+          <a href='/mdt?unit_id=${u.id}' target='_blank' class='btn-sm bg-purple-800 hover:bg-purple-700 text-white inline-flex items-center'>MDT</a>
           <button class='btn-sm bg-indigo-800 hover:bg-indigo-700' onclick='setCamera(${u.id})'>Cam</button>
           <button class='btn-sm bg-yellow-800 hover:bg-yellow-700' onclick='findUnit(${u.id})'>Near</button>
           <button class='btn-sm bg-pink-800 hover:bg-pink-700' onclick='alertUnit(${u.id})'>Alert</button>

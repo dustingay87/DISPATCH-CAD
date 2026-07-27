@@ -211,6 +211,10 @@ def units_screen():
 def calls_screen():
     return FileResponse('static/screen.html')
 
+@app.get('/mdt')
+def mdt():
+    return FileResponse('static/mdt.html')
+
 @app.get('/health')
 def health():
     return {'status': 'ok'}
@@ -320,6 +324,18 @@ class IncidentUpdate(BaseModel):
     lng: Optional[float] = None
     extra: Optional[dict] = None
 
+class MessageOut(BaseModel):
+    id: int
+    incident_id: Optional[int] = None
+    unit_id: Optional[int] = None
+    channel: Optional[str] = None
+    message_text: Optional[str] = None
+    method: Optional[str] = None
+    sent_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
 class StatusUpdate(BaseModel):
     status_code: str
     lat: Optional[float] = None
@@ -424,6 +440,17 @@ def list_units(agency_id: Optional[int] = Query(None), db: Session = Depends(get
         q = q.filter(Unit.agency_id == agency_id)
     return q.all()
 
+@app.get('/units/{unit_id}', response_model=UnitOut)
+def get_unit(unit_id: int, db: Session = Depends(get_db)):
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    return unit
+
+@app.get('/units/{unit_id}/messages', response_model=List[MessageOut])
+def get_unit_messages(unit_id: int, db: Session = Depends(get_db)):
+    return db.query(DispatchMessage).filter(DispatchMessage.unit_id == unit_id).order_by(DispatchMessage.sent_at.desc()).limit(50).all()
+
 @app.post('/personnel', response_model=PersonnelOut)
 def create_personnel(body: PersonnelCreate, db: Session = Depends(get_db)):
     p = Personnel(**body.model_dump())
@@ -461,6 +488,13 @@ def list_incidents(agency_id: Optional[int] = Query(None), db: Session = Depends
     if agency_id:
         q = q.filter(Incident.agency_id == agency_id)
     return q.order_by(Incident.created_at.desc()).all()
+
+@app.get('/incidents/{incident_id}', response_model=IncidentOut)
+def get_incident(incident_id: int, db: Session = Depends(get_db)):
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    return incident
 
 @app.put('/incidents/{incident_id}', response_model=IncidentOut)
 def update_incident(incident_id: int, body: IncidentUpdate, db: Session = Depends(get_db)):
