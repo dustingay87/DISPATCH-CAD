@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, or_
 from sqlalchemy.orm import declarative_base, relationship, Session, sessionmaker
 from pydantic import BaseModel
 from datetime import datetime
@@ -218,6 +218,10 @@ def mdt():
 @app.get('/avl')
 def avl():
     return FileResponse('static/avl.html')
+
+@app.get('/history')
+def history():
+    return FileResponse('static/history.html')
 
 @app.get('/health')
 def health():
@@ -504,10 +508,21 @@ def create_incident(body: IncidentCreate, db: Session = Depends(get_db)):
     return incident
 
 @app.get('/incidents', response_model=List[IncidentOut])
-def list_incidents(agency_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
+def list_incidents(agency_id: Optional[int] = Query(None), status: Optional[str] = Query(None), call_type: Optional[str] = Query(None), search: Optional[str] = Query(None), from_date: Optional[datetime] = Query(None), to_date: Optional[datetime] = Query(None), db: Session = Depends(get_db)):
     q = db.query(Incident)
     if agency_id:
         q = q.filter(Incident.agency_id == agency_id)
+    if status:
+        q = q.filter(Incident.status == status)
+    if call_type:
+        q = q.filter(Incident.call_type.ilike(f'%{call_type}%'))
+    if search:
+        term = f'%{search}%'
+        q = q.filter(or_(Incident.incident_number.ilike(term), Incident.call_number.ilike(term), Incident.call_type.ilike(term), Incident.location_text.ilike(term), Incident.caller_name.ilike(term)))
+    if from_date:
+        q = q.filter(Incident.created_at >= from_date)
+    if to_date:
+        q = q.filter(Incident.created_at <= to_date)
     return q.order_by(Incident.created_at.desc()).all()
 
 @app.get('/incidents/{incident_id}', response_model=IncidentOut)
@@ -516,6 +531,19 @@ def get_incident(incident_id: int, db: Session = Depends(get_db)):
     if not incident:
         raise HTTPException(status_code=404, detail='Incident not found')
     return incident
+
+@app.get('/incidents/{incident_id}/timeline')
+def timeline(incident_id: int, db: Session = Depends(get_db)):
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    def to_dict(obj):
+        return {c.name: getattr(obj, c.name) for c in obj.__table__.columns if c.name != 'geom'}
+    events = [to_dict(e) for e in db.query(StatusEvent).filter_by(incident_id=incident_id).order_by(StatusEvent.created_at.desc()).all()]
+    logs = [to_dict(l) for l in db.query(CallLog).filter_by(incident_id=incident_id).order_by(CallLog.timestamp.desc()).all()]
+    messages = [to_dict(m) for m in db.query(DispatchMessage).filter_by(incident_id=incident_id).order_by(DispatchMessage.sent_at.desc()).all()]
+    assignments = [to_dict(iu) for iu in db.query(IncidentUnit).filter_by(incident_id=incident_id).order_by(IncidentUnit.assigned_at.desc()).all()]
+    return {'incident': to_dict(incident), 'events': events, 'logs': logs, 'messages': messages, 'assignments': assignments}
 
 @app.put('/incidents/{incident_id}', response_model=IncidentOut)
 def update_incident(incident_id: int, body: IncidentUpdate, db: Session = Depends(get_db)):
