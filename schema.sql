@@ -1,6 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
 
-CREATE TABLE agencies (
+CREATE TABLE IF NOT EXISTS agencies (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     agency_type VARCHAR(50) NOT NULL DEFAULT 'fire',
@@ -16,7 +16,7 @@ CREATE TABLE agencies (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
     hashed_password VARCHAR(255) NOT NULL,
@@ -26,7 +26,7 @@ CREATE TABLE users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE personnel (
+CREATE TABLE IF NOT EXISTS personnel (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     agency_id INTEGER NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
@@ -39,7 +39,7 @@ CREATE TABLE personnel (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE certifications (
+CREATE TABLE IF NOT EXISTS certifications (
     id SERIAL PRIMARY KEY,
     agency_id INTEGER REFERENCES agencies(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
@@ -47,7 +47,7 @@ CREATE TABLE certifications (
     description TEXT
 );
 
-CREATE TABLE personnel_certifications (
+CREATE TABLE IF NOT EXISTS personnel_certifications (
     id SERIAL PRIMARY KEY,
     personnel_id INTEGER NOT NULL REFERENCES personnel(id) ON DELETE CASCADE,
     certification_id INTEGER NOT NULL REFERENCES certifications(id) ON DELETE CASCADE,
@@ -57,7 +57,7 @@ CREATE TABLE personnel_certifications (
     UNIQUE (personnel_id, certification_id)
 );
 
-CREATE TABLE locations (
+CREATE TABLE IF NOT EXISTS locations (
     id SERIAL PRIMARY KEY,
     agency_id INTEGER REFERENCES agencies(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
@@ -69,9 +69,9 @@ CREATE TABLE locations (
     notes TEXT
 );
 
-CREATE INDEX idx_locations_geom ON locations USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_locations_geom ON locations USING GIST (geom);
 
-CREATE TABLE units (
+CREATE TABLE IF NOT EXISTS units (
     id SERIAL PRIMARY KEY,
     agency_id INTEGER NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
@@ -92,12 +92,12 @@ CREATE TABLE units (
     is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
-CREATE INDEX idx_units_geom ON units USING GIST (geom);
-CREATE INDEX idx_units_taip ON units(taip_id);
-CREATE INDEX idx_units_call_sign ON units(call_sign);
-CREATE INDEX idx_units_agency ON units(agency_id);
+CREATE INDEX IF NOT EXISTS idx_units_geom ON units USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_units_taip ON units(taip_id);
+CREATE INDEX IF NOT EXISTS idx_units_call_sign ON units(call_sign);
+CREATE INDEX IF NOT EXISTS idx_units_agency ON units(agency_id);
 
-CREATE TABLE unit_personnel (
+CREATE TABLE IF NOT EXISTS unit_personnel (
     id SERIAL PRIMARY KEY,
     unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
     personnel_id INTEGER NOT NULL REFERENCES personnel(id) ON DELETE CASCADE,
@@ -106,7 +106,7 @@ CREATE TABLE unit_personnel (
     ended_at TIMESTAMPTZ
 );
 
-CREATE TABLE incidents (
+CREATE TABLE IF NOT EXISTS incidents (
     id SERIAL PRIMARY KEY,
     agency_id INTEGER NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
     incident_number VARCHAR(50) NOT NULL,
@@ -126,11 +126,11 @@ CREATE TABLE incidents (
     UNIQUE (agency_id, incident_number)
 );
 
-CREATE INDEX idx_incidents_geom ON incidents USING GIST (geom);
-CREATE INDEX idx_incidents_agency_status ON incidents(agency_id, status);
-CREATE INDEX idx_incidents_number ON incidents(incident_number);
+CREATE INDEX IF NOT EXISTS idx_incidents_geom ON incidents USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_incidents_agency_status ON incidents(agency_id, status);
+CREATE INDEX IF NOT EXISTS idx_incidents_number ON incidents(incident_number);
 
-CREATE TABLE incident_units (
+CREATE TABLE IF NOT EXISTS incident_units (
     id SERIAL PRIMARY KEY,
     incident_id INTEGER NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
     unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
@@ -141,7 +141,7 @@ CREATE TABLE incident_units (
     UNIQUE (incident_id, unit_id)
 );
 
-CREATE TABLE status_events (
+CREATE TABLE IF NOT EXISTS status_events (
     id BIGSERIAL PRIMARY KEY,
     unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
     incident_id INTEGER REFERENCES incidents(id) ON DELETE SET NULL,
@@ -154,9 +154,9 @@ CREATE TABLE status_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_status_events_unit ON status_events(unit_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_status_events_unit ON status_events(unit_id, created_at);
 
-CREATE TABLE taip_positions (
+CREATE TABLE IF NOT EXISTS taip_positions (
     id BIGSERIAL PRIMARY KEY,
     unit_id INTEGER REFERENCES units(id) ON DELETE SET NULL,
     taip_id VARCHAR(50) NOT NULL,
@@ -172,10 +172,10 @@ CREATE TABLE taip_positions (
     received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_taip_positions_unit_time ON taip_positions(unit_id, received_at);
-CREATE INDEX idx_taip_positions_taip_time ON taip_positions(taip_id, received_at);
+CREATE INDEX IF NOT EXISTS idx_taip_positions_unit_time ON taip_positions(unit_id, received_at);
+CREATE INDEX IF NOT EXISTS idx_taip_positions_taip_time ON taip_positions(taip_id, received_at);
 
-CREATE TABLE call_logs (
+CREATE TABLE IF NOT EXISTS call_logs (
     id BIGSERIAL PRIMARY KEY,
     incident_id INTEGER NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -184,9 +184,9 @@ CREATE TABLE call_logs (
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_call_logs_incident ON call_logs(incident_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_call_logs_incident ON call_logs(incident_id, timestamp);
 
-CREATE TABLE dispatch_messages (
+CREATE TABLE IF NOT EXISTS dispatch_messages (
     id BIGSERIAL PRIMARY KEY,
     incident_id INTEGER REFERENCES incidents(id) ON DELETE SET NULL,
     unit_id INTEGER REFERENCES units(id) ON DELETE SET NULL,
