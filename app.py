@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import declarative_base, relationship, Session, sessionmaker
 from pydantic import BaseModel
@@ -173,6 +175,12 @@ if DATABASE_URL.startswith('sqlite'):
     Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title='VolCAD Prototype', version='0.1.0')
+
+app.mount('/static', StaticFiles(directory='static'), name='static')
+
+@app.get('/')
+def index():
+    return FileResponse('static/index.html')
 
 @app.get('/health')
 def health():
