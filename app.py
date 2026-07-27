@@ -180,7 +180,7 @@ app.mount('/static', StaticFiles(directory='static'), name='static')
 
 @app.get('/')
 def index():
-    return FileResponse('static/index.html')
+    return FileResponse('static/dashboard.html')
 
 @app.get('/health')
 def health():
@@ -198,6 +198,12 @@ class AgencyCreate(BaseModel):
     name: str
     agency_type: str = 'fire'
     domain: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 class AgencyOut(AgencyCreate):
     id: int

@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>VolCAD Dispatch v2</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
+<script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' crossorigin=''></script>
+<style>
+  html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  #map { height:100%; width:100%; background:#0f172a; }
+  .panel { height:calc(100% - 3rem); overflow-y:auto; }
+  .tab-active { background:#334155; color:#fff; border-bottom:2px solid #60a5fa; }
+  .priority-1 { background:#7f1d1d33; border-left:4px solid #ef4444; }
+  .priority-2 { background:#7c2d1233; border-left:4px solid #f97316; }
+  .priority-3 { background:#713f1233; border-left:4px solid #eab308; }
+  .priority-4 { background:#064e3b33; border-left:4px solid #22c55e; }
+  .onscene { animation: pulse 2s infinite; }
+  @keyframes pulse { 0% { box-shadow: inset 0 0 0 0 rgba(239,68,68,0.5);} 70% { box-shadow: inset 0 0 0 5px rgba(239,68,68,0);} 100% { box-shadow: inset 0 0 0 0 rgba(239,68,68,0);} }
+  th { cursor:pointer; user-select:none; }
+  tr:hover td { background:#334155; }
+  .alert { background:#1e293b; border-left:4px solid #ef4444; color:#fff; padding:0.5rem; border-radius:0.25rem; margin-bottom:0.5rem; }
+</style>
+</head>
+<body class='bg-slate-900 text-slate-200 text-sm'>
+  <header class='h-14 bg-slate-800 flex items-center justify-between px-4 border-b border-slate-700'>
+    <div class='font-bold text-lg tracking-wide'>VolCAD <span class='text-slate-400 text-sm font-normal'>Full-Screen Dispatch Prototype</span></div>
+    <div class='flex items-center space-x-2'>
+      <select id='agencyFilter' class='bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs'>
+        <option value=''>All agency types</option>
+        <option value='fire'>Fire</option>
+        <option value='police'>Police</option>
+        <option value='ems'>EMS</option>
+      </select>
+      <label class='flex items-center space-x-1 text-xs'><input id='liveToggle' type='checkbox' checked class='accent-blue-500'> <span>Live</span></label>
+      <select id='areaType' class='bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs'>
+        <option value='city'>City</option>
+        <option value='county'>County</option>
+        <option value='region'>Region</option>
+      </select>
+      <button id='drawAreaBtn' class='bg-indigo-600 hover:bg-indigo-700 px-2 py-1 rounded text-xs'>Draw Area</button>
+      <button id='clearAreasBtn' class='bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs'>Clear Areas</button>
+      <button id='seedBtn' class='bg-green-600 hover:bg-green-700 px-2 py-1 rounded text-xs'>Seed Demo</button>
+      <button id='refreshBtn' class='bg-slate-600 hover:bg-slate-700 px-2 py-1 rounded text-xs'>Refresh</button>
+    </div>
+  </header>
+  <main class='flex h-[calc(100vh-3.5rem)]'>
+    <section class='w-2/5 border-r border-slate-700 flex flex-col'>
+      <nav class='bg-slate-800 flex border-b border-slate-700'>
+        <button class='tab-btn flex-1 py-2 text-xs font-medium tab-active' data-tab='incidents'>Incidents</button>
+        <button class='tab-btn flex-1 py-2 text-xs font-medium' data-tab='units'>Units</button>
+        <button class='tab-btn flex-1 py-2 text-xs font-medium' data-tab='agencies'>Agencies</button>
+      </nav>
+      <div id='tabContent' class='panel p-2 bg-slate-900'></div>
+    </section>
+    <section class='w-3/5 relative'>
+      <div id='map'></div>
+      <div id='alerts' class='absolute top-2 right-2 w-64 space-y-2 z-[1000]'></div>
+    </section>
+  </main>
+<script>
+const CENTER = [39.9612, -82.9988];
+let state = { agencies: [], units: [], incidents: [], tab: 'incidents', sort: {key:'', dir:1}, filter: '', serviceAreas: JSON.parse(localStorage.getItem('volcad_areas') || '[]'), drawing: false, drawPoints: [], alerted: new Set(), agencyMap: {} };
+
+function api(path, opts={}) {
+  return fetch(path, opts).then(r => { if (!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); });
+}
+
+function addAlert(msg) {
+  const d = document.createElement('div'); d.className='alert'; d.textContent=msg; document.getElementById('alerts').appendChild(d); setTimeout(()=>d.remove(), 10000);
+}
+
+function fmtTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+
+function elapsed(iso) {
+  const t = iso ? new Date(iso).getTime() : Date.now();
+  return Date.now() - t;
+}
+
+function fmtElapsed(ms) {
+  const s = Math.floor(ms/1000);
+  const m = Math.floor(s/60); const h = Math.floor(m/60);
+  const remM = m%60; const remS = s%60;
+  return `${h>0?h+':':''}${String(remM).padStart(2,'0')}:${String(remS).padStart(2,'0')}`;
+}
+
+function priorityClass(p) { return `priority-${Math.min(Math.max(p||2,1),4)}`; }
+
+function unitColor(status) {
+  if (status==='OS') return '#ef4444';
+  if (status==='ER') return '#eab308';
+  if (status==='AK' || status==='dispatched') return '#3b82f6';
+  return '#22c55e';
+}
+
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 3959; const toR = Math.PI/180;
+  const dLat = (lat2-lat1)*toR, dLng = (lng2-lng1)*toR;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*toR)*Math.cos(lat2*toR)*Math.sin(dLng/2)**2;
+  return 2*R*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+const map = L.map('map', { center: CENTER, zoom: 11 });
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+const agencyLayer = L.layerGroup().addTo(map);
+const unitLayer = L.layerGroup().addTo(map);
+const incidentLayer = L.layerGroup().addTo(map);
+const areaLayer = L.layerGroup().addTo(map);
+const drawLayer = L.layerGroup().addTo(map);
+
+function zoomTo(lat, lng) { if (lat!=null && lng!=null) map.setView([lat, lng], 15); }
+
+function findNearest(unit) {
+  const agency = state.agencyMap[unit.agency_id];
+  const type = agency ? agency.agency_type : '';
+  let best = null, bestD = Infinity;
+  state.units.forEach(u => {
+    if (u.id === unit.id) return;
+    const at = state.agencyMap[u.agency_id];
+    if (!at || at.agency_type !== type) return;
+    if (u.lat == null || u.lng == null || unit.lat == null || unit.lng == null) return;
+    const d = haversine(unit.lat, unit.lng, u.lat, u.lng);
+    if (d < bestD) { bestD = d; best = u; }
+  });
+  if (best) {
+    addAlert(`Nearest ${type} unit to ${unit.call_sign}: ${best.call_sign} (${bestD.toFixed(2)} mi)`);
+    L.popup().setLatLng([best.lat, best.lng]).setContent(`<b>${best.call_sign}</b><br>nearest to ${unit.call_sign}<br>${bestD.toFixed(2)} mi`).openOn(map);
+    if (unit.lat!=null && unit.lng!=null && best.lat!=null && best.lng!=null)
+      L.polyline([[unit.lat, unit.lng], [best.lat, best.lng]], {color:'#38bdf8', weight:3}).addTo(map).bindPopup('nearest support');
+  } else addAlert('No other unit found');
+}
+
+function renderHeader() {
+  const row = (...heads) => `<thead><tr class='text-left text-slate-400 border-b border-slate-700'>` + heads.map((h,i) => `<th class='py-1 px-2' data-key='${h.key}'>${h.label} ${state.sort.key===h.key ? (state.sort.dir>0?'▲':'▼'):''}</th>`).join('') + `</tr></thead>`;
+  return row;
+}
+
+function wrapTable(html) { return `<table class='w-full text-left border-collapse'>` + html + `</table>`; }
+
+function renderIncidents() {
+  let data = state.incidents.slice();
+  if (state.filter) data = data.filter(i => state.agencyMap[i.agency_id] && state.agencyMap[i.agency_id].agency_type===state.filter);
+  if (state.sort.key) { data.sort((a,b)=>{ const av=a[state.sort.key]||'', bv=b[state.sort.key]||''; return (av<bv?-1:1)*state.sort.dir; }); }
+  let rows = data.map(i => {
+    const a = state.agencyMap[i.agency_id] || {};
+    return `<tr class='border-b border-slate-800 ${priorityClass(i.priority)}' onclick='zoomTo(${i.lat},${i.lng})'>
+      <td class='py-1 px-2'>${i.incident_number||'-'}</td>
+      <td class='py-1 px-2'>${i.call_type}</td>
+      <td class='py-1 px-2'>${i.priority}</td>
+      <td class='py-1 px-2'>${i.status}</td>
+      <td class='py-1 px-2'>${a.name||'-'}</td>
+      <td class='py-1 px-2'>${fmtTime(i.created_at)}</td>
+    </tr>`;
+  }).join('');
+  if (!rows) rows = `<tr><td colspan='6' class='p-4 text-slate-500'>No incidents</td></tr>`;
+  const h = renderHeader()({key:'incident_number',label:'#'},{key:'call_type',label:'Type'},{key:'priority',label:'Pri'},{key:'status',label:'Status'},{key:'agency_id',label:'Agency'},{key:'created_at',label:'Time'});
+  document.getElementById('tabContent').innerHTML = wrapTable(h + `<tbody>${rows}</tbody>`);
+}
+
+function renderUnits() {
+  let data = state.units.slice();
+  if (state.filter) data = data.filter(u => state.agencyMap[u.agency_id] && state.agencyMap[u.agency_id].agency_type===state.filter);
+  if (state.sort.key) { data.sort((a,b)=>{ const av=a[state.sort.key]||'', bv=b[state.sort.key]||''; return (String(av)<String(bv)?-1:1)*state.sort.dir; }); }
+  let rows = data.map(u => {
+    const a = state.agencyMap[u.agency_id] || {};
+    const isOS = u.current_status === 'OS';
+    const timer = isOS ? `<span class='text-red-400 font-mono timer' data-since='${u.last_seen_at||''}' data-id='${u.id}'>${fmtElapsed(elapsed(u.last_seen_at))}</span>` : '-';
+    return `<tr class='border-b border-slate-800 ${isOS?'onscene':''}'>
+      <td class='py-1 px-2'>${u.call_sign}</td>
+      <td class='py-1 px-2'>${u.current_status}</td>
+      <td class='py-1 px-2'>${a.name||'-'}</td>
+      <td class='py-1 px-2'>${a.agency_type||'-'}</td>
+      <td class='py-1 px-2'>${timer}</td>
+      <td class='py-1 px-2'><button class='text-blue-400 hover:text-blue-300' onclick='nearestForId(${u.id})'>Nearest</button></td>
+    </tr>`;
+  }).join('');
+  if (!rows) rows = `<tr><td colspan='6' class='p-4 text-slate-500'>No units</td></tr>`;
+  const h = renderHeader()({key:'call_sign',label:'Call'},{key:'current_status',label:'Status'},{key:'agency_id',label:'Agency'},{key:'agency_type',label:'Type'},{key:'last_seen_at',label:'Timer'},{key:'id',label:''});
+  document.getElementById('tabContent').innerHTML = wrapTable(h + `<tbody>${rows}</tbody>`);
+  checkTimers();
+}
+
+window.nearestForId = function(id) { const u = state.units.find(x=>x.id===id); if (u) findNearest(u); };
+
+function renderAgencies() {
+  let data = state.agencies.slice();
+  if (state.filter) data = data.filter(a => a.agency_type===state.filter);
+  if (state.sort.key) { data.sort((a,b)=>{ const av=a[state.sort.key]||'', bv=b[state.sort.key]||''; return (String(av)<String(bv)?-1:1)*state.sort.dir; }); }
+  let rows = data.map(a => `<tr class='border-b border-slate-800' onclick='zoomTo(${a.lat},${a.lng})'>
+    <td class='py-1 px-2'>${a.name}</td>
+    <td class='py-1 px-2'>${a.agency_type}</td>
+    <td class='py-1 px-2'>${a.city||'-'}</td>
+    <td class='py-1 px-2'>${a.state||'-'}</td>
+    <td class='py-1 px-2'>${a.approved?'Yes':'No'}</td>
+  </tr>`).join('');
+  if (!rows) rows = `<tr><td colspan='5' class='p-4 text-slate-500'>No agencies</td></tr>`;
+  const h = renderHeader()({key:'name',label:'Name'},{key:'agency_type',label:'Type'},{key:'city',label:'City'},{key:'state',label:'State'},{key:'approved',label:'Approved'});
+  document.getElementById('tabContent').innerHTML = wrapTable(h + `<tbody>${rows}</tbody>`);
+}
+
+function renderTable() {
+  if (state.tab === 'incidents') renderIncidents();
+  else if (state.tab === 'units') renderUnits();
+  else renderAgencies();
+}
+
+function renderMap() {
+  agencyLayer.clearLayers(); unitLayer.clearLayers(); incidentLayer.clearLayers();
+  state.agencies.forEach(a => {
+    if (a.lat != null && a.lng != null)
+      L.circleMarker([a.lat, a.lng], {radius:6, color:'#60a5fa', fillColor:'#60a5fa', fillOpacity:0.8}).addTo(agencyLayer).bindPopup(`<b>${a.name}</b><br>${a.agency_type}`);
+  });
+  state.units.forEach(u => {
+    if (u.lat != null && u.lng != null) {
+      const col = unitColor(u.current_status);
+      L.circleMarker([u.lat, u.lng], {radius:7, color:col, fillColor:col, fillOpacity:0.9}).addTo(unitLayer)
+        .bindPopup(`<b>${u.call_sign}</b><br>${u.current_status}<br>${u.name}`).on('click', ()=>findNearest(u));
+    }
+  });
+  state.incidents.forEach(i => {
+    if (i.lat != null && i.lng != null) {
+      const col = i.priority===1?'#ef4444':i.priority===2?'#f97316':i.priority===3?'#eab308':'#22c55e';
+      L.circleMarker([i.lat, i.lng], {radius:8, color:col, fillColor:col, fillOpacity:0.9}).addTo(incidentLayer).bindPopup(`<b>${i.incident_number||'#'}</b><br>${i.call_type}<br>${i.status}`);
+    }
+  });
+  renderAreas();
+}
+
+function renderAreas() {
+  areaLayer.clearLayers();
+  state.serviceAreas.forEach((area, idx) => {
+    const col = area.type==='city'?'#60a5fa':area.type==='county'?'#22c55e':'#a855f7';
+    L.polygon(area.points, {color:col, weight:2, fillOpacity:0.15}).addTo(areaLayer).bindPopup(`${area.type}: ${area.name||'Area '+(idx+1)}`);
+  });
+}
+
+function checkTimers() {
+  document.querySelectorAll('.timer').forEach(el => {
+    const since = el.dataset.since;
+    const ms = elapsed(since);
+    el.textContent = fmtElapsed(ms);
+    const id = parseInt(el.dataset.id);
+    if (ms > 600000 && !state.alerted.has(id)) { state.alerted.add(id); addAlert('Unit on scene over 10 minutes (ID '+id+')'); }
+    if (ms <= 600000 && state.alerted.has(id)) state.alerted.delete(id);
+  });
+}
+
+async function load() {
+  try {
+    const [agencies, units, incidents] = await Promise.all([api('/agencies'), api('/units'), api('/incidents')]);
+    state.agencies = agencies; state.units = units; state.incidents = incidents;
+    state.agencyMap = {}; state.agencies.forEach(a => state.agencyMap[a.id] = a);
+    state.alerted.clear();
+    renderTable(); renderMap();
+  } catch(e) { addAlert('Load error: '+e.message); }
+}
+
+async function seed() {
+  try {
+    const a = await api('/agencies', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:'Metro Fire', agency_type:'fire', city:'Columbus', state:'OH', lat:CENTER[0]+0.01, lng:CENTER[1]-0.01})});
+    await api('/agencies', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:'City Police', agency_type:'police', city:'Columbus', state:'OH', lat:CENTER[0]-0.01, lng:CENTER[1]+0.01})});
+    const u1 = await api('/units', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({agency_id:a.id, name:'Engine 1', call_sign:'E1', unit_type:'engine', lat:CENTER[0]+0.015, lng:CENTER[1]-0.015})});
+    await api('/units', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({agency_id:a.id, name:'Ladder 1', call_sign:'L1', unit_type:'ladder', lat:CENTER[0]+0.025, lng:CENTER[1]-0.005})});
+    const inc = await api('/incidents', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({agency_id:a.id, call_type:'Structure Fire', priority:1, lat:CENTER[0]+0.012, lng:CENTER[1]-0.012})});
+    await api(`/incidents/${inc.id}/dispatch/${u1.id}`, {method:'POST'});
+    await api(`/incidents/${inc.id}/units/${u1.id}/status`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status_code:'OS'})});
+    await load();
+    addAlert('Demo data seeded');
+  } catch(e) { addAlert('Seed error: '+e.message); }
+}
+
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('tab-active')); b.classList.add('tab-active');
+  state.tab = b.dataset.tab; state.sort = {key:'', dir:1}; renderTable();
+}));
+
+document.getElementById('tabContent').addEventListener('click', e => {
+  const th = e.target.closest('th');
+  if (th) {
+    const key = th.dataset.key;
+    if (state.sort.key === key) state.sort.dir *= -1; else { state.sort.key = key; state.sort.dir = 1; }
+    renderTable();
+  }
+});
+
+document.getElementById('agencyFilter').addEventListener('change', e => { state.filter = e.target.value; renderTable(); renderMap(); });
+document.getElementById('refreshBtn').addEventListener('click', load);
+document.getElementById('seedBtn').addEventListener('click', seed);
+
+let liveInterval = setInterval(() => { if (document.getElementById('liveToggle').checked) load(); }, 5000);
+let timerInterval = setInterval(checkTimers, 1000);
+
+document.getElementById('drawAreaBtn').addEventListener('click', () => {
+  if (state.drawing) {
+    if (state.drawPoints.length >= 3) {
+      const name = prompt('Service area name') || '';
+      state.serviceAreas.push({type: document.getElementById('areaType').value, name, points: state.drawPoints.map(p=>[p.lat, p.lng])});
+      localStorage.setItem('volcad_areas', JSON.stringify(state.serviceAreas));
+      renderAreas(); addAlert('Service area saved locally');
+    } else addAlert('Need at least 3 points');
+    drawLayer.clearLayers(); state.drawPoints = []; state.drawing = false; document.getElementById('drawAreaBtn').textContent='Draw Area';
+  } else {
+    state.drawing = true; state.drawPoints = []; document.getElementById('drawAreaBtn').textContent='Finish Area';
+    addAlert('Click map to add area points');
+  }
+});
+
+document.getElementById('clearAreasBtn').addEventListener('click', () => {
+  if (confirm('Clear all service areas?')) { state.serviceAreas = []; localStorage.removeItem('volcad_areas'); renderAreas(); addAlert('Service areas cleared'); }
+});
+
+map.on('click', e => {
+  if (!state.drawing) return;
+  const p = [e.latlng.lat, e.latlng.lng];
+  state.drawPoints.push({lat: e.latlng.lat, lng: e.latlng.lng});
+  L.circleMarker(p, {radius:4, color:'#38bdf8'}).addTo(drawLayer);
+  if (state.drawPoints.length > 1) {
+    const pts = state.drawPoints.map(x=>[x.lat, x.lng]);
+    drawLayer.clearLayers();
+    pts.forEach(pt => L.circleMarker(pt, {radius:4, color:'#38bdf8'}).addTo(drawLayer));
+    L.polyline(pts, {color:'#38bdf8', dashArray:'4'}).addTo(drawLayer);
+  }
+});
+
+load();
+</script>
+</body>
+</html>
