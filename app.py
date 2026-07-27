@@ -203,6 +203,14 @@ app.mount('/static', StaticFiles(directory='static'), name='static')
 def index():
     return FileResponse('static/dashboard_v4.html')
 
+@app.get('/units-screen')
+def units_screen():
+    return FileResponse('static/screen.html')
+
+@app.get('/calls-screen')
+def calls_screen():
+    return FileResponse('static/screen.html')
+
 @app.get('/health')
 def health():
     return {'status': 'ok'}

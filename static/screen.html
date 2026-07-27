@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>VolCAD Screen</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .priority-1 { background:rgba(239,68,68,0.15); border-left:6px solid #ef4444; }
+  .priority-2 { background:rgba(249,115,22,0.15); border-left:6px solid #f97316; }
+  .priority-3 { background:rgba(234,179,8,0.15); border-left:6px solid #eab308; }
+  .priority-4 { background:rgba(34,197,94,0.15); border-left:6px solid #22c55e; }
+  .unit-os { background:rgba(239,68,68,0.15); border-left:6px solid #ef4444; }
+  .unit-er { background:rgba(234,179,8,0.15); border-left:6px solid #eab308; }
+  .unit-aq { background:rgba(34,197,94,0.15); border-left:6px solid #22c55e; }
+  .unit-oth { background:rgba(100,116,139,0.15); border-left:6px solid #64748b; }
+  tr { border-bottom:1px solid #334155; }
+  tr td { padding:1rem 1.5rem; font-size:1.125rem; }
+  th { padding:1rem 1.5rem; font-size:1rem; text-transform:uppercase; letter-spacing:0.05em; background:#1e293b; }
+  .timer { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body class='bg-slate-900 text-slate-200 h-screen flex flex-col'>
+  <header class='h-20 bg-slate-800 flex items-center justify-between px-6 border-b border-slate-700 shrink-0'>
+    <div class='font-bold text-2xl tracking-wide'>VolCAD <span id='modeLabel' class='text-slate-400 font-normal text-lg ml-2'>Screen</span></div>
+    <div class='flex items-center space-x-4 text-lg'>
+      <label class='flex items-center space-x-2'><input id='liveToggle' type='checkbox' checked class='accent-blue-500 w-5 h-5'> <span>Live</span></label>
+      <button id='refreshBtn' class='bg-slate-600 hover:bg-slate-700 px-4 py-2 rounded-lg'>Refresh</button>
+    </div>
+  </header>
+  <div id='content' class='flex-1 overflow-auto p-4'></div>
+<script>
+const MODE = window.location.pathname.includes('call') ? 'calls' : 'units';
+document.getElementById('modeLabel').textContent = MODE === 'calls' ? 'Active Calls' : 'Unit Status';
+
+function api(path, opts={}) { return fetch(path, opts).then(r => { if (!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+function toMs(iso){ return iso ? new Date(iso).getTime() : Date.now(); }
+function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
+function elapsed(iso){ return (Date.now()-toMs(iso))/1000; }
+function unitClass(st){ if(st==='OS') return 'unit-os'; if(st==='ER'||st==='TR'||st==='DEL') return 'unit-er'; if(st==='AQ') return 'unit-aq'; return 'unit-oth'; }
+
+function unitTimers(u){
+  const onCall = ['OS','ER','TR','AK','dispatched','LUN','OOS','MAINT','DEL','NPF'].includes(u.current_status);
+  const last = elapsed(u.last_assigned_at);
+  const avail = u.current_status==='AQ' ? fmtDur(last) : '-';
+  const scene = u.current_status==='OS' ? fmtDur(last) : '-';
+  let acc = u.accumulated_call_seconds || 0; if(onCall && u.last_assigned_at) acc += last;
+  const shift = u.in_service_at ? fmtDur(elapsed(u.in_service_at)) : '-';
+  return { avail, scene, call: fmtDur(acc), shift };
+}
+
+function unitIncident(u){
+  if(!u.current_incident_id) return '-';
+  const inc = state.incidents.find(i=>i.id===u.current_incident_id);
+  return inc ? `${inc.call_number||inc.incident_number} ${inc.call_type}` : `Incident ${u.current_incident_id}`;
+}
+
+let state = { agencies:[], units:[], incidents:[] };
+
+function renderCalls(){
+  const active = state.incidents.filter(i=>i.status !== 'closed').slice().sort((a,b)=> (a.priority||2)-(b.priority||2) || new Date(b.created_at)-new Date(a.created_at));
+  const rows = active.map(i=>{
+    const a = state.agencyMap[i.agency_id] || {};
+    const assigned = state.units.filter(u=>u.current_incident_id===i.id).map(u=>u.call_sign).join(', ') || '-';
+    return `<tr class='priority-${Math.min(Math.max(i.priority||2,1),4)}'>
+      <td class='font-bold'>${i.call_number||i.incident_number}</td>
+      <td>${i.call_type}</td>
+      <td>${i.priority}</td>
+      <td>${i.status}</td>
+      <td>${a.name||'-'}</td>
+      <td>${i.location_text||'-'}</td>
+      <td>${assigned}</td>
+      <td>${fmtTime(i.created_at)}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('content').innerHTML = `<table class='w-full text-left border-collapse'><thead><tr><th>Call #</th><th>Type</th><th>Pri</th><th>Status</th><th>Agency</th><th>Location</th><th>Units</th><th>Time</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="text-center text-slate-500">No active calls</td></tr>'}</tbody></table>`;
+}
+
+function renderUnits(){
+  const rows = state.units.map(u=>{
+    const a = state.agencyMap[u.agency_id] || {};
+    const t = unitTimers(u);
+    const cam = u.camera_url ? `<a href='${u.camera_url}' target='_blank' class='text-blue-400 underline'>Cam</a>` : '-';
+    return `<tr class='${unitClass(u.current_status)}'>
+      <td class='font-bold'>${u.call_sign}</td>
+      <td>${a.agency_type ? a.agency_type.toUpperCase() : '-'}</td>
+      <td>${u.current_status}</td>
+      <td>${unitIncident(u)}</td>
+      <td class='timer' data-since='${u.last_assigned_at||''}' data-mode='scene'>${t.scene}</td>
+      <td class='timer' data-since='${u.last_assigned_at||''}' data-mode='avail'>${t.avail}</td>
+      <td class='timer' data-since='${u.in_service_at||''}' data-mode='shift'>${t.shift}</td>
+      <td class='timer' data-since='${u.last_assigned_at||''}' data-mode='call' data-accum='${u.accumulated_call_seconds||0}'>${t.call}</td>
+      <td>${cam}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('content').innerHTML = `<table class='w-full text-left border-collapse'><thead><tr><th>Call Sign</th><th>Type</th><th>Status</th><th>Incident</th><th>On Scene</th><th>Available</th><th>Shift</th><th>Call Time</th><th>Cam</th></tr></thead><tbody>${rows || '<tr><td colspan="9" class="text-center text-slate-500">No units</td></tr>'}</tbody></table>`;
+  updateTimers();
+}
+
+function updateTimers(){
+  document.querySelectorAll('.timer').forEach(el=>{
+    const since = el.dataset.since; const mode = el.dataset.mode; const accum = parseFloat(el.dataset.accum||0);
+    const s = elapsed(since);
+    if(mode==='scene') el.textContent = (since && s>0) ? fmtDur(s) : '-';
+    else if(mode==='avail') el.textContent = (since || s===0) ? fmtDur(s) : '-';
+    else if(mode==='shift') el.textContent = (since && s>0) ? fmtDur(s) : '-';
+    else if(mode==='call') el.textContent = fmtDur(accum + s);
+  });
+}
+
+async function load(){
+  try {
+    const [agencies, units, incidents] = await Promise.all([api('/agencies'), api('/units'), api('/incidents')]);
+    state.agencies = agencies; state.units = units; state.incidents = incidents;
+    state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
+    if(MODE==='calls') renderCalls(); else renderUnits();
+  } catch(e){ document.getElementById('content').innerHTML = `<div class='p-8 text-red-400 text-xl'>Load error: ${e.message}</div>`; }
+}
+
+document.getElementById('refreshBtn').addEventListener('click', load);
+load();
+let live = setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); }, 5000);
+let timers = setInterval(updateTimers, 1000);
+</script>
+</body>
+</html>
