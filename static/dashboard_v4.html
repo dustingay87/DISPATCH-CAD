@@ -118,6 +118,10 @@ const CONFIG = {
     ],
     dispositions: ['No Transport','Treated no transport','Transport','Dead on Arrival','No Pt Found','Cancelled En Route','Pt Transferred to HEMS','Cancelled'],
     callTypes: [
+      {label:'Emergent', priority:1, fields:['age','conscious','chief_complaint']},
+      {label:'Non-Emergency', priority:4, fields:['chief_complaint']},
+      {label:'Public Assistance', priority:4, fields:['details']},
+      {label:'Event Standby', priority:4, fields:['event_name']},
       {label:'Cardiac Arrest', priority:1, fields:['age','conscious']},
       {label:'Chest Pain', priority:2, fields:['age']},
       {label:'Difficulty Breathing', priority:2, fields:['age']},
