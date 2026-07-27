@@ -1,0 +1,75 @@
+{
+  "config": {
+    "branding": {
+      "logo_url": "https://example.com/logo.png",
+      "primary_color": "#0f172a",
+      "accent_color": "#3b82f6",
+      "app_name": "Metro CAD"
+    },
+    "roles": [
+      { "name": "admin", "permissions": ["*"] },
+      { "name": "dispatcher", "permissions": ["create_call", "dispatch", "status", "view"] },
+      { "name": "responder", "permissions": ["view", "status"] },
+      { "name": "supervisor", "permissions": ["view", "reports", "config"] }
+    ],
+    "unit_types": [
+      { "name": "patrol" },
+      { "name": "engine" },
+      { "name": "ambulance" },
+      { "name": "supervisor" }
+    ],
+    "personnel_types": [
+      { "name": "officer" },
+      { "name": "firefighter" },
+      { "name": "paramedic" },
+      { "name": "supervisor" }
+    ]
+  },
+  "agencies": [
+    {
+      "name": "Metro Police",
+      "agency_type": "police",
+      "domain": "police.metrocad.example",
+      "city": "Columbus",
+      "state": "OH",
+      "lat": 39.9612,
+      "lng": -82.9988
+    },
+    {
+      "name": "Metro Fire",
+      "agency_type": "fire",
+      "domain": "fire.metrocad.example",
+      "city": "Columbus",
+      "state": "OH",
+      "lat": 39.960,
+      "lng": -82.999
+    },
+    {
+      "name": "County EMS",
+      "agency_type": "ems",
+      "domain": "ems.metrocad.example",
+      "city": "Columbus",
+      "state": "OH",
+      "lat": 39.962,
+      "lng": -82.997
+    }
+  ],
+  "users": [
+    { "email": "admin@metrocad.example", "password": "ChangeMe123!", "role": "admin" },
+    { "email": "dispatch@metrocad.example", "password": "ChangeMe123!", "role": "dispatcher" },
+    { "email": "officer@metrocad.example", "password": "ChangeMe123!", "role": "responder" },
+    { "email": "medic@metrocad.example", "password": "ChangeMe123!", "role": "responder" }
+  ],
+  "units": [
+    { "agency": "Metro Police", "name": "Adam-12", "call_sign": "A12", "unit_type": "patrol", "lat": 39.9608, "lng": -82.998 },
+    { "agency": "Metro Police", "name": "Adam-20", "call_sign": "A20", "unit_type": "patrol", "lat": 39.962, "lng": -82.9975 },
+    { "agency": "Metro Fire", "name": "Engine 1", "call_sign": "E1", "unit_type": "engine", "lat": 39.959, "lng": -83.0 },
+    { "agency": "County EMS", "name": "Medic 1", "call_sign": "M1", "unit_type": "ambulance", "lat": 39.9625, "lng": -82.996 }
+  ],
+  "personnel": [
+    { "agency": "Metro Police", "email": "officer@metrocad.example", "first_name": "John", "last_name": "Doe", "phone": "+16145551001", "unit": "A12" },
+    { "agency": "Metro Police", "first_name": "Jane", "last_name": "Roe", "phone": "+16145551002", "unit": "A20" },
+    { "agency": "Metro Fire", "first_name": "Mike", "last_name": "Smith", "phone": "+16145551003", "unit": "E1" },
+    { "agency": "County EMS", "email": "medic@metrocad.example", "first_name": "Sarah", "last_name": "Lee", "phone": "+16145551004", "unit": "M1" }
+  ]
+}

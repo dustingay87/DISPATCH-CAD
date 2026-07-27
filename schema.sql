@@ -207,3 +207,16 @@ ALTER TABLE incidents ADD COLUMN IF NOT EXISTS call_number VARCHAR(50);
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS extra JSONB;
 ALTER TABLE incident_units ADD COLUMN IF NOT EXISTS disposition VARCHAR(100);
 ALTER TABLE incident_units ADD COLUMN IF NOT EXISTS passenger_count INTEGER;
+
+CREATE TABLE IF NOT EXISTS customer_config (
+    id SERIAL PRIMARY KEY,
+    agency_id INTEGER REFERENCES agencies(id) ON DELETE CASCADE,
+    category VARCHAR(50) NOT NULL,
+    key VARCHAR(100) NOT NULL,
+    value JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (agency_id, category, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_customer_config_category ON customer_config(agency_id, category);

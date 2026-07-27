@@ -192,6 +192,17 @@ class DispatchMessage(Base):
     sent_at = Column(DateTime)
     delivered_at = Column(DateTime)
 
+class CustomerConfig(Base):
+    __tablename__ = 'customer_config'
+    id = Column(Integer, primary_key=True, index=True)
+    agency_id = Column(Integer, ForeignKey('agencies.id'), nullable=True)
+    category = Column(String(50))
+    key = Column(String(100))
+    value = Column(JSON)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    __table_args__ = (UniqueConstraint('agency_id', 'category', 'key', name='uix_customer_config'),)
+
 if DATABASE_URL.startswith('sqlite'):
     Base.metadata.create_all(bind=engine)
 
@@ -222,6 +233,31 @@ def avl():
 @app.get('/history')
 def history():
     return FileResponse('static/history.html')
+
+@app.get('/config', response_model=List[CustomerConfigOut])
+def list_config(agency_id: Optional[int] = Query(None), category: Optional[str] = Query(None), db: Session = Depends(get_db)):
+    q = db.query(CustomerConfig)
+    if agency_id:
+        q = q.filter(CustomerConfig.agency_id == agency_id)
+    if category:
+        q = q.filter(CustomerConfig.category == category)
+    return q.order_by(CustomerConfig.category, CustomerConfig.key).all()
+
+@app.post('/config', response_model=CustomerConfigOut)
+def create_config(body: CustomerConfigCreate, db: Session = Depends(get_db)):
+    existing = db.query(CustomerConfig).filter_by(agency_id=body.agency_id, category=body.category, key=body.key).first()
+    if existing:
+        for k, v in body.model_dump(exclude_unset=True).items():
+            setattr(existing, k, v)
+        existing.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(existing)
+        return existing
+    cfg = CustomerConfig(**body.model_dump())
+    db.add(cfg)
+    db.commit()
+    db.refresh(cfg)
+    return cfg
 
 @app.get('/health')
 def health():
@@ -341,6 +377,19 @@ class MessageOut(BaseModel):
     method: Optional[str] = None
     sent_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+class CustomerConfigCreate(BaseModel):
+    agency_id: Optional[int] = None
+    category: str
+    key: str
+    value: Optional[dict] = None
+
+class CustomerConfigOut(CustomerConfigCreate):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     class Config:
         from_attributes = True
 
