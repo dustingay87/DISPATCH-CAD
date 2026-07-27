@@ -6,11 +6,31 @@ from datetime import datetime
 from typing import List, Optional
 import os
 import re
+import socket
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from dotenv import load_dotenv
 
 load_dotenv()
 
 DATABASE_URL = os.getenv('SUPABASE_DB_URL', 'sqlite:///./volcad.db')
+
+def _add_ipv4_hostaddr(url):
+    parsed = urlparse(url)
+    if parsed.scheme.startswith('postgresql') and parsed.hostname:
+        try:
+            addrs = socket.getaddrinfo(parsed.hostname, None, socket.AF_INET)
+            if addrs:
+                ip = addrs[0][4][0]
+                query = parse_qs(parsed.query)
+                if 'hostaddr' not in query:
+                    query['hostaddr'] = [ip]
+                new_query = urlencode(query, doseq=True)
+                return urlunparse(parsed._replace(query=new_query))
+        except Exception:
+            pass
+    return url
+
+DATABASE_URL = _add_ipv4_hostaddr(DATABASE_URL)
 
 if DATABASE_URL.startswith('sqlite'):
     engine = create_engine(DATABASE_URL, connect_args={'check_same_thread': False})
