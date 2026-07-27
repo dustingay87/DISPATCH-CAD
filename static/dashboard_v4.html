@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>VolCAD v4 Dispatch Console</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
+<script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' crossorigin=''></script>
+<style>
+  html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  #map { height:100%; width:100%; background:#0f172a; }
+  .panel { height:calc(100% - 3rem); overflow-y:auto; }
+  .tab-active { background:#334155; color:#fff; border-bottom:2px solid #60a5fa; }
+  .priority-1 { background:#7f1d1d33; border-left:4px solid #ef4444; }
+  .priority-2 { background:#7c2d1233; border-left:4px solid #f97316; }
+  .priority-3 { background:#713f1233; border-left:4px solid #eab308; }
+  .priority-4 { background:#064e3b33; border-left:4px solid #22c55e; }
+  .onscene { animation: pulse 2s infinite; }
+  @keyframes pulse { 0% { box-shadow: inset 0 0 0 0 rgba(239,68,68,0.5);} 70% { box-shadow: inset 0 0 0 5px rgba(239,68,68,0);} 100% { box-shadow: inset 0 0 0 0 rgba(239,68,68,0);} }
+  th { cursor:pointer; user-select:none; }
+  tr:hover td { background:#334155; }
+  .alert { background:#1e293b; border-left:4px solid #ef4444; color:#fff; padding:0.5rem; border-radius:0.25rem; margin-bottom:0.5rem; }
+  .btn { padding:0.15rem 0.4rem; border-radius:0.25rem; color:#fff; margin-right:0.25rem; margin-bottom:0.25rem; display:inline-block; }
+  .btn-s { background:#475569; }
+  .btn-s:hover { background:#64748b; }
+</style>
+</head>
+<body class='bg-slate-900 text-slate-200 text-xs'>
+  <header class='h-14 bg-slate-800 flex items-center justify-between px-3 border-b border-slate-700'>
+    <div class='font-bold text-base tracking-wide'>VolCAD <span class='text-slate-400 font-normal text-xs'>v4 Multi-Agency Console</span></div>
+    <div class='flex items-center space-x-2'>
+      <select id='agencyFilter' class='bg-slate-700 border border-slate-600 rounded px-2 py-1'>
+        <option value=''>All types</option>
+        <option value='police'>Police</option>
+        <option value='fire'>Fire</option>
+        <option value='ems'>EMS</option>
+      </select>
+      <label class='flex items-center space-x-1'><input id='liveToggle' type='checkbox' checked class='accent-blue-500'> <span>Live</span></label>
+      <button id='refreshBtn' class='bg-slate-600 hover:bg-slate-700 px-2 py-1 rounded'>Refresh</button>
+      <button id='seedBtn' class='bg-green-600 hover:bg-green-700 px-2 py-1 rounded'>Seed Demo</button>
+    </div>
+  </header>
+  <main class='flex h-[calc(100vh-3.5rem)]'>
+    <section class='w-2/5 border-r border-slate-700 flex flex-col'>
+      <nav class='bg-slate-800 flex border-b border-slate-700'>
+        <button class='tab-btn flex-1 py-2 text-xs font-medium tab-active' data-tab='incidents'>Calls</button>
+        <button class='tab-btn flex-1 py-2 text-xs font-medium' data-tab='units'>Units</button>
+        <button class='tab-btn flex-1 py-2 text-xs font-medium' data-tab='personnel'>Personnel</button>
+      </nav>
+      <div id='tabContent' class='panel p-2 bg-slate-900'></div>
+    </section>
+    <section class='w-3/5 relative'>
+      <div id='map'></div>
+      <div id='alerts' class='absolute top-2 right-2 w-80 space-y-2 z-[1000]'></div>
+    </section>
+  </main>
+<script>
+const CONFIG = {
+  police: {
+    statuses: [
+      {label:'Available', code:'AQ'},
+      {label:'Cancelled', code:'CAN'},
+      {label:'Out for Lunch', code:'LUN'},
+      {label:'Away from Radio', code:'AFR'},
+      {label:'On Scene', code:'OS'},
+      {label:'En Route to Scene', code:'ER'},
+      {label:'Transporting', code:'TR'}
+    ],
+    callTypes: [
+      {label:'Disturbance', priority:2, fields:[]},
+      {label:'Domestic', priority:2, fields:[]},
+      {label:'Burglary', priority:3, fields:[]},
+      {label:'Robbery', priority:1, fields:[]},
+      {label:'Traffic Stop', priority:4, fields:[]},
+      {label:'Welfare Check', priority:3, fields:[]},
+      {label:'Suspicious Person', priority:3, fields:[]},
+      {label:'Assault', priority:1, fields:[]},
+      {label:'Theft', priority:3, fields:[]},
+      {label:'Noise Complaint', priority:4, fields:[]},
+      {label:'Shots Fired', priority:1, fields:[]},
+      {label:'Missing Person', priority:3, fields:[]}
+    ]
+  },
+  fire: {
+    statuses: [
+      {label:'Available', code:'AQ'},
+      {label:'Cancelled', code:'CAN'},
+      {label:'On Scene', code:'OS'},
+      {label:'En Route', code:'ER'},
+      {label:'Out of Service', code:'OOS'},
+      {label:'Away from Radio', code:'AFR'},
+      {label:'Maintenance', code:'MAINT'}
+    ],
+    callTypes: [
+      {label:'Structure Fire', priority:1, fields:['exposures']},
+      {label:'Vehicle Fire', priority:2, fields:[]},
+      {label:'Brush Fire', priority:2, fields:[]},
+      {label:'Alarm', priority:3, fields:[]},
+      {label:'Medical Assist', priority:3, fields:[]},
+      {label:'MVC', priority:2, fields:[]},
+      {label:'Hazmat', priority:1, fields:[]},
+      {label:'Rescue', priority:1, fields:[]},
+      {label:'Gas Leak', priority:2, fields:[]},
+      {label:'CO Alarm', priority:3, fields:[]}
+    ]
+  },
+  ems: {
+    statuses: [
+      {label:'Available', code:'AQ'},
+      {label:'En Route', code:'ER'},
+      {label:'On Scene', code:'OS'},
+      {label:'Transporting', code:'TR'},
+      {label:'Cancelled', code:'CAN'},
+      {label:'No Pt Found', code:'NPF'},
+      {label:'Delayed', code:'DEL'},
+      {label:'Away from Radio', code:'AFR'}
+    ],
+    dispositions: ['No Transport','Treated no transport','Transport','Dead on Arrival','No Pt Found','Cancelled En Route','Pt Transferred to HEMS','Cancelled'],
+    callTypes: [
+      {label:'Cardiac Arrest', priority:1, fields:['age','conscious']},
+      {label:'Chest Pain', priority:2, fields:['age']},
+      {label:'Difficulty Breathing', priority:2, fields:['age']},
+      {label:'Fall', priority:3, fields:['age']},
+      {label:'MVC', priority:2, fields:['patients']},
+      {label:'Overdose', priority:1, fields:['substance']},
+      {label:'Psychiatric', priority:3, fields:[]},
+      {label:'Seizure', priority:2, fields:['age']},
+      {label:'Diabetic', priority:3, fields:['age']},
+      {label:'Trauma', priority:1, fields:['mechanism']},
+      {label:'Unknown Problem', priority:4, fields:[]},
+      {label:'Transfer', priority:4, fields:['destination']},
+      {label:'Abdominal Pain', priority:3, fields:['age']}
+    ]
+  }
+};
+
+const CENTER = [39.9612, -82.9988];
+let state = { agencies:[], units:[], incidents:[], personnel:[], tab:'incidents', sort:{key:'',dir:1}, filter:'', serviceAreas:JSON.parse(localStorage.getItem('volcad_v4_areas')||'[]'), drawing:false, drawPoints:[], alerted:new Set(), agencyMap:{} };
+
+function api(path, opts={}) { return fetch(path, opts).then(r => { if (!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+function addAlert(msg){ const d=document.createElement('div'); d.className='alert'; d.textContent=msg; document.getElementById('alerts').appendChild(d); setTimeout(()=>d.remove(),12000); }
+function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+function toMs(iso){ return iso ? new Date(iso).getTime() : Date.now(); }
+function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
+function elapsed(iso){ return (Date.now()-toMs(iso))/1000; }
+function priorityClass(p){ return `priority-${Math.min(Math.max(p||2,1),4)}`; }
+function unitColor(st){ if(st==='OS') return '#ef4444'; if(st==='ER'||st==='TR'||st==='DEL') return '#eab308'; if(st==='AK'||st==='dispatched') return '#3b82f6'; return '#22c55e'; }
+function haversine(lat1,lng1,lat2,lng2){ const R=3959, toR=Math.PI/180; const dLat=(lat2-lat1)*toR, dLng=(lng2-lng1)*toR; const a=Math.sin(dLat/2)**2 + Math.cos(lat1*toR)*Math.cos(lat2*toR)*Math.sin(dLng/2)**2; return 2*R*Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); }
+
+const map = L.map('map', { center: CENTER, zoom: 11 });
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+const layers = { agencies:L.layerGroup().addTo(map), units:L.layerGroup().addTo(map), incidents:L.layerGroup().addTo(map), areas:L.layerGroup().addTo(map), draw:L.layerGroup().addTo(map) };
+function zoomTo(lat,lng){ if(lat!=null && lng!=null) map.setView([lat,lng],15); }
+
+function findNearest(unit){
+  const a=state.agencyMap[unit.agency_id]; const type=a?a.agency_type:'';
+  let best=null, bestD=Infinity;
+  state.units.forEach(u=>{ if(u.id===unit.id) return; const at=state.agencyMap[u.agency_id]; if(!at || at.agency_type!==type) return; if(u.lat==null || u.lng==null || unit.lat==null || unit.lng==null) return; const d=haversine(unit.lat,unit.lng,u.lat,u.lng); if(d<bestD){bestD=d;best=u;} });
+  if(best){ addAlert(`Nearest ${type} to ${unit.call_sign}: ${best.call_sign} (${bestD.toFixed(2)} mi)`); L.popup().setLatLng([best.lat,best.lng]).setContent(`<b>${best.call_sign}</b><br>nearest to ${unit.call_sign}<br>${bestD.toFixed(2)} mi`).openOn(map); if(unit.lat!=null && unit.lng!=null) L.polyline([[unit.lat,unit.lng],[best.lat,best.lng]],{color:'#38bdf8',weight:3}).addTo(map); }
+  else addAlert('No other unit found');
+}
+
+function sortRows(arr,key,dir){ if(!key) return arr; return arr.slice().sort((a,b)=>{ const av=a[key]||'', bv=b[key]||''; if(typeof av==='number' && typeof bv==='number') return (av-bv)*dir; return (String(av)<String(bv)?-1:1)*dir; }); }
+function renderTable(html){ document.getElementById('tabContent').innerHTML = `<table class='w-full text-left border-collapse'>${html}</table>`; }
+function th(key,label){ return `<th class='py-1 px-2 text-slate-400 border-b border-slate-700' data-key='${key}'>${label}${state.sort.key===key?(state.sort.dir>0?' ▲':' ▼'):''}</th>`; }
+
+function groupedCalls(){
+  const groups={};
+  state.incidents.forEach(i=>{ const cn=i.call_number||i.incident_number; if(!groups[cn]) groups[cn]={call_number:cn, rows:[], newest:i.created_at}; groups[cn].rows.push(i); if(i.created_at>groups[cn].newest) groups[cn].newest=i.created_at; });
+  return Object.values(groups).sort((a,b)=> new Date(b.newest)-new Date(a.newest));
+}
+
+function incidentBlock(g){
+  const lead = g.rows[0]; const a=state.agencyMap[lead.agency_id]||{}; const disp = g.rows.map(i=>`<span class='text-slate-300'>${i.call_type}</span> ${i.status}`).join(' / ');
+  return `<div class='mb-2 rounded overflow-hidden border border-slate-700 ${priorityClass(lead.priority)}'>
+    <div class='p-2 bg-slate-800 flex justify-between items-center cursor-pointer' onclick='toggleCall(${lead.id})'>
+      <div><b class='text-sm'>${g.call_number}</b> <span class='text-slate-400'>${a.name||'-'}</span> <span class='text-xs ml-2'>${disp}</span></div>
+      <button class='text-blue-400 text-xs' onclick='event.stopPropagation();openDispatch(${lead.id})'>+ Unit</button>
+    </div>
+    <div id='call-${lead.id}' class='hidden p-2 bg-slate-900 space-y-2'>
+      ${g.rows.map(i=>callRow(i)).join('')}
+    </div>
+  </div>`;
+}
+
+function callRow(i){
+  const a=state.agencyMap[i.agency_id]||{};
+  const assigned = state.units.filter(u=>u.current_incident_id===i.id);
+  const unitsHtml = assigned.length ? assigned.map(u=>`<span class='text-slate-300'>${u.call_sign}</span>`).join(', ') : '<span class=\'text-slate-500\'>no units</span>';
+  return `<div class='border-b border-slate-800 pb-1 mb-1'>
+    <div class='flex justify-between'><b>${i.call_type}</b> <span>${i.status}</span></div>
+    <div class='text-slate-400'>${i.location_text||''} ${fmtTime(i.created_at)}</div>
+    <div>Units: ${unitsHtml}</div>
+    <div class='mt-1 space-y-1'>${statusButtons(i)}</div>
+  </div>`;
+}
+
+function statusButtons(i){
+  return state.units.filter(u=>u.current_incident_id===i.id).map(u=>{
+    const cfg=CONFIG[state.agencyMap[u.agency_id]?.agency_type] || {statuses:[]};
+    const buttons=cfg.statuses.map(s=>`<button class='btn btn-s' onclick='event.stopPropagation();setUnitStatus(${i.id},${u.id},"${s.code}")'>${s.label}</button>`).join('');
+    return `<div class='ml-2'><b>${u.call_sign}</b> ${buttons}</div>`;
+  }).join('');
+}
+
+function renderIncidents(){
+  const form = `<div class='mb-2 p-2 bg-slate-800 rounded space-y-2'>
+    <div class='font-semibold text-slate-400'>New Call</div>
+    <div class='flex space-x-1'>
+      <select id='cAgency' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 flex-1'><option value=''>Lead agency</option>${state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('')}</select>
+      <select id='cTypeCat' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 flex-1'><option value=''>Type</option>${Object.keys(CONFIG).map(k=>`<option value='${k}'>${k.toUpperCase()}</option>`).join('')}</select>
+      <select id='cType' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 flex-1'><option value=''>Call type</option></select>
+    </div>
+    <div class='flex space-x-1'>
+      <input id='cCallNum' placeholder='Call # (optional)' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 w-24'>
+      <input id='cLoc' placeholder='Location text' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 flex-1'>
+      <input id='cCaller' placeholder='Caller' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 w-24'>
+      <input id='cCallback' placeholder='Callback' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 w-24'>
+    </div>
+    <div id='cExtra' class='flex flex-wrap gap-1'></div>
+    <button id='cCreate' class='bg-green-600 hover:bg-green-700 px-3 py-1 rounded w-full'>Create Call</button>
+  </div>`;
+  const groups = groupedCalls();
+  let html = groups.map(g=>incidentBlock(g)).join('');
+  if(!html) html = '<div class="p-4 text-slate-500">No calls</div>';
+  document.getElementById('tabContent').innerHTML = form + `<div class='space-y-2'>${html}</div>`;
+  document.getElementById('cTypeCat').addEventListener('change', populateCallTypes);
+  document.getElementById('cType').addEventListener('change', renderExtraFields);
+  document.getElementById('cCreate').addEventListener('click', createCall);
+  populateCallTypes();
+}
+
+function populateCallTypes(){
+  const cat=document.getElementById('cTypeCat').value; const sel=document.getElementById('cType');
+  sel.innerHTML = '<option value="">Call type</option>' + (cat?CONFIG[cat].callTypes.map((t,i)=>`<option value='${i}'>${t.label}</option>`).join(''):'');
+  renderExtraFields();
+}
+
+function renderExtraFields(){
+  const cat=document.getElementById('cTypeCat').value; const idx=document.getElementById('cType').value; const div=document.getElementById('cExtra');
+  if(!cat || idx==='') { div.innerHTML=''; return; }
+  const fields = CONFIG[cat].callTypes[idx].fields;
+  div.innerHTML = fields.map(f=>`<input class='extra-field bg-slate-700 border border-slate-600 rounded px-1 py-1 w-28' data-key='${f}' placeholder='${f}'>`).join('');
+}
+
+async function createCall(){
+  const cat=document.getElementById('cTypeCat').value; const idx=document.getElementById('cType').value; const agency_id=parseInt(document.getElementById('cAgency').value);
+  if(!cat || idx==='' || !agency_id){ addAlert('Select agency and call type'); return; }
+  const type = CONFIG[cat].callTypes[idx];
+  const extra = {}; document.querySelectorAll('.extra-field').forEach(el=>{ if(el.value) extra[el.dataset.key]=el.value; });
+  const body={ agency_id, call_number: document.getElementById('cCallNum').value || undefined, call_type: type.label, priority: type.priority, location_text: document.getElementById('cLoc').value, caller_name: document.getElementById('cCaller').value, callback: document.getElementById('cCallback').value, lat: CENTER[0]+(Math.random()-.5)*.03, lng: CENTER[1]+(Math.random()-.5)*.03, extra };
+  try { await api('/incidents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); await load(); addAlert('Call created'); } catch(e){ addAlert(e.message); }
+}
+
+window.toggleCall = function(id){ const el=document.getElementById('call-'+id); el.classList.toggle('hidden'); };
+window.openDispatch = async function(incidentId){
+  const ids = state.units.filter(u=>!state.filter || (state.agencyMap[u.agency_id] && state.agencyMap[u.agency_id].agency_type===state.filter)).map(u=>u.id).join('\n');
+  const uid = parseInt(prompt('Unit ID to dispatch:\n'+ids)); if(!uid) return;
+  try { await api(`/incidents/${incidentId}/dispatch/${uid}`,{method:'POST'}); await load(); addAlert('Unit dispatched'); } catch(e){ addAlert(e.message); }
+};
+window.setUnitStatus = async function(incidentId, unitId, code){
+  let extra = {}; const type = state.agencyMap[state.units.find(u=>u.id===unitId).agency_id].agency_type;
+  if(code==='TR' || code==='CAN'){ const pc=prompt('Passenger / Patient count?'); if(pc) extra.passenger_count=parseInt(pc); }
+  if(type==='ems' && (code==='CAN' || code==='TR' || code==='NPF')){ const d=prompt('Disposition?\n' + CONFIG.ems.dispositions.join('\n')); if(d) extra.disposition=d; }
+  try { await api(`/incidents/${incidentId}/units/${unitId}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status_code:code,...extra})}); await load(); addAlert('Status updated'); } catch(e){ addAlert(e.message); }
+};
+
+function unitTimers(u){
+  const onCall = ['OS','ER','TR','AK','dispatched','LUN','OOS','MAINT','DEL','NPF'].includes(u.current_status);
+  const last = elapsed(u.last_assigned_at); const avail = u.current_status==='AQ' ? fmtDur(last) : '-';
+  const scene = u.current_status==='OS' ? fmtDur(last) : '-';
+  let acc = u.accumulated_call_seconds || 0; if(onCall && u.last_assigned_at) acc += last;
+  const shift = u.in_service_at ? fmtDur(elapsed(u.in_service_at)) : '-';
+  return { avail, scene, call: fmtDur(acc), shift };
+}
+
+function renderUnits(){
+  let data=state.units.slice(); if(state.filter) data=data.filter(u=>state.agencyMap[u.agency_id] && state.agencyMap[u.agency_id].agency_type===state.filter);
+  data=sortRows(data,state.sort.key,state.sort.dir);
+  let rows=data.map(u=>{
+    const a=state.agencyMap[u.agency_id]||{}; const t=unitTimers(u); const cfg=CONFIG[a.agency_type]||{statuses:[]};
+    const cam=u.camera_url?`<a href='${u.camera_url}' target='_blank' class='text-blue-400 underline'>Cam</a>`:`<span class='text-slate-500'>-</span>`;
+    const statusBtns=cfg.statuses.map(s=>`<button class='btn btn-s' onclick='setUnitGlobalStatus(${u.id},"${s.code}")'>${s.label}</button>`).join('');
+    return `<tr class='border-b border-slate-800 ${u.current_status==='OS'?'onscene':''}'>
+      <td class='py-1 px-2'>${u.call_sign}</td>
+      <td class='py-1 px-2'>${u.current_status}</td>
+      <td class='py-1 px-2'>${a.agency_type||'-'}</td>
+      <td class='py-1 px-2'>${t.avail}</td>
+      <td class='py-1 px-2'>${t.scene}</td>
+      <td class='py-1 px-2'>${t.call}</td>
+      <td class='py-1 px-2'>${t.shift}</td>
+      <td class='py-1 px-2'>${cam}</td>
+      <td class='py-1 px-2'>
+        <button class='text-green-400' onclick='startShift(${u.id})'>Start</button>
+        <button class='text-red-400' onclick='endShift(${u.id})'>End</button>
+        <button class='text-indigo-400' onclick='setCamera(${u.id})'>Cam</button>
+        <button class='text-yellow-400' onclick='findNearestForId(${u.id})'>Near</button>
+        <button class='text-pink-400' onclick='alertUnitCrew(${u.id})'>Alert</button>
+      </td>
+    </tr>
+    <tr><td colspan='9' class='py-1 px-2'>${statusBtns}</td></tr>`;
+  }).join('');
+  if(!rows) rows=`<tr><td colspan='9' class='p-4 text-slate-500'>No units</td></tr>`;
+  renderTable(`<thead><tr>${th('call_sign','Call')}${th('current_status','Status')}${th('agency_id','Type')}${th('last_assigned_at','Avail')}${th('last_assigned_at','On Scene')}${th('accumulated_call_seconds','Call Time')}${th('in_service_at','Shift')}${th('camera_url','Cam')}${th('id','')}</tr></thead><tbody>${rows}</tbody>`);
+  checkTimers();
+}
+
+window.setUnitGlobalStatus = async function(id, code){
+  const u = state.units.find(x=>x.id===id); const incident = state.incidents.find(i=>i.id===u.current_incident_id);
+  if(!incident){ addAlert('Unit is not assigned to an incident'); return; }
+  await setUnitStatus(incident.id, id, code);
+};
+
+function renderPersonnel(){
+  let data=state.personnel.slice(); if(state.filter) data=data.filter(p=>state.agencyMap[p.agency_id] && state.agencyMap[p.agency_id].agency_type===state.filter);
+  data=sortRows(data,state.sort.key,state.sort.dir);
+  let rows=data.map(p=>{
+    const u=state.units.find(x=>x.id===p.current_unit_id); const uname=u?u.call_sign:'-';
+    return `<tr class='border-b border-slate-800'>
+      <td class='py-1 px-2'>${p.first_name||''} ${p.last_name||''}</td>
+      <td class='py-1 px-2'>${p.email||'-'}</td>
+      <td class='py-1 px-2'>${p.sms_phone||'-'}</td>
+      <td class='py-1 px-2'>${uname}</td>
+      <td class='py-1 px-2 space-x-1'><button class='text-blue-400' onclick='assignPerson(${p.id})'>Assign</button><button class='text-red-400' onclick='unassignPerson(${p.id})'>Un</button></td>
+    </tr>`;
+  }).join('');
+  if(!rows) rows=`<tr><td colspan='5' class='p-4 text-slate-500'>No personnel</td></tr>`;
+  const form = `<div class='mb-2 p-2 bg-slate-800 rounded space-y-1'>
+    <div class='font-semibold text-slate-400'>Add Crew</div>
+    <div class='flex space-x-1'><input id='npAgency' type='number' placeholder='Agency' class='w-16 bg-slate-700 border border-slate-600 rounded px-1'><input id='npFirst' placeholder='First' class='flex-1 bg-slate-700 border border-slate-600 rounded px-1'><input id='npLast' placeholder='Last' class='flex-1 bg-slate-700 border border-slate-600 rounded px-1'></div>
+    <div class='flex space-x-1'><input id='npEmail' type='email' placeholder='Email' class='flex-1 bg-slate-700 border border-slate-600 rounded px-1'><input id='npSms' placeholder='SMS' class='flex-1 bg-slate-700 border border-slate-600 rounded px-1'><input id='npUnit' type='number' placeholder='Unit' class='w-16 bg-slate-700 border border-slate-600 rounded px-1'><button id='addPersonBtn' class='bg-green-600 hover:bg-green-700 px-2 py-1 rounded'>Add</button></div>
+  </div>`;
+  document.getElementById('tabContent').innerHTML = form + `<table class='w-full text-left border-collapse'><thead><tr>${th('last_name','Name')}${th('email','Email')}${th('sms_phone','SMS')}${th('current_unit_id','Unit')}${th('id','')}</tr></thead><tbody>${rows}</tbody></table>`;
+  document.getElementById('addPersonBtn').addEventListener('click', addPerson);
+}
+
+function renderMap(){
+  layers.agencies.clearLayers(); layers.units.clearLayers(); layers.incidents.clearLayers();
+  state.agencies.forEach(a=>{ if(a.lat!=null && a.lng!=null) L.circleMarker([a.lat,a.lng],{radius:6,color:'#60a5fa',fillColor:'#60a5fa',fillOpacity:.8}).addTo(layers.agencies).bindPopup(`<b>${a.name}</b><br>${a.agency_type}`); });
+  state.units.forEach(u=>{
+    if(u.lat!=null && u.lng!=null){
+      const col=unitColor(u.current_status); const t=unitTimers(u); const a=state.agencyMap[u.agency_id]||{};
+      const crew=state.personnel.filter(p=>p.current_unit_id===u.id).map(p=>`${p.first_name||''} ${p.last_name||''} ${p.sms_phone||''}`).join('<br>')||'none';
+      const cam=u.camera_url?`<a href='${u.camera_url}' target='_blank' class='text-blue-300 underline'>Open Camera</a>`:'no camera';
+      L.circleMarker([u.lat,u.lng],{radius:7,color:col,fillColor:col,fillOpacity:.9}).addTo(layers.units).bindPopup(`<b>${u.call_sign}</b> (${a.agency_type})<br>${u.current_status}<br>On scene: ${t.scene}<br>Call time: ${t.call}<br>Shift: ${t.shift}<br>${cam}<br>Crew:<br>${crew}`).on('click',()=>findNearest(u));
+    }
+  });
+  state.incidents.forEach(i=>{
+    if(i.lat!=null && i.lng!=null){ const col=i.priority===1?'#ef4444':i.priority===2?'#f97316':i.priority===3?'#eab308':'#22c55e'; L.circleMarker([i.lat,i.lng],{radius:8,color:col,fillColor:col,fillOpacity:.9}).addTo(layers.incidents).bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${i.status}`); }
+  });
+  renderAreas();
+}
+
+function renderAreas(){
+  layers.areas.clearLayers();
+  state.serviceAreas.forEach((area,idx)=>{
+    const col=area.type==='city'?'#60a5fa':area.type==='county'?'#22c55e':'#a855f7';
+    L.polygon(area.points,{color:col,weight:2,fillOpacity:.15}).addTo(layers.areas).bindPopup(`${area.type}: ${area.name||'Area '+(idx+1)}`);
+  });
+}
+
+function checkTimers(){
+  document.querySelectorAll('.timer').forEach(el=>{
+    const since=el.dataset.since; const id=parseInt(el.dataset.id);
+    const s=elapsed(since); el.textContent=fmtDur(s);
+    if(s>600 && !state.alerted.has(id)){ state.alerted.add(id); addAlert('Unit on scene >10 min (ID '+id+')'); }
+    if(s<=600 && state.alerted.has(id)) state.alerted.delete(id);
+  });
+}
+
+async function load(){
+  try { const [agencies,units,incidents,personnel] = await Promise.all([api('/agencies'),api('/units'),api('/incidents'),api('/personnel')]); state.agencies=agencies; state.units=units; state.incidents=incidents; state.personnel=personnel; state.agencyMap={}; state.agencies.forEach(a=>state.agencyMap[a.id]=a); state.alerted.clear(); if(state.tab==='incidents') renderIncidents(); else if(state.tab==='units') renderUnits(); else renderPersonnel(); renderMap(); } catch(e){ addAlert('Load error: '+e.message); }
+}
+
+async function seed(){
+  try {
+    const police = await api('/agencies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'City Police',agency_type:'police',city:'Columbus',state:'OH',lat:CENTER[0]-.01,lng:CENTER[1]+.01})});
+    const fire = await api('/agencies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Metro Fire',agency_type:'fire',city:'Columbus',state:'OH',lat:CENTER[0]+.01,lng:CENTER[1]-.01})});
+    const ems = await api('/agencies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'County EMS',agency_type:'ems',city:'Columbus',state:'OH',lat:CENTER[0]+.005,lng:CENTER[1]-.015})});
+    const u1 = await api('/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:police.id,name:'Adam-12',call_sign:'A12',unit_type:'patrol',lat:CENTER[0]-.008,lng:CENTER[1]+.012,camera_url:'https://example.com/cam1'})});
+    const u2 = await api('/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:fire.id,name:'Engine 1',call_sign:'E1',unit_type:'engine',lat:CENTER[0]+.012,lng:CENTER[1]-.012})});
+    const u3 = await api('/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:ems.id,name:'Medic 1',call_sign:'M1',unit_type:'ambulance',lat:CENTER[0]+.007,lng:CENTER[1]-.017})});
+    await api(`/units/${u1.id}/shift`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'start'})});
+    await api(`/units/${u2.id}/shift`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'start'})});
+    await api(`/units/${u3.id}/shift`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'start'})});
+    await api('/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:police.id,first_name:'John',last_name:'Doe',email:'john@police.example',sms_phone:'+16145551001',current_unit_id:u1.id})});
+    await api('/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:fire.id,first_name:'Jane',last_name:'Smith',email:'jane@fire.example',sms_phone:'+16145551002',current_unit_id:u2.id})});
+    const inc = await api('/incidents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:fire.id,call_number:'2026-0001',call_type:'Structure Fire',priority:1,location_text:'123 Main St',lat:CENTER[0]+.012,lng:CENTER[1]-.012,extra:{exposures:'2'}})});
+    await api(`/incidents/${inc.id}/dispatch/${u2.id}`,{method:'POST'});
+    await api(`/incidents/${inc.id}/dispatch/${u3.id}`,{method:'POST'});
+    await api(`/incidents/${inc.id}/units/${u2.id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status_code:'OS'})});
+    await load(); addAlert('Demo data seeded');
+  } catch(e){ addAlert('Seed error: '+e.message); }
+}
+
+window.startShift = async function(id){ try { await api(`/units/${id}/shift`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'start'})}); await load(); addAlert('Shift started'); } catch(e){ addAlert(e.message); } };
+window.endShift = async function(id){ try { await api(`/units/${id}/shift`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'end'})}); await load(); addAlert('Shift ended'); } catch(e){ addAlert(e.message); } };
+window.setCamera = async function(id){ const url=prompt('Camera URL'); if(!url) return; try { await api(`/units/${id}/camera`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({camera_url:url})}); await load(); addAlert('Camera set'); } catch(e){ addAlert(e.message); } };
+window.findNearestForId = function(id){ const u=state.units.find(x=>x.id===id); if(u) findNearest(u); };
+window.alertUnitCrew = async function(id){ const msg=prompt('Alert message'); if(msg==null) return; try { const r=await api(`/units/${id}/alert-crew`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})}); await load(); addAlert(`Alert sent to ${r.recipients.length} contacts`); } catch(e){ addAlert(e.message); } };
+window.assignPerson = async function(pid){ const uid=parseInt(prompt('Unit ID')); if(isNaN(uid)) return; try { await api(`/personnel/${pid}/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unit_id:uid})}); await load(); addAlert('Assigned'); } catch(e){ addAlert(e.message); } };
+window.unassignPerson = async function(pid){ try { await api(`/personnel/${pid}/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unit_id:null})}); await load(); addAlert('Unassigned'); } catch(e){ addAlert(e.message); } };
+
+async function addPerson(){
+  const body={ agency_id:parseInt(document.getElementById('npAgency').value), first_name:document.getElementById('npFirst').value, last_name:document.getElementById('npLast').value, email:document.getElementById('npEmail').value, sms_phone:document.getElementById('npSms').value, current_unit_id:parseInt(document.getElementById('npUnit').value)||null };
+  if(!body.agency_id || !body.first_name){ addAlert('Agency and first name required'); return; }
+  try { await api('/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); await load(); addAlert('Crew added'); } catch(e){ addAlert(e.message); }
+}
+
+document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.tab-btn').forEach(x=>x.classList.remove('tab-active')); b.classList.add('tab-active');
+  state.tab=b.dataset.tab; state.sort={key:'',dir:1}; if(state.tab==='incidents') renderIncidents(); else if(state.tab==='units') renderUnits(); else renderPersonnel();
+}));
+document.getElementById('tabContent').addEventListener('click',e=>{
+  const th=e.target.closest('th'); if(!th) return; const key=th.dataset.key; if(state.sort.key===key) state.sort.dir*=-1; else{ state.sort.key=key; state.sort.dir=1; } if(state.tab==='units') renderUnits(); else renderPersonnel();
+});
+document.getElementById('agencyFilter').addEventListener('change',e=>{ state.filter=e.target.value; if(state.tab==='incidents') renderIncidents(); else if(state.tab==='units') renderUnits(); else renderPersonnel(); renderMap(); });
+document.getElementById('refreshBtn').addEventListener('click',load);
+document.getElementById('seedBtn').addEventListener('click',seed);
+
+let liveInterval = setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); },5000);
+let timerInterval = setInterval(checkTimers,1000);
+
+load();
+</script>
+</body>
+</html>

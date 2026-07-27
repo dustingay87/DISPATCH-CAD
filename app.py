@@ -61,6 +61,8 @@ class Personnel(Base):
     last_name = Column(String(100))
     radio_id = Column(String(50), index=True)
     phone = Column(String(50))
+    email = Column(String(255))
+    sms_phone = Column(String(50))
     duty_status = Column(String(50), default='off_duty')
     current_unit_id = Column(Integer, ForeignKey('units.id'), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -96,6 +98,10 @@ class Unit(Base):
     last_seen_at = Column(DateTime)
     radio_id = Column(String(50), index=True)
     taip_id = Column(String(50), index=True)
+    camera_url = Column(String(255))
+    last_assigned_at = Column(DateTime)
+    in_service_at = Column(DateTime)
+    accumulated_call_seconds = Column(Float, default=0)
     is_active = Column(Boolean, default=True)
     agency = relationship('Agency', back_populates='units')
     current_incident = relationship('Incident', foreign_keys=[current_incident_id])
@@ -108,7 +114,9 @@ class Incident(Base):
     call_type = Column(String(100))
     priority = Column(Integer, default=2)
     status = Column(String(50), default='open')
+    call_number = Column(String(50), index=True)
     location_text = Column(Text)
+    extra = Column(JSON)
     lat = Column(Float)
     lng = Column(Float)
     caller_name = Column(String(255))
@@ -128,6 +136,8 @@ class IncidentUnit(Base):
     assigned_at = Column(DateTime, default=datetime.utcnow)
     cleared_at = Column(DateTime)
     assignment_status = Column(String(50), default='assigned')
+    disposition = Column(String(100))
+    passenger_count = Column(Integer)
     notes = Column(Text)
     incident = relationship('Incident', back_populates='assigned_units')
     unit = relationship('Unit')
@@ -171,6 +181,17 @@ class CallLog(Base):
     message = Column(Text)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
+class DispatchMessage(Base):
+    __tablename__ = 'dispatch_messages'
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey('incidents.id'), nullable=True)
+    unit_id = Column(Integer, ForeignKey('units.id'), nullable=True)
+    channel = Column(String(100))
+    message_text = Column(Text)
+    method = Column(String(50))
+    sent_at = Column(DateTime)
+    delivered_at = Column(DateTime)
+
 if DATABASE_URL.startswith('sqlite'):
     Base.metadata.create_all(bind=engine)
 
@@ -180,7 +201,7 @@ app.mount('/static', StaticFiles(directory='static'), name='static')
 
 @app.get('/')
 def index():
-    return FileResponse('static/dashboard.html')
+    return FileResponse('static/dashboard_v4.html')
 
 @app.get('/health')
 def health():
@@ -234,6 +255,10 @@ class UnitOut(BaseModel):
     heading: Optional[float] = None
     speed: Optional[float] = None
     last_seen_at: Optional[datetime] = None
+    camera_url: Optional[str] = None
+    last_assigned_at: Optional[datetime] = None
+    in_service_at: Optional[datetime] = None
+    accumulated_call_seconds: Optional[float] = None
     taip_id: Optional[str] = None
     class Config:
         from_attributes = True
@@ -243,11 +268,14 @@ class PersonnelCreate(BaseModel):
     first_name: str
     last_name: str
     radio_id: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    sms_phone: Optional[str] = None
+    current_unit_id: Optional[int] = None
     duty_status: str = 'off_duty'
 
 class PersonnelOut(PersonnelCreate):
     id: int
-    current_unit_id: Optional[int] = None
     created_at: Optional[datetime] = None
     class Config:
         from_attributes = True
@@ -255,9 +283,11 @@ class PersonnelOut(PersonnelCreate):
 class IncidentCreate(BaseModel):
     agency_id: int
     incident_number: Optional[str] = None
+    call_number: Optional[str] = None
     call_type: str
     priority: int = 2
     location_text: Optional[str] = None
+    extra: Optional[dict] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
     caller_name: Optional[str] = None
@@ -277,6 +307,20 @@ class StatusUpdate(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     reason: Optional[str] = None
+    disposition: Optional[str] = None
+    passenger_count: Optional[int] = None
+
+class UnitCamera(BaseModel):
+    camera_url: str
+
+class UnitShift(BaseModel):
+    action: str
+
+class PersonnelAssign(BaseModel):
+    unit_id: Optional[int] = None
+
+class AlertCrew(BaseModel):
+    message: Optional[str] = None
 
 class TaipIngest(BaseModel):
     raw: str
@@ -371,10 +415,12 @@ def create_personnel(body: PersonnelCreate, db: Session = Depends(get_db)):
     return p
 
 @app.get('/personnel', response_model=List[PersonnelOut])
-def list_personnel(agency_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
+def list_personnel(agency_id: Optional[int] = Query(None), unit_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
     q = db.query(Personnel)
     if agency_id:
         q = q.filter(Personnel.agency_id == agency_id)
+    if unit_id:
+        q = q.filter(Personnel.current_unit_id == unit_id)
     return q.all()
 
 @app.post('/incidents', response_model=IncidentOut)
@@ -383,6 +429,8 @@ def create_incident(body: IncidentCreate, db: Session = Depends(get_db)):
     if not data.get('incident_number'):
         count = db.query(Incident).filter(Incident.agency_id == data['agency_id']).count()
         data['incident_number'] = f"{data['agency_id']}-{count + 1:05d}"
+    if not data.get('call_number'):
+        data['call_number'] = data['incident_number']
     incident = Incident(**data)
     db.add(incident)
     db.commit()
@@ -402,13 +450,12 @@ def dispatch_unit(incident_id: int, unit_id: int, notes: Optional[str] = None, d
     unit = db.query(Unit).get(unit_id)
     if not incident or not unit:
         raise HTTPException(status_code=404, detail='Incident or unit not found')
-    if unit.agency_id != incident.agency_id:
-        raise HTTPException(status_code=400, detail='Unit and incident must belong to same agency')
     existing = db.query(IncidentUnit).filter_by(incident_id=incident_id, unit_id=unit_id).first()
     if existing:
         raise HTTPException(status_code=400, detail='Unit already dispatched to incident')
     iu = IncidentUnit(incident_id=incident_id, unit_id=unit_id, notes=notes)
     unit.current_incident_id = incident_id
+    unit.last_assigned_at = datetime.utcnow()
     unit.current_status = 'AK'
     incident.status = 'dispatched'
     db.add(iu)
@@ -429,13 +476,22 @@ def update_unit_status(incident_id: int, unit_id: int, body: StatusUpdate, db: S
         raise HTTPException(status_code=404, detail='Unit not assigned to incident')
     unit = db.query(Unit).get(unit_id)
     iu.assignment_status = map_status(body.status_code)
+    if body.disposition is not None:
+        iu.disposition = body.disposition
+    if body.passenger_count is not None:
+        iu.passenger_count = body.passenger_count
     if body.status_code == 'CAN':
+        if iu.assigned_at:
+            duration = (datetime.utcnow() - iu.assigned_at).total_seconds()
+            unit.accumulated_call_seconds = (unit.accumulated_call_seconds or 0) + duration
         iu.cleared_at = datetime.utcnow()
         unit.current_incident_id = None
         unit.current_status = 'AQ'
     else:
         unit.current_status = body.status_code
         unit.current_incident_id = incident_id
+        if body.disposition is not None:
+            iu.disposition = body.disposition
     incident = db.query(Incident).get(incident_id)
     if body.status_code == 'OS' and incident.status in ('open', 'dispatched', 'en_route'):
         incident.status = 'on_scene'
@@ -485,3 +541,78 @@ def ingest_taip(body: TaipIngest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(pos)
     return {'taip_id': taip_id, 'parsed': data, 'unit_id': pos.unit_id}
+
+@app.post('/units/{unit_id}/camera', response_model=UnitOut)
+def set_unit_camera(unit_id: int, body: UnitCamera, db: Session = Depends(get_db)):
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    unit.camera_url = body.camera_url
+    db.commit()
+    db.refresh(unit)
+    return unit
+
+@app.post('/units/{unit_id}/shift', response_model=UnitOut)
+def set_unit_shift(unit_id: int, body: UnitShift, db: Session = Depends(get_db)):
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    if body.action == 'start':
+        unit.in_service_at = datetime.utcnow()
+        unit.accumulated_call_seconds = 0
+        unit.current_status = 'AQ'
+    elif body.action == 'end':
+        unit.in_service_at = None
+        unit.accumulated_call_seconds = 0
+        unit.current_status = 'off_duty'
+    else:
+        raise HTTPException(status_code=400, detail='Invalid action')
+    db.commit()
+    db.refresh(unit)
+    return unit
+
+@app.post('/personnel/{personnel_id}/assign', response_model=PersonnelOut)
+def assign_personnel(personnel_id: int, body: PersonnelAssign, db: Session = Depends(get_db)):
+    p = db.query(Personnel).get(personnel_id)
+    if not p:
+        raise HTTPException(status_code=404, detail='Personnel not found')
+    p.current_unit_id = body.unit_id
+    db.commit()
+    db.refresh(p)
+    return p
+
+def _record_alert(db, incident_id, unit_id, msg, crew):
+    sent = []
+    for c in crew:
+        for channel in ['sms', 'email']:
+            address = c.sms_phone if channel == 'sms' else c.email
+            if address:
+                m = DispatchMessage(incident_id=incident_id, unit_id=unit_id, message_text=msg, method=channel, channel=address, sent_at=datetime.utcnow())
+                db.add(m)
+                sent.append({'name': f"{c.first_name or ''} {c.last_name or ''}".strip(), 'channel': channel, 'address': address})
+    return sent
+
+@app.post('/units/{unit_id}/alert-crew')
+def alert_unit_crew(unit_id: int, body: AlertCrew, db: Session = Depends(get_db)):
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    msg = body.message or 'Alert from dispatch'
+    crew = db.query(Personnel).filter(Personnel.current_unit_id == unit_id).all()
+    sent = _record_alert(db, None, unit_id, msg, crew)
+    db.commit()
+    return {'recipients': sent, 'message': msg}
+
+@app.post('/incidents/{incident_id}/alert-crew')
+def alert_incident_crew(incident_id: int, body: AlertCrew, db: Session = Depends(get_db)):
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    msg = body.message or f"{incident.incident_number}: {incident.call_type}"
+    ius = db.query(IncidentUnit).filter_by(incident_id=incident_id).all()
+    sent = []
+    for iu in ius:
+        crew = db.query(Personnel).filter(Personnel.current_unit_id == iu.unit_id).all()
+        sent.extend(_record_alert(db, incident_id, iu.unit_id, msg, crew))
+    db.commit()
+    return {'recipients': sent, 'message': msg}
