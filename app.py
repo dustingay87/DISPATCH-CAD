@@ -201,7 +201,7 @@ app.mount('/static', StaticFiles(directory='static'), name='static')
 
 @app.get('/')
 def index():
-    return FileResponse('static/dashboard_v4.html')
+    return FileResponse('static/dashboard_v5.html')
 
 @app.get('/units-screen')
 def units_screen():
@@ -309,6 +309,16 @@ class IncidentOut(IncidentCreate):
     closed_at: Optional[datetime] = None
     class Config:
         from_attributes = True
+
+class IncidentUpdate(BaseModel):
+    call_type: Optional[str] = None
+    priority: Optional[int] = None
+    status: Optional[str] = None
+    location_text: Optional[str] = None
+    narrative: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    extra: Optional[dict] = None
 
 class StatusUpdate(BaseModel):
     status_code: str
@@ -451,6 +461,19 @@ def list_incidents(agency_id: Optional[int] = Query(None), db: Session = Depends
     if agency_id:
         q = q.filter(Incident.agency_id == agency_id)
     return q.order_by(Incident.created_at.desc()).all()
+
+@app.put('/incidents/{incident_id}', response_model=IncidentOut)
+def update_incident(incident_id: int, body: IncidentUpdate, db: Session = Depends(get_db)):
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(incident, k, v)
+    if body.status == 'closed' and not incident.closed_at:
+        incident.closed_at = datetime.utcnow()
+    db.commit()
+    db.refresh(incident)
+    return incident
 
 @app.post('/incidents/{incident_id}/dispatch/{unit_id}')
 def dispatch_unit(incident_id: int, unit_id: int, notes: Optional[str] = None, db: Session = Depends(get_db)):
