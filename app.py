@@ -35,7 +35,12 @@ DATABASE_URL = _add_ipv4_hostaddr(DATABASE_URL)
 if DATABASE_URL.startswith('sqlite'):
     engine = create_engine(DATABASE_URL, connect_args={'check_same_thread': False})
 else:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    db_url = DATABASE_URL.split('?')[0]
+    if db_url.startswith('postgresql+psycopg2://'):
+        db_url = db_url.replace('postgresql+psycopg2://', 'postgresql+pg8000://', 1)
+    elif db_url.startswith('postgresql://'):
+        db_url = db_url.replace('postgresql://', 'postgresql+pg8000://', 1)
+    engine = create_engine(db_url, pool_pre_ping=True, connect_args={'ssl': True})
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
