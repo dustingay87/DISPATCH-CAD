@@ -21,38 +21,38 @@
   th { cursor:pointer; user-select:none; }
   tr:hover td { background:#334155; }
   .alert { background:#1e293b; border-left:4px solid #ef4444; color:#fff; padding:0.5rem; border-radius:0.25rem; margin-bottom:0.5rem; }
-  .btn { padding:0.15rem 0.4rem; border-radius:0.25rem; color:#fff; margin-right:0.25rem; margin-bottom:0.25rem; display:inline-block; }
+  .btn { padding:0.5rem 1rem; border-radius:0.375rem; color:#fff; margin-right:0.5rem; margin-bottom:0.5rem; display:inline-block; font-size:0.875rem; }
   .btn-s { background:#475569; }
   .btn-s:hover { background:#64748b; }
 </style>
 </head>
-<body class='bg-slate-900 text-slate-200 text-xs'>
-  <header class='h-14 bg-slate-800 flex items-center justify-between px-3 border-b border-slate-700'>
-    <div class='font-bold text-base tracking-wide'>VolCAD <span class='text-slate-400 font-normal text-xs'>v4 Multi-Agency Console</span></div>
-    <div class='flex items-center space-x-2'>
-      <select id='agencyFilter' class='bg-slate-700 border border-slate-600 rounded px-2 py-1'>
+<body class='bg-slate-900 text-slate-200 text-sm'>
+  <header class='h-20 bg-slate-800 flex items-center justify-between px-3 border-b border-slate-700'>
+    <div class='font-bold text-base tracking-wide'>VolCAD <span class='text-slate-400 font-normal text-sm'>v4 Multi-Agency Console</span></div>
+    <div class='flex items-center space-x-3'>
+      <select id='agencyFilter' class='bg-slate-700 border border-slate-600 rounded px-3 py-2'>
         <option value=''>All types</option>
         <option value='police'>Police</option>
         <option value='fire'>Fire</option>
         <option value='ems'>EMS</option>
       </select>
-      <label class='flex items-center space-x-1'><input id='liveToggle' type='checkbox' checked class='accent-blue-500'> <span>Live</span></label>
-      <button id='refreshBtn' class='bg-slate-600 hover:bg-slate-700 px-2 py-1 rounded'>Refresh</button>
-      <button id='seedBtn' class='bg-green-600 hover:bg-green-700 px-2 py-1 rounded'>Seed Demo</button>
+      <label class='flex items-center space-x-2'><input id='liveToggle' type='checkbox' checked class='accent-blue-500'> <span>Live</span></label>
+      <button id='refreshBtn' class='bg-slate-600 hover:bg-slate-700 px-3 py-2 rounded'>Refresh</button>
+      <button id='seedBtn' class='bg-green-600 hover:bg-green-700 px-3 py-2 rounded'>Seed Demo</button>
     </div>
   </header>
-  <main class='flex h-[calc(100vh-3.5rem)]'>
-    <section class='w-2/5 border-r border-slate-700 flex flex-col'>
+  <main class='flex h-[calc(100vh-5rem)]'>
+    <section class='w-1/2 border-r border-slate-700 flex flex-col'>
       <nav class='bg-slate-800 flex border-b border-slate-700'>
-        <button class='tab-btn flex-1 py-2 text-xs font-medium tab-active' data-tab='incidents'>Calls</button>
-        <button class='tab-btn flex-1 py-2 text-xs font-medium' data-tab='units'>Units</button>
-        <button class='tab-btn flex-1 py-2 text-xs font-medium' data-tab='personnel'>Personnel</button>
+        <button class='tab-btn flex-1 py-2 text-sm font-medium tab-active' data-tab='incidents'>Calls</button>
+        <button class='tab-btn flex-1 py-2 text-sm font-medium' data-tab='units'>Units</button>
+        <button class='tab-btn flex-1 py-2 text-sm font-medium' data-tab='personnel'>Personnel</button>
       </nav>
-      <div id='tabContent' class='panel p-2 bg-slate-900'></div>
+      <div id='tabContent' class='panel p-4 bg-slate-900'></div>
     </section>
-    <section class='w-3/5 relative'>
+    <section class='w-1/2 relative'>
       <div id='map'></div>
-      <div id='alerts' class='absolute top-2 right-2 w-80 space-y-2 z-[1000]'></div>
+      <div id='alerts' class='absolute top-4 right-2 w-96 space-y-4 z-[1000]'></div>
     </section>
   </main>
 <script>
@@ -167,7 +167,7 @@ function findNearest(unit){
 
 function sortRows(arr,key,dir){ if(!key) return arr; return arr.slice().sort((a,b)=>{ const av=a[key]||'', bv=b[key]||''; if(typeof av==='number' && typeof bv==='number') return (av-bv)*dir; return (String(av)<String(bv)?-1:1)*dir; }); }
 function renderTable(html){ document.getElementById('tabContent').innerHTML = `<table class='w-full text-left border-collapse'>${html}</table>`; }
-function th(key,label){ return `<th class='py-1 px-2 text-slate-400 border-b border-slate-700' data-key='${key}'>${label}${state.sort.key===key?(state.sort.dir>0?' ▲':' ▼'):''}</th>`; }
+function th(key,label){ return `<th class='py-2 px-3 text-slate-400 border-b border-slate-700' data-key='${key}'>${label}${state.sort.key===key?(state.sort.dir>0?' ▲':' ▼'):''}</th>`; }
 
 function groupedCalls(){
   const groups={};
@@ -178,11 +178,11 @@ function groupedCalls(){
 function incidentBlock(g){
   const lead = g.rows[0]; const a=state.agencyMap[lead.agency_id]||{}; const disp = g.rows.map(i=>`<span class='text-slate-300'>${i.call_type}</span> ${i.status}`).join(' / ');
   return `<div class='mb-2 rounded overflow-hidden border border-slate-700 ${priorityClass(lead.priority)}'>
-    <div class='p-2 bg-slate-800 flex justify-between items-center cursor-pointer' onclick='toggleCall(${lead.id})'>
-      <div><b class='text-sm'>${g.call_number}</b> <span class='text-slate-400'>${a.name||'-'}</span> <span class='text-xs ml-2'>${disp}</span></div>
-      <button class='text-blue-400 text-xs' onclick='event.stopPropagation();openDispatch(${lead.id})'>+ Unit</button>
+    <div class='p-4 bg-slate-800 flex justify-between items-center cursor-pointer' onclick='toggleCall(${lead.id})'>
+      <div><b class='text-sm'>${g.call_number}</b> <span class='text-slate-400'>${a.name||'-'}</span> <span class='text-sm ml-2'>${disp}</span></div>
+      <button class='text-blue-400 text-sm' onclick='event.stopPropagation();openDispatch(${lead.id})'>+ Unit</button>
     </div>
-    <div id='call-${lead.id}' class='hidden p-2 bg-slate-900 space-y-2'>
+    <div id='call-${lead.id}' class='hidden p-4 bg-slate-900 space-y-4'>
       ${g.rows.map(i=>callRow(i)).join('')}
     </div>
   </div>`;
@@ -196,7 +196,7 @@ function callRow(i){
     <div class='flex justify-between'><b>${i.call_type}</b> <span>${i.status}</span></div>
     <div class='text-slate-400'>${i.location_text||''} ${fmtTime(i.created_at)}</div>
     <div>Units: ${unitsHtml}</div>
-    <div class='mt-1 space-y-1'>${statusButtons(i)}</div>
+    <div class='mt-1 space-y-2'>${statusButtons(i)}</div>
   </div>`;
 }
 
@@ -209,14 +209,14 @@ function statusButtons(i){
 }
 
 function renderIncidents(){
-  const form = `<div class='mb-2 p-2 bg-slate-800 rounded space-y-2'>
+  const form = `<div class='mb-2 p-4 bg-slate-800 rounded space-y-4'>
     <div class='font-semibold text-slate-400'>New Call</div>
-    <div class='flex space-x-1'>
+    <div class='flex space-x-2'>
       <select id='cAgency' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 flex-1'><option value=''>Lead agency</option>${state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('')}</select>
       <select id='cTypeCat' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 flex-1'><option value=''>Type</option>${Object.keys(CONFIG).map(k=>`<option value='${k}'>${k.toUpperCase()}</option>`).join('')}</select>
       <select id='cType' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 flex-1'><option value=''>Call type</option></select>
     </div>
-    <div class='flex space-x-1'>
+    <div class='flex space-x-2'>
       <input id='cCallNum' placeholder='Call # (optional)' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 w-24'>
       <input id='cLoc' placeholder='Location text' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 flex-1'>
       <input id='cCaller' placeholder='Caller' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 w-24'>
@@ -228,7 +228,7 @@ function renderIncidents(){
   const groups = groupedCalls();
   let html = groups.map(g=>incidentBlock(g)).join('');
   if(!html) html = '<div class="p-4 text-slate-500">No calls</div>';
-  document.getElementById('tabContent').innerHTML = form + `<div class='space-y-2'>${html}</div>`;
+  document.getElementById('tabContent').innerHTML = form + `<div class='space-y-4'>${html}</div>`;
   document.getElementById('cTypeCat').addEventListener('change', populateCallTypes);
   document.getElementById('cType').addEventListener('change', renderExtraFields);
   document.getElementById('cCreate').addEventListener('click', createCall);
@@ -287,15 +287,15 @@ function renderUnits(){
     const cam=u.camera_url?`<a href='${u.camera_url}' target='_blank' class='text-blue-400 underline'>Cam</a>`:`<span class='text-slate-500'>-</span>`;
     const statusBtns=cfg.statuses.map(s=>`<button class='btn btn-s' onclick='setUnitGlobalStatus(${u.id},"${s.code}")'>${s.label}</button>`).join('');
     return `<tr class='border-b border-slate-800 ${u.current_status==='OS'?'onscene':''}'>
-      <td class='py-1 px-2'>${u.call_sign}</td>
-      <td class='py-1 px-2'>${u.current_status}</td>
-      <td class='py-1 px-2'>${a.agency_type||'-'}</td>
-      <td class='py-1 px-2'>${t.avail}</td>
-      <td class='py-1 px-2'>${t.scene}</td>
-      <td class='py-1 px-2'>${t.call}</td>
-      <td class='py-1 px-2'>${t.shift}</td>
-      <td class='py-1 px-2'>${cam}</td>
-      <td class='py-1 px-2'>
+      <td class='py-2 px-3'>${u.call_sign}</td>
+      <td class='py-2 px-3'>${u.current_status}</td>
+      <td class='py-2 px-3'>${a.agency_type||'-'}</td>
+      <td class='py-2 px-3'>${t.avail}</td>
+      <td class='py-2 px-3'>${t.scene}</td>
+      <td class='py-2 px-3'>${t.call}</td>
+      <td class='py-2 px-3'>${t.shift}</td>
+      <td class='py-2 px-3'>${cam}</td>
+      <td class='py-2 px-3'>
         <button class='text-green-400' onclick='startShift(${u.id})'>Start</button>
         <button class='text-red-400' onclick='endShift(${u.id})'>End</button>
         <button class='text-indigo-400' onclick='setCamera(${u.id})'>Cam</button>
@@ -303,7 +303,7 @@ function renderUnits(){
         <button class='text-pink-400' onclick='alertUnitCrew(${u.id})'>Alert</button>
       </td>
     </tr>
-    <tr><td colspan='9' class='py-1 px-2'>${statusBtns}</td></tr>`;
+    <tr><td colspan='9' class='py-2 px-3'>${statusBtns}</td></tr>`;
   }).join('');
   if(!rows) rows=`<tr><td colspan='9' class='p-4 text-slate-500'>No units</td></tr>`;
   renderTable(`<thead><tr>${th('call_sign','Call')}${th('current_status','Status')}${th('agency_id','Type')}${th('last_assigned_at','Avail')}${th('last_assigned_at','On Scene')}${th('accumulated_call_seconds','Call Time')}${th('in_service_at','Shift')}${th('camera_url','Cam')}${th('id','')}</tr></thead><tbody>${rows}</tbody>`);
@@ -322,18 +322,18 @@ function renderPersonnel(){
   let rows=data.map(p=>{
     const u=state.units.find(x=>x.id===p.current_unit_id); const uname=u?u.call_sign:'-';
     return `<tr class='border-b border-slate-800'>
-      <td class='py-1 px-2'>${p.first_name||''} ${p.last_name||''}</td>
-      <td class='py-1 px-2'>${p.email||'-'}</td>
-      <td class='py-1 px-2'>${p.sms_phone||'-'}</td>
-      <td class='py-1 px-2'>${uname}</td>
-      <td class='py-1 px-2 space-x-1'><button class='text-blue-400' onclick='assignPerson(${p.id})'>Assign</button><button class='text-red-400' onclick='unassignPerson(${p.id})'>Un</button></td>
+      <td class='py-2 px-3'>${p.first_name||''} ${p.last_name||''}</td>
+      <td class='py-2 px-3'>${p.email||'-'}</td>
+      <td class='py-2 px-3'>${p.sms_phone||'-'}</td>
+      <td class='py-2 px-3'>${uname}</td>
+      <td class='py-2 px-3 space-x-2'><button class='text-blue-400' onclick='assignPerson(${p.id})'>Assign</button><button class='text-red-400' onclick='unassignPerson(${p.id})'>Un</button></td>
     </tr>`;
   }).join('');
   if(!rows) rows=`<tr><td colspan='5' class='p-4 text-slate-500'>No personnel</td></tr>`;
-  const form = `<div class='mb-2 p-2 bg-slate-800 rounded space-y-1'>
+  const form = `<div class='mb-2 p-4 bg-slate-800 rounded space-y-2'>
     <div class='font-semibold text-slate-400'>Add Crew</div>
-    <div class='flex space-x-1'><input id='npAgency' type='number' placeholder='Agency' class='w-16 bg-slate-700 border border-slate-600 rounded px-1'><input id='npFirst' placeholder='First' class='flex-1 bg-slate-700 border border-slate-600 rounded px-1'><input id='npLast' placeholder='Last' class='flex-1 bg-slate-700 border border-slate-600 rounded px-1'></div>
-    <div class='flex space-x-1'><input id='npEmail' type='email' placeholder='Email' class='flex-1 bg-slate-700 border border-slate-600 rounded px-1'><input id='npSms' placeholder='SMS' class='flex-1 bg-slate-700 border border-slate-600 rounded px-1'><input id='npUnit' type='number' placeholder='Unit' class='w-16 bg-slate-700 border border-slate-600 rounded px-1'><button id='addPersonBtn' class='bg-green-600 hover:bg-green-700 px-2 py-1 rounded'>Add</button></div>
+    <div class='flex space-x-2'><input id='npAgency' type='number' placeholder='Agency' class='w-16 bg-slate-700 border border-slate-600 rounded px-1'><input id='npFirst' placeholder='First' class='flex-1 bg-slate-700 border border-slate-600 rounded px-1'><input id='npLast' placeholder='Last' class='flex-1 bg-slate-700 border border-slate-600 rounded px-1'></div>
+    <div class='flex space-x-2'><input id='npEmail' type='email' placeholder='Email' class='flex-1 bg-slate-700 border border-slate-600 rounded px-1'><input id='npSms' placeholder='SMS' class='flex-1 bg-slate-700 border border-slate-600 rounded px-1'><input id='npUnit' type='number' placeholder='Unit' class='w-16 bg-slate-700 border border-slate-600 rounded px-1'><button id='addPersonBtn' class='bg-green-600 hover:bg-green-700 px-3 py-2 rounded'>Add</button></div>
   </div>`;
   document.getElementById('tabContent').innerHTML = form + `<table class='w-full text-left border-collapse'><thead><tr>${th('last_name','Name')}${th('email','Email')}${th('sms_phone','SMS')}${th('current_unit_id','Unit')}${th('id','')}</tr></thead><tbody>${rows}</tbody></table>`;
   document.getElementById('addPersonBtn').addEventListener('click', addPerson);
