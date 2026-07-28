@@ -283,6 +283,19 @@ def require_admin(request: Request):
         raise HTTPException(status_code=403, detail='Admin required')
     return user
 
+def seed_default_admin():
+    db = SessionLocal()
+    try:
+        if db.query(User).count() == 0:
+            db.add(User(email='dustin@dispatchtodiscipleship.net', hashed_password=hash_password('Warrior/202601!'), role='admin', is_active=True))
+            db.commit()
+    finally:
+        db.close()
+
+@app.on_event('startup')
+def startup():
+    seed_default_admin()
+
 @app.middleware('http')
 async def auth_middleware(request: Request, call_next):
     if request.method in ('GET', 'OPTIONS', 'HEAD') or request.url.path.startswith('/static/'):
