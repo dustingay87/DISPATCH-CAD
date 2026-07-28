@@ -54,7 +54,7 @@
   </div>
 <script>
 const CENTER = [39.9612, -82.9988];
-let state = { agencies:[], units:[], positions:{}, selected:null, trails:false };
+let state = { agencies:[], units:[], positions:{}, selected:null, selectedTrail:null, trails:false };
 let map, layers={};
 
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
@@ -123,6 +123,14 @@ function renderMap(){
     if(state.selected===u.id) marker.openPopup();
   });
   if(document.getElementById('trailsToggle').checked) drawTrails();
+  drawSelectedTrail();
+}
+
+function drawSelectedTrail(){
+  if(!state.selectedTrail || state.selectedTrail.length < 2) return;
+  const pts = state.selectedTrail.map(p=>[p.lat,p.lng]).filter(p=>p[0]!=null&&p[1]!=null);
+  if(pts.length < 2) return;
+  L.polyline(pts,{color:'#38bdf8',weight:3,opacity:.8}).addTo(layers.trails);
 }
 
 function drawTrails(){
@@ -137,10 +145,11 @@ function drawTrails(){
   });
 }
 
-function selectUnit(id){
+async function selectUnit(id){
   state.selected = id; renderUnitList(); renderMap();
   const u = state.units.find(x=>x.id===id); if(u && u.lat!=null && u.lng!=null) map.setView([u.lat,u.lng],16);
   updateTelemetry();
+  try { state.selectedTrail = await api(`/units/${id}/trail?hours=8`); renderMap(); } catch(e){ state.selectedTrail = null; }
 }
 
 function updateTelemetry(){

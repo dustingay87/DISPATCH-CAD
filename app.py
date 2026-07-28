@@ -2190,3 +2190,9 @@ def reports_summary(days: int = 7, current_user: dict = Depends(get_current_user
 @app.get('/reports-page')
 def reports_page():
     return FileResponse('static/reports.html')
+
+@app.get('/units/{unit_id}/trail')
+def unit_trail(unit_id: int, hours: int = 8, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    since = datetime.utcnow() - timedelta(hours=max(1, min(hours, 72)))
+    events = db.query(StatusEvent).filter(StatusEvent.unit_id == unit_id, StatusEvent.lat != None, StatusEvent.lng != None, StatusEvent.created_at >= since).order_by(StatusEvent.created_at.asc()).all()
+    return [{'lat': e.lat, 'lng': e.lng, 'status_code': e.status_code, 'created_at': e.created_at.isoformat() if e.created_at else None} for e in events]
