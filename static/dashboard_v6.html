@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>VolCAD v6 RescueNet</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
+<script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' crossorigin=''></script>
+<style>
+* { box-sizing:border-box; }
+html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+.pri-1 { background:rgba(239,68,68,0.25); border-left:4px solid #ef4444; }
+.pri-2 { background:rgba(249,115,22,0.25); border-left:4px solid #f97316; }
+.pri-3 { background:rgba(234,179,8,0.25); border-left:4px solid #eab308; }
+.pri-4 { background:rgba(34,197,94,0.25); border-left:4px solid #22c55e; }
+.stat-AQ { color:#22c55e; }
+.stat-OS { color:#ef4444; }
+.stat-ER,.stat-TR,.stat-DEL { color:#eab308; }
+.tbl { width:100%; border-collapse:collapse; font-size:0.75rem; }
+.tbl th { background:#0f172a; padding:0.25rem 0.5rem; text-align:left; text-transform:uppercase; color:#94a3b8; }
+.tbl td { padding:0.25rem 0.5rem; border-bottom:1px solid #334155; }
+.tbl tr { cursor:pointer; }
+.tbl tr:hover { background:rgba(255,255,255,0.05); }
+.tbl tr.selected { outline:2px solid #3b82f6; }
+#map { height:100%; min-height:180px; background:#0f172a; }
+.panel { background:#1e293b; border:1px solid #334155; border-radius:0.375rem; overflow:hidden; display:flex; flex-direction:column; }
+.panel-head { background:#0f172a; padding:0.35rem 0.5rem; font-weight:700; font-size:0.75rem; border-bottom:1px solid #334155; }
+.panel-body { flex:1; overflow:auto; padding:0.25rem; }
+</style>
+</head>
+<body class='bg-slate-900 text-slate-200 text-xs h-screen flex flex-col'>
+  <header class='h-14 bg-slate-950 border-b border-slate-700 flex items-center justify-between px-4 shrink-0'>
+    <div class='font-bold text-lg text-white'>VolCAD <span class='text-slate-500 font-normal'>v6 RescueNet</span></div>
+    <div class='flex items-center gap-2'>
+      <a href='/dashboard_v5.html' class='bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs'>v5 Console</a>
+      <a href='/call-entry' class='bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-xs'>Call Entry</a>
+      <a href='/mdt?unit_id=1' class='bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-xs'>MDT</a>
+      <a href='/avl' class='bg-cyan-700 hover:bg-cyan-600 px-2 py-1 rounded text-xs'>AVL</a>
+    </div>
+  </header>
+  <main class='flex-1 grid grid-cols-12 gap-1 p-1 overflow-hidden'>
+    <section class='col-span-8 flex flex-col gap-1 min-h-0'>
+      <div class='panel flex-1 min-h-0'>
+        <div class='panel-head flex justify-between'><span>Open Work</span><span id='callCount' class='text-slate-400'>0</span></div>
+        <div id='openWork' class='panel-body p-0'></div>
+      </div>
+      <div class='panel h-2/5 min-h-0'>
+        <div class='panel-head'>Map</div>
+        <div class='panel-body p-0'><div id='map'></div></div>
+      </div>
+    </section>
+    <section class='col-span-4 flex flex-col gap-1 min-h-0'>
+      <div class='panel flex-1 min-h-0'>
+        <div class='panel-head flex justify-between'><span>Vehicle Information</span><span id='unitCount' class='text-slate-400'>0</span></div>
+        <div id='vehicleInfo' class='panel-body p-0'></div>
+      </div>
+      <div class='panel h-2/5 min-h-0'>
+        <div class='panel-head'>Trip / Vehicle Summary</div>
+        <div id='tripSummary' class='panel-body'></div>
+      </div>
+    </section>
+  </main>
+<script>
+const CENTER=[39.9612,-82.9988];
+let state={agencies:[],units:[],incidents:[],agencyMap:{},selectedTrip:null,selectedVehicle:null};
+let map,layers;
+
+function api(path,opts={}){return fetch(path,{...opts,credentials:'include'}).then(r=>{if(r.status===401){window.location.href='/login';throw new Error('Unauthorized');}if(!r.ok)throw new Error(`${path} ${r.status}`);return r.json();});}
+function statusLabel(c){const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene'};return M[c]||c;}
+function fmtTime(iso){if(!iso)return '-';const d=new Date(iso);return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+function fmtDur(s){const h=Math.floor(s/3600);const m=Math.floor((s%3600)/60);const sec=Math.floor(s%60);return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;}
+function elapsed(iso){return iso?(Date.now()-new Date(iso).getTime())/1000:0;}
+function priorityClass(p){return `pri-${Math.min(Math.max(p||2,1),4)}`;}
+function statClass(c){if(c==='AQ')return 'stat-AQ';if(c==='OS')return 'stat-OS';if(['ER','TR','DEL'].includes(c))return 'stat-ER';return 'text-slate-400';}
+
+async function load(){
+  const [agencies,units,incidents]=await Promise.all([api('/agencies'),api('/units'),api('/incidents')]);
+  state.agencies=agencies;state.units=units;state.incidents=incidents;state.agencyMap={};state.agencies.forEach(a=>state.agencyMap[a.id]=a);
+  renderOpenWork();renderVehicleInfo();renderMap();renderTripSummary();
+}
+function initMap(){if(map)return;map=L.map('map',{center:CENTER,zoom:11});L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap'}).addTo(map);layers={units:L.layerGroup().addTo(map),incidents:L.layerGroup().addTo(map)};}
+
+function renderOpenWork(){
+  const active=state.incidents.filter(i=>i.status!=='closed').sort((a,b)=>(a.priority||2)-(b.priority||2)||new Date(b.created_at)-new Date(a.created_at));
+  document.getElementById('callCount').textContent=active.length;
+  const html=active.length?`<table class='tbl'><thead><tr><th>Priority</th><th>Call Type</th><th>Time</th><th>Location</th><th>City</th><th>Agency</th><th>Status</th><th>Units</th></tr></thead><tbody>`+active.map(i=>{
+    const a=state.agencyMap[i.agency_id]||{};
+    const assigned=state.units.filter(u=>u.current_incident_id===i.id).map(u=>u.call_sign).join(', ')||'-';
+    return `<tr class='${priorityClass(i.priority)} ${state.selectedTrip===i.id?'selected':''}' onclick='selectTrip(${i.id})'>
+      <td class='font-bold'>P${i.priority}</td>
+      <td>${i.call_type}</td>
+      <td>${fmtTime(i.created_at)}</td>
+      <td>${i.location_text||'-'}</td>
+      <td>${i.city||'-'}</td>
+      <td>${a.name||'-'}</td>
+      <td class='${statClass(i.status)}'>${statusLabel(i.status)}</td>
+      <td>${assigned}</td>
+    </tr>`;
+  }).join('')+'</tbody></table>':'<div class="p-2 text-slate-500">No active calls</div>';
+  document.getElementById('openWork').innerHTML=html;
+}
+
+function renderVehicleInfo(){
+  const sorted=state.units.slice().sort((a,b)=>(a.call_sign||'').localeCompare(b.call_sign||''));
+  document.getElementById('unitCount').textContent=sorted.length;
+  const html=sorted.length?`<table class='tbl'><thead><tr><th>Unit</th><th>Type</th><th>Status</th><th>Call</th><th>Loc</th></tr></thead><tbody>`+sorted.map(u=>{
+    const inc=u.current_incident_id?(state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id):'-';
+    return `<tr class='${state.selectedVehicle===u.id?'selected':''}' onclick='selectVehicle(${u.id})'>
+      <td class='font-bold'>${u.call_sign}</td>
+      <td>${u.unit_type||'-'}</td>
+      <td class='${statClass(u.current_status)}'>${statusLabel(u.current_status)}</td>
+      <td>${inc}</td>
+      <td>${u.lat!=null&&u.lng!=null?'GPS':'-'}</td>
+    </tr>`;
+  }).join('')+'</tbody></table>':'<div class="p-2 text-slate-500">No units</div>';
+  document.getElementById('vehicleInfo').innerHTML=html;
+}
+
+function renderMap(){
+  initMap();layers.units.clearLayers();layers.incidents.clearLayers();
+  state.units.forEach(u=>{if(u.lat==null||u.lng==null)return;const col=u.current_status==='OS'?'#ef4444':u.current_status==='AQ'?'#22c55e':u.current_status==='ER'||u.current_status==='TR'||u.current_status==='DEL'?'#eab308':'#64748b';const m=L.circleMarker([u.lat,u.lng],{radius:6,color:col,fillColor:col,fillOpacity:0.9}).addTo(layers.units);m.bindPopup(`<b>${u.call_sign}</b><br>${statusLabel(u.current_status)}`);});
+  state.incidents.forEach(i=>{if(i.lat==null||i.lng==null)return;const col=i.priority===1?'#ef4444':i.priority===2?'#f97316':i.priority===3?'#eab308':'#22c55e';const m=L.circleMarker([i.lat,i.lng],{radius:8,color:col,fillColor:col,fillOpacity:0.6}).addTo(layers.incidents);m.bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${statusLabel(i.status)}`);});
+}
+
+function renderTripSummary(){
+  const el=document.getElementById('tripSummary');el.innerHTML='';
+  if(state.selectedTrip){
+    const i=state.incidents.find(x=>x.id===state.selectedTrip);if(!i)return;
+    const a=state.agencyMap[i.agency_id]||{};
+    const assigned=state.units.filter(u=>u.current_incident_id===i.id).map(u=>u.call_sign).join(', ')||'none';
+    const opts=state.units.filter(u=>u.current_status==='AQ'||u.current_status==='Available').map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
+    el.innerHTML=`<div class='space-y-1'>
+      <div class='font-bold text-white'>${i.call_number||i.incident_number}</div>
+      <div>${i.call_type} <span class='text-slate-400'>P${i.priority}</span></div>
+      <div><span class='text-slate-400'>Location:</span> ${i.location_text||'-'}</div>
+      <div><span class='text-slate-400'>Agency:</span> ${a.name||'-'}</div>
+      <div><span class='text-slate-400'>Status:</span> ${statusLabel(i.status)}</div>
+      <div><span class='text-slate-400'>Elapsed:</span> ${fmtDur(elapsed(i.created_at))}</div>
+      <div><span class='text-slate-400'>Units:</span> ${assigned}</div>
+      <div class='flex gap-1 mt-2'><select id='addUnit' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value=''>Add unit</option>${opts}</select><button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='addUnitToTrip(${i.id})'>Add</button></div>
+    </div>`;
+  }else if(state.selectedVehicle){
+    const u=state.units.find(x=>x.id===state.selectedVehicle);if(!u)return;
+    const inc=u.current_incident_id?(state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id):'-';
+    el.innerHTML=`<div class='space-y-1'>
+      <div class='font-bold text-white'>${u.call_sign}</div>
+      <div><span class='text-slate-400'>Status:</span> ${statusLabel(u.current_status)}</div>
+      <div><span class='text-slate-400'>Type:</span> ${u.unit_type||'-'}</div>
+      <div><span class='text-slate-400'>Agency:</span> ${state.agencyMap[u.agency_id]?.name||'-'}</div>
+      <div><span class='text-slate-400'>Current Call:</span> ${inc}</div>
+      <div><span class='text-slate-400'>Crew:</span> -</div>
+    </div>`;
+  }else{el.innerHTML='<div class="text-slate-500">Select a trip or vehicle.</div>';}
+}
+
+window.selectTrip=function(id){state.selectedTrip=id;state.selectedVehicle=null;renderOpenWork();renderVehicleInfo();renderTripSummary();}
+window.selectVehicle=function(id){state.selectedVehicle=id;state.selectedTrip=null;renderOpenWork();renderVehicleInfo();renderTripSummary();}
+window.addUnitToTrip=async function(incidentId){const uid=document.getElementById('addUnit').value;if(!uid)return;try{await api(`/incidents/${incidentId}/dispatch/${uid}`,{method:'POST'});await load();}catch(e){alert(e.message);}}
+
+load();setInterval(load,5000);
+</script>
+</body>
+</html>
