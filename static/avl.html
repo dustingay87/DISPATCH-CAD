@@ -75,12 +75,24 @@ function arrowIcon(color, heading){
 
 async function load(){
   try {
-    const [agencies, units] = await Promise.all([api('/agencies'), api('/units')]);
-    state.agencies = agencies; state.units = units;
-    const ids = state.units.map(u=>u.id).join(',');
-    if(ids) state.positions = await api(`/taip/positions?limit=100&unit_id=${ids.indexOf(',')===-1 ? ids : ''}`).then(r=>r?{all:r}:{}).catch(()=>({}));
+    const [agencies, units, positions] = await Promise.all([api('/agencies'), api('/units'), api('/taip/positions?limit=200')]).catch(()=>[[],[],[]]);
+    state.agencies = agencies; state.units = units; state.positions = positions || [];
     renderUnitList(); renderMap(); updateTelemetry();
   } catch(e){ document.getElementById('unitList').innerHTML = `<div class='p-4 text-red-400'>Error: ${e.message}</div>`; }
+}
+
+function startStream(){
+  if(!window.EventSource) return;
+  const es = new EventSource('/taip/stream', {withCredentials:true});
+  es.onmessage = e => {
+    const positions = JSON.parse(e.data);
+    positions.forEach(p => {
+      const u = state.units.find(x => x.id === p.id);
+      if(u){ u.lat = p.lat; u.lng = p.lng; u.heading = p.heading; u.speed = p.speed; u.last_seen_at = p.last_seen_at; u.current_status = p.current_status; }
+    });
+    renderUnitList(); renderMap(); updateTelemetry();
+  };
+  es.onerror = () => { es.close(); setTimeout(startStream, 5000); };
 }
 
 function agencyMap(){ const m={}; state.agencies.forEach(a=>m[a.id]=a); return m; }
@@ -179,7 +191,8 @@ document.getElementById('simSendBtn').addEventListener('click', ()=>{
 window.selectUnit = selectUnit;
 initMap();
 load();
-setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); }, 5000);
+startStream();
+setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); }, 15000);
 </script>
 </body>
 </html>
