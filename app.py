@@ -1,6 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, or_, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship, Session, sessionmaker
 from pydantic import BaseModel
@@ -8,9 +8,15 @@ from datetime import datetime
 from typing import List, Optional
 import os
 import re
+import time
+import hmac
+import hashlib
 from dotenv import load_dotenv
 
 load_dotenv()
+
+SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-change-me')
+INSECURE_DEV = os.getenv('INSECURE_DEV', 'false').lower() == 'true'
 
 DATABASE_URL = os.getenv('SUPABASE_DB_URL', 'sqlite:///./volcad.db')
 
@@ -217,6 +223,16 @@ def get_db():
     finally:
         db.close()
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class UserMe(BaseModel):
+    user_id: int
+    role: str
+    email: Optional[str] = None
+    agency_id: Optional[int] = None
+
 class CustomerConfigCreate(BaseModel):
     agency_id: Optional[int] = None
     category: str
@@ -229,6 +245,42 @@ class CustomerConfigOut(CustomerConfigCreate):
     updated_at: Optional[datetime] = None
     class Config:
         from_attributes = True
+
+@app.middleware('http')
+async def auth_middleware(request: Request, call_next):
+    if request.method in ('GET', 'OPTIONS', 'HEAD') or request.url.path.startswith('/static/'):
+        return await call_next(request)
+    if request.url.path in ('/login', '/logout', '/docs', '/openapi.json', '/taip/ingest'):
+        return await call_next(request)
+    session = request.cookies.get('session')
+    payload = verify_session(session)
+    if not payload:
+        return JSONResponse(status_code=401, content={'detail': 'Not authenticated'})
+    if request.url.path == '/config' and request.method in ('POST', 'PUT', 'DELETE') and payload.get('role') != 'admin':
+        return JSONResponse(status_code=403, content={'detail': 'Admin required'})
+    return await call_next(request)
+
+@app.post('/login')
+def login(body: LoginRequest, response: Response, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == body.email).first()
+    if not user or user.hashed_password != hash_password(body.password):
+        raise HTTPException(status_code=401, detail='Invalid credentials')
+    response.set_cookie(key='session', value=make_session(user), httponly=True, samesite='lax', path='/', max_age=86400)
+    return {'email': user.email, 'role': user.role, 'agency_id': user.agency_id}
+
+@app.post('/logout')
+def logout(response: Response):
+    response.delete_cookie(key='session', path='/')
+    return {'ok': True}
+
+@app.get('/me', response_model=UserMe)
+def me(request: Request):
+    user = get_current_user(request)
+    return {'user_id': user['user_id'], 'role': user['role']}
+
+@app.get('/login')
+def login_page():
+    return FileResponse('static/login.html')
 
 @app.get('/')
 def index():
@@ -264,7 +316,7 @@ def list_config(agency_id: Optional[int] = Query(None), category: Optional[str] 
     return q.order_by(CustomerConfig.category, CustomerConfig.key).all()
 
 @app.post('/config', response_model=CustomerConfigOut)
-def create_config(body: CustomerConfigCreate, db: Session = Depends(get_db)):
+def create_config(body: CustomerConfigCreate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     existing = db.query(CustomerConfig).filter_by(agency_id=body.agency_id, category=body.category, key=body.key).first()
     if existing:
         for k, v in body.model_dump(exclude_unset=True).items():
@@ -282,6 +334,43 @@ def create_config(body: CustomerConfigCreate, db: Session = Depends(get_db)):
 @app.get('/health')
 def health():
     return {'status': 'ok'}
+
+def hash_password(password):
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+def make_session(user):
+    exp = int(time.time()) + 86400
+    msg = f'{user.id}:{user.role}:{exp}'
+    sig = hmac.new(SECRET_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
+    return f'{msg}:{sig}'
+
+def verify_session(token):
+    if not token:
+        return None
+    parts = token.split(':')
+    if len(parts) != 4:
+        return None
+    uid, role, exp, sig = parts
+    expected = hmac.new(SECRET_KEY.encode(), f'{uid}:{role}:{exp}'.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return None
+    if time.time() > int(exp):
+        return None
+    return {'user_id': int(uid), 'role': role, 'exp': int(exp)}
+
+def get_current_user(request: Request):
+    if INSECURE_DEV:
+        return {'user_id': 0, 'role': 'admin', 'email': 'dev@example.com', 'agency_id': None}
+    payload = verify_session(request.cookies.get('session'))
+    if not payload:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+    return payload
+
+def require_admin(request: Request):
+    user = get_current_user(request)
+    if user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail='Admin required')
+    return user
 
 # Pydantic schemas
 class AgencyCreate(BaseModel):
@@ -390,19 +479,6 @@ class MessageOut(BaseModel):
     method: Optional[str] = None
     sent_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
-    class Config:
-        from_attributes = True
-
-class CustomerConfigCreate(BaseModel):
-    agency_id: Optional[int] = None
-    category: str
-    key: str
-    value: Optional[dict] = None
-
-class CustomerConfigOut(CustomerConfigCreate):
-    id: int
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
     class Config:
         from_attributes = True
 
