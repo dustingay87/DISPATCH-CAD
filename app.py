@@ -1853,9 +1853,87 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
             db.add(CustomerConfig(agency_id=agency.id, category=category, key='defaults', value=value))
         db.add(CustomerConfig(agency_id=agency.id, category='__seeded__', key='flag', value=True))
     templates = {
-        'police': {'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TC','label':'Traffic Control'},{'code':'CT','label':'Citation'},{'code':'ARR','label':'Arrest'},{'code':'BK','label':'Booking'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}], 'dispositions': ['Arrested','Cited','Warned','Referred','Report','No Action','False Alarm']},
-        'fire': {'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'WATER','label':'Water on Fire'},{'code':'EXT','label':'Extinguished'},{'code':'OVER','label':'Overhaul'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}], 'dispositions': ['Extinguished','Controlled','Under Control','False Alarm','No Fire','Cancelled']},
-        'ems': {'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}], 'dispositions': ['Transport to hospital','Refused','Treated/Released','Deceased','AMA']}
+        'police': {
+            'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TC','label':'Traffic Control'},{'code':'CT','label':'Citation'},{'code':'ARR','label':'Arrest'},{'code':'BK','label':'Booking'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'unit_types': ['patrol','detective','supervisor','k9','swat','traffic','rescue'],
+            'call_types': [
+                {'label':'Traffic Accident', 'priority':2, 'fields':['vehicles','injuries']},
+                {'label':'Theft', 'priority':3, 'fields':['property','suspect']},
+                {'label':'Domestic', 'priority':2, 'fields':['weapons','children']},
+                {'label':'Assault', 'priority':1, 'fields':['weapons','injuries']},
+                {'label':'Welfare Check', 'priority':3, 'fields':['age']},
+                {'label':'Suspicious Person', 'priority':3, 'fields':['armed']}
+            ],
+            'priorities': [
+                {'priority':1,'label':'Emergency','target_seconds':180},
+                {'priority':2,'label':'Urgent','target_seconds':420},
+                {'priority':3,'label':'Routine','target_seconds':720},
+                {'priority':4,'label':'Low','target_seconds':1200}
+            ],
+            'response_plans': {
+                'Traffic Accident': ['patrol','supervisor','rescue'],
+                'Theft': ['patrol','detective'],
+                'Domestic': ['patrol','supervisor'],
+                'Assault': ['patrol','supervisor','k9'],
+                'Welfare Check': ['patrol'],
+                'Suspicious Person': ['patrol','k9']
+            },
+            'dispositions': ['Arrested','Cited','Warned','Referred','Report','No Action','False Alarm']
+        },
+        'fire': {
+            'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'WATER','label':'Water on Fire'},{'code':'EXT','label':'Extinguished'},{'code':'OVER','label':'Overhaul'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'unit_types': ['engine','ladder','rescue','brush','tanker','ambulance','chief'],
+            'call_types': [
+                {'label':'Structure Fire', 'priority':1, 'fields':['exposures','occupants']},
+                {'label':'Vehicle Fire', 'priority':2, 'fields':['hazmat']},
+                {'label':'Medical Assist', 'priority':2, 'fields':['age','conscious']},
+                {'label':'Alarm', 'priority':3, 'fields':['type']},
+                {'label':'Vehicle Accident', 'priority':1, 'fields':['extrication','injuries']},
+                {'label':'Brush Fire', 'priority':2, 'fields':['size']}
+            ],
+            'priorities': [
+                {'priority':1,'label':'Working Fire','target_seconds':180},
+                {'priority':2,'label':'Urgent','target_seconds':420},
+                {'priority':3,'label':'Routine','target_seconds':720},
+                {'priority':4,'label':'Low','target_seconds':1200}
+            ],
+            'response_plans': {
+                'Structure Fire': ['engine','ladder','rescue','chief'],
+                'Vehicle Fire': ['engine','brush','tanker'],
+                'Medical Assist': ['rescue','ambulance'],
+                'Alarm': ['engine','ladder'],
+                'Vehicle Accident': ['engine','rescue','ambulance'],
+                'Brush Fire': ['brush','tanker']
+            },
+            'dispositions': ['Extinguished','Controlled','Under Control','False Alarm','No Fire','Cancelled']
+        },
+        'ems': {
+            'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'unit_types': ['ambulance','medic','supervisor','air','rescue'],
+            'call_types': [
+                {'label':'Cardiac Arrest', 'priority':1, 'fields':['age','conscious']},
+                {'label':'Chest Pain', 'priority':1, 'fields':['age','conscious']},
+                {'label':'Respiratory', 'priority':1, 'fields':['age','conscious']},
+                {'label':'Fall', 'priority':2, 'fields':['age','conscious']},
+                {'label':'Motor Vehicle Accident', 'priority':1, 'fields':['extrication','injuries']},
+                {'label':'Overdose', 'priority':1, 'fields':['age','conscious','substance']}
+            ],
+            'priorities': [
+                {'priority':1,'label':'Priority 1','target_seconds':180},
+                {'priority':2,'label':'Priority 2','target_seconds':420},
+                {'priority':3,'label':'Priority 3','target_seconds':720},
+                {'priority':4,'label':'Priority 4','target_seconds':1200}
+            ],
+            'response_plans': {
+                'Cardiac Arrest': ['medic','supervisor'],
+                'Chest Pain': ['medic','ambulance'],
+                'Respiratory': ['medic','ambulance'],
+                'Fall': ['ambulance','medic'],
+                'Motor Vehicle Accident': ['air','ambulance','medic','supervisor'],
+                'Overdose': ['ambulance','medic']
+            },
+            'dispositions': ['Transport to hospital','Refused','Treated/Released','Deceased','AMA']
+        }
     }
     ensure_config(police, templates['police'])
     ensure_config(fire, templates['fire'])
