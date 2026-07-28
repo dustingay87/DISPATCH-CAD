@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Query, Request
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, or_, UniqueConstraint
@@ -1160,3 +1160,34 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
     db.commit()
     _log_event(db, 'pilot_seeded', 'system', 0, user_id=current_user.get('user_id'), data={'agencies':[police.id, fire.id, ems.id]}, agency_id=None)
     return {'status': 'seeded', 'agencies': [police.id, fire.id, ems.id], 'incident': inc.id}
+
+@app.post('/import/{entity}', response_model=dict)
+def import_csv(entity: str, file: UploadFile = File(...), current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    import csv, io
+    if entity not in ('agencies', 'units', 'personnel', 'incidents'):
+        raise HTTPException(status_code=400, detail='Entity must be agencies, units, personnel, or incidents')
+    content = file.file.read().decode('utf-8')
+    reader = csv.DictReader(io.StringIO(content))
+    count = 0; errors = []
+    for idx, row in enumerate(reader, start=1):
+        try:
+            if entity == 'agencies':
+                db.add(Agency(name=row['name'], agency_type=row.get('agency_type', 'fire'), city=row.get('city'), state=row.get('state'), domain=row.get('domain')))
+            elif entity == 'units':
+                db.add(Unit(agency_id=int(row['agency_id']), name=row.get('name', row['call_sign']), call_sign=row['call_sign'], unit_type=row.get('unit_type', 'patrol'), lat=float(row['lat']) if row.get('lat') else None, lng=float(row['lng']) if row.get('lng') else None, taip_id=row.get('taip_id'), camera_url=row.get('camera_url'), current_status='AQ', in_service_at=datetime.utcnow(), accumulated_call_seconds=0))
+            elif entity == 'personnel':
+                db.add(Personnel(agency_id=int(row['agency_id']), first_name=row['first_name'], last_name=row['last_name'], email=row.get('email'), phone=row.get('phone'), sms_phone=row.get('sms_phone'), current_unit_id=int(row['current_unit_id']) if row.get('current_unit_id') else None, duty_status=row.get('duty_status', 'off_duty')))
+            elif entity == 'incidents':
+                db.add(Incident(agency_id=int(row['agency_id']), call_number=row.get('call_number'), incident_number=row.get('incident_number'), call_type=row.get('call_type', 'Unknown'), priority=int(row['priority']) if row.get('priority') else 2, location_text=row.get('location_text'), lat=float(row['lat']) if row.get('lat') else None, lng=float(row['lng']) if row.get('lng') else None, status=row.get('status', 'open'), caller_name=row.get('caller_name'), callback=row.get('callback'), narrative=row.get('narrative')))
+            count += 1
+            if count % 100 == 0:
+                db.commit()
+        except Exception as e:
+            errors.append(f'row {idx}: {e}')
+    db.commit()
+    _log_event(db, 'csv_imported', 'system', 0, user_id=current_user.get('user_id'), data={'entity': entity, 'imported': count, 'errors': len(errors)}, agency_id=None)
+    return {'imported': count, 'errors': errors[:10]}
+
+@app.get('/import')
+def import_page():
+    return FileResponse('static/import.html')
