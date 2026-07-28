@@ -1300,3 +1300,7 @@ def create_user(body: UserCreate, current_user: dict = Depends(require_admin), d
 @app.get('/users-page')
 def users_page():
     return FileResponse('static/users.html')
+
+@app.get('/events-page')
+def events_page():
+    return FileResponse('static/events.html')

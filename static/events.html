@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>VolCAD Audit Log</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .card { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1rem; }
+  .btn { padding:0.5rem 1rem; border-radius:0.375rem; font-size:0.875rem; }
+  .btn-primary { background:#2563eb; color:#fff; }
+  .btn-primary:hover { background:#1d4ed8; }
+  input, select { background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:0.35rem 0.5rem; border-radius:0.25rem; }
+  table { width:100%; border-collapse:collapse; font-size:0.8rem; }
+  th, td { padding:0.5rem; border-bottom:1px solid #334155; text-align:left; }
+  th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
+  .hidden { display:none; }
+  pre { background:#0f172a; padding:0.5rem; border-radius:0.25rem; overflow:auto; font-size:0.75rem; }
+</style>
+</head>
+<body class='p-4'>
+  <div class='max-w-6xl mx-auto space-y-4'>
+    <div class='flex justify-between items-center'>
+      <h1 class='text-2xl font-bold'>VolCAD <span class='text-slate-400 font-normal'>Audit Log</span></h1>
+      <div class='space-x-2'>
+        <a href='/admin' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Admin</a>
+        <a href='/console' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Console</a>
+      </div>
+    </div>
+
+    <div id='msg' class='hidden px-4 py-2 rounded text-sm'></div>
+
+    <div class='card flex flex-wrap gap-2 items-end'>
+      <div>
+        <label class='text-xs text-slate-400 block'>Entity</label>
+        <select id='entityType'>
+          <option value=''>All</option>
+          <option value='incident'>incident</option>
+          <option value='unit'>unit</option>
+          <option value='user'>user</option>
+          <option value='system'>system</option>
+        </select>
+      </div>
+      <div>
+        <label class='text-xs text-slate-400 block'>Agency</label>
+        <select id='agencyFilter'><option value=''>All</option></select>
+      </div>
+      <div>
+        <label class='text-xs text-slate-400 block'>Limit</label>
+        <select id='limit'>
+          <option value='100'>100</option>
+          <option value='500'>500</option>
+          <option value='1000'>1000</option>
+        </select>
+      </div>
+      <button id='loadBtn' class='btn btn-primary'>Load</button>
+    </div>
+
+    <div class='card'>
+      <div id='events' class='overflow-x-auto'><div class='text-slate-500'>Click Load</div></div>
+    </div>
+  </div>
+
+<script>
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+
+let state = { agencies:[] };
+
+function showMsg(text, ok=true){
+  const el = document.getElementById('msg'); el.classList.remove('hidden');
+  el.className = ok ? 'px-4 py-2 rounded text-sm bg-green-900 text-green-100' : 'px-4 py-2 rounded text-sm bg-red-900 text-red-100';
+  el.textContent = text; setTimeout(()=>el.classList.add('hidden'), 4000);
+}
+
+async function loadAgencies(){
+  state.agencies = await api('/agencies');
+  document.getElementById('agencyFilter').innerHTML = '<option value="">All</option>' + state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
+}
+
+async function loadEvents(){
+  try {
+    const params = new URLSearchParams();
+    const et = document.getElementById('entityType').value; if(et) params.set('entity_type', et);
+    const aid = document.getElementById('agencyFilter').value; if(aid) params.set('agency_id', aid);
+    params.set('limit', document.getElementById('limit').value);
+    const evts = await api('/events?'+params.toString());
+    const rows = evts.map(e=>{
+      const ts = e.timestamp ? new Date(e.timestamp).toLocaleString() : '-';
+      const data = e.data ? `<pre>${JSON.stringify(e.data,null,2).slice(0,300)}</pre>` : '';
+      const a = state.agencies.find(x=>x.id===e.agency_id);
+      return `<tr><td>${ts}</td><td>${e.event_type}</td><td>${e.entity_type}</td><td>${e.entity_id}</td><td>${a?a.name:'-'}</td><td>${e.user_id||'-'}</td><td class='text-slate-300'>${data}</td></tr>`;
+    }).join('');
+    document.getElementById('events').innerHTML = rows ? `<table><thead><tr><th>Timestamp</th><th>Event</th><th>Entity Type</th><th>Entity ID</th><th>Agency</th><th>User</th><th>Data</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="text-slate-500">No events</div>';
+  } catch(err){ showMsg(err.message, false); }
+}
+
+document.getElementById('loadBtn').addEventListener('click', loadEvents);
+loadAgencies();
+</script>
+</body>
+</html>
