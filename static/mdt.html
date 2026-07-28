@@ -46,6 +46,10 @@
       <div class='card bg-slate-800 rounded-lg p-4 flex-1 flex flex-col min-h-0'>
         <div class='text-lg font-semibold border-b border-slate-600 pb-2 mb-2'>Messages</div>
         <div id='messages' class='flex-1 overflow-y-auto log space-y-1 text-slate-300'></div>
+        <div class='flex p-2 gap-2 border-t border-slate-600 mt-2'>
+          <input id='msgReply' type='text' class='flex-1 bg-slate-900 border border-slate-600 rounded px-2 text-sm' placeholder='Reply to dispatch...'>
+          <button class='bg-blue-700 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm' onclick='sendMessage()'>Send</button>
+        </div>
       </div>
       <div class='card bg-slate-800 rounded-lg p-4'>
         <div class='text-lg font-semibold border-b border-slate-600 pb-2 mb-2'>Crew</div>
@@ -68,7 +72,7 @@ function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}
 const url = new URL(window.location.href);
 let unitId = parseInt(url.searchParams.get('unit_id'));
 if(!unitId){ url.searchParams.set('unit_id','1'); unitId=1; history.replaceState(null,'',url); }
-let state = { unit:null, incident:null, messages:[], crew:[], agencyMap:{} };
+let state = { unit:null, incident:null, messages:[], crew:[], agencyMap:{}, config:{statuses:[], dispositions:[], callTypes:[]} };
 
 function showLoading(msg){ const el=document.getElementById('loading'); el.textContent=msg; el.classList.remove('hidden'); }
 function hideLoading(){ document.getElementById('loading').classList.add('hidden'); }
@@ -78,6 +82,13 @@ async function load(){
     const [agencies, unit, personnel] = await Promise.all([api('/agencies'), api(`/units/${unitId}`), api(`/personnel?unit_id=${unitId}`)]);
     state.agencyMap={}; agencies.forEach(a=>state.agencyMap[a.id]=a);
     state.unit=unit; state.crew=personnel;
+    if(unit.agency_id){
+      const cfg = await api(`/config?agency_id=${unit.agency_id}`);
+      state.config.statuses = cfg.find(c=>c.category==='statuses')?.value || [];
+      state.config.callTypes = cfg.find(c=>c.category==='call_types')?.value || [];
+      const disp = cfg.find(c=>c.category==='dispositions')?.value;
+      state.config.dispositions = disp ? (Array.isArray(disp) ? disp : [disp]) : (unit.agency_type==='ems' ? ['Transport to hospital','Refused','Treated/Released','Deceased','AMA'] : ['Cleared','Cancelled','False alarm']);
+    }
     if(unit.current_incident_id){ state.incident = await api(`/incidents/${unit.current_incident_id}`); state.messages = await api(`/units/${unitId}/messages`); }
     else { state.incident=null; state.messages = await api(`/units/${unitId}/messages`); }
     render();
@@ -93,8 +104,7 @@ function render(){
   const onCall = ['OS','ER','TR','AK','dispatched'].includes(u.current_status) && u.last_assigned_at;
   document.getElementById('callTimer').textContent = onCall ? fmtDur(elapsed(u.last_assigned_at)) : '--';
 
-  const type=a.agency_type;
-  document.getElementById('statusButtons').innerHTML = cfg.statuses.map(s=>{
+  document.getElementById('statusButtons').innerHTML = state.config.statuses.map(s=>{
     let color='bg-slate-700 hover:bg-slate-600';
     if(s.code==='OS') color='bg-red-700 hover:bg-red-600';
     else if(s.code==='ER'||s.code==='TR'||s.code==='DEL') color='bg-yellow-700 hover:bg-yellow-600';
@@ -145,13 +155,18 @@ window.setStatus = async function(code){
   const u=state.unit; if(!u.current_incident_id){ alert('No active call'); return; }
   let extra={status_code:code};
   if(code==='TR' || code==='CAN'){ const pc=prompt('Passenger/Patient count?'); if(pc) extra.passenger_count=parseInt(pc); }
-  const a=state.agencyMap[u.agency_id]; const cfg=CONFIG[a.agency_type];
-  if(a.agency_type==='ems' && (code==='CAN' || code==='TR' || code==='NPF')){ const d=prompt('Disposition?\n'+(cfg.dispositions||[]).join('\n')); if(d) extra.disposition=d; }
+  const a=state.agencyMap[u.agency_id]; const cfg=state.config;
+  if(code==='CAN' || code==='TR' || code==='NPF'){ const d=prompt('Disposition?\n'+(cfg.dispositions||[]).join('\n')); if(d) extra.disposition=d; }
   try { await api(`/incidents/${u.current_incident_id}/units/${u.id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); await load(); } catch(e){ alert(e.message); }
 };
 
 window.toggleShift = async function(){
   try { const action = state.unit.in_service_at ? 'end' : 'start'; await api(`/units/${unitId}/shift`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})}); await load(); } catch(e){ alert(e.message); }
+};
+
+window.sendMessage = async function(){
+  const inp = document.getElementById('msgReply'); const text = inp.value.trim(); if(!text) return;
+  try { await api('/messages', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({unit_id:unitId, channel:'mdt', message_text:text})}); inp.value=''; await load(); } catch(e){ alert(e.message); }
 };
 
 function updateClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
