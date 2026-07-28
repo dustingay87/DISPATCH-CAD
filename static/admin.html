@@ -62,6 +62,14 @@
           <p class='text-xs text-slate-400'>Loads default statuses, unit types, call types, priorities, and response plans.</p>
         </div>
       </div>
+
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Seed Pilot Data</h2>
+        <div class='space-y-2'>
+          <button id='seedPilotBtn' class='btn btn-primary text-white w-full'>Seed Full Pilot Dataset</button>
+          <p class='text-xs text-slate-400'>Creates police, fire, and EMS agencies with units, personnel, and a sample incident.</p>
+        </div>
+      </div>
     </div>
 
     <div class='card'>
@@ -123,6 +131,10 @@ document.getElementById('seedBtn').addEventListener('click', async ()=>{
   const template = document.getElementById('seedTemplate').value;
   if(!agency_id){ showMsg('Select agency', false); return; }
   try { await api('/config/seed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:parseInt(agency_id),template})}); showMsg('Template applied'); loadConfig(); } catch(err){ showMsg(err.message, false); }
+});
+
+document.getElementById('seedPilotBtn').addEventListener('click', async ()=>{
+  try { await api('/seed-pilot',{method:'POST'}); showMsg('Pilot data seeded'); loadAgencies(); loadConfig(); } catch(err){ showMsg(err.message, false); }
 });
 
 document.getElementById('loadConfig').addEventListener('click', loadConfig);

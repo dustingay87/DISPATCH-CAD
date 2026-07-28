@@ -1097,3 +1097,46 @@ def alert_incident_crew(incident_id: int, body: AlertCrew, db: Session = Depends
         sent.extend(_record_alert(db, incident_id, iu.unit_id, msg, crew))
     db.commit()
     return {'recipients': sent, 'message': msg}
+
+@app.post('/seed-pilot', response_model=dict)
+def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    CENTER = (39.9612, -82.9988)
+    def ensure_agency(name, atype, domain, lat, lng):
+        a = db.query(Agency).filter(Agency.domain == domain).first()
+        if a: return a
+        a = Agency(name=name, agency_type=atype, domain=domain, city='Columbus', state='OH', lat=lat, lng=lng)
+        db.add(a); db.flush(); return a
+    police = ensure_agency('City Police', 'police', 'pilot.police', CENTER[0]-0.01, CENTER[1]+0.01)
+    fire = ensure_agency('Metro Fire', 'fire', 'pilot.fire', CENTER[0]+0.01, CENTER[1]-0.01)
+    ems = ensure_agency('County EMS', 'ems', 'pilot.ems', CENTER[0]+0.005, CENTER[1]-0.015)
+    db.commit()
+    def ensure_unit(call_sign, agency_id, unit_type, lat, lng, taip_id):
+        u = db.query(Unit).filter(Unit.call_sign == call_sign).first()
+        if u: return u
+        u = Unit(name=call_sign, call_sign=call_sign, agency_id=agency_id, unit_type=unit_type, lat=lat, lng=lng, taip_id=taip_id, in_service_at=datetime.utcnow(), current_status='AQ', current_incident_id=None, accumulated_call_seconds=0)
+        db.add(u); db.flush(); return u
+    u1 = ensure_unit('A12', police.id, 'patrol', CENTER[0]-0.008, CENTER[1]+0.012, 'TAIP-A12')
+    u2 = ensure_unit('E1', fire.id, 'engine', CENTER[0]+0.012, CENTER[1]-0.012, 'TAIP-E1')
+    u3 = ensure_unit('M1', ems.id, 'ambulance', CENTER[0]+0.007, CENTER[1]-0.017, 'TAIP-M1')
+    db.commit()
+    if db.query(Personnel).filter(Personnel.email == 'john@pilot.example').count() == 0:
+        db.add(Personnel(agency_id=police.id, first_name='John', last_name='Doe', email='john@pilot.example', current_unit_id=u1.id))
+    if db.query(Personnel).filter(Personnel.email == 'jane@pilot.example').count() == 0:
+        db.add(Personnel(agency_id=fire.id, first_name='Jane', last_name='Smith', email='jane@pilot.example', current_unit_id=u2.id))
+    db.commit()
+    inc = db.query(Incident).filter(Incident.call_number == 'PILOT-0001').first()
+    if not inc:
+        inc = Incident(agency_id=fire.id, call_number='PILOT-0001', incident_number='PILOT-0001', call_type='Structure Fire', priority=1, location_text='123 Main St', lat=CENTER[0]+0.012, lng=CENTER[1]-0.012, status='open', narrative='Pilot structure fire demo')
+        db.add(inc); db.flush()
+    if not db.query(IncidentUnit).filter_by(incident_id=inc.id, unit_id=u2.id).first():
+        db.add(IncidentUnit(incident_id=inc.id, unit_id=u2.id))
+        u2.current_incident_id = inc.id; u2.current_status = 'AK'; u2.last_assigned_at = datetime.utcnow()
+        db.add(StatusEvent(unit_id=u2.id, incident_id=inc.id, status_code='AK', reason='Dispatched to incident'))
+        inc.status = 'dispatched'
+    if not db.query(IncidentUnit).filter_by(incident_id=inc.id, unit_id=u3.id).first():
+        db.add(IncidentUnit(incident_id=inc.id, unit_id=u3.id))
+        u3.current_incident_id = inc.id; u3.current_status = 'AK'; u3.last_assigned_at = datetime.utcnow()
+        db.add(StatusEvent(unit_id=u3.id, incident_id=inc.id, status_code='AK', reason='Dispatched to incident'))
+    db.commit()
+    _log_event(db, 'pilot_seeded', 'system', 0, user_id=current_user.get('user_id'), data={'agencies':[police.id, fire.id, ems.id]}, agency_id=None)
+    return {'status': 'seeded', 'agencies': [police.id, fire.id, ems.id], 'incident': inc.id}
