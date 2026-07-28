@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Reports</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  body { background:#0f172a; color:#e2e8f0; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  .panel { background:#1e293b; border:1px solid #334155; border-radius:.5rem; }
+  .stat { font-size:1.5rem; font-weight:700; color:#fff; }
+  .label { font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; }
+</style>
+</head>
+<body class='p-4'>
+<div class='max-w-6xl mx-auto'>
+  <div class='flex justify-between items-center mb-4'>
+    <h1 class='text-2xl font-bold'>CAD Reports</h1>
+    <a href='/' class='text-sm text-blue-400 hover:underline'>Dashboard</a>
+  </div>
+  <div class='flex gap-2 mb-4'>
+    <select id='days' class='bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm'>
+      <option value='1'>Last 24 hours</option>
+      <option value='7' selected>Last 7 days</option>
+      <option value='30'>Last 30 days</option>
+      <option value='90'>Last 90 days</option>
+    </select>
+    <button class='bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm' onclick='load()'>Refresh</button>
+  </div>
+
+  <div class='grid grid-cols-2 md:grid-cols-4 gap-4 mb-4'>
+    <div class='panel p-4'><div class='label'>Total Incidents</div><div class='stat' id='totalIncidents'>-</div></div>
+    <div class='panel p-4'><div class='label'>Open</div><div class='stat' id='openIncidents'>-</div></div>
+    <div class='panel p-4'><div class='label'>Completed Transports</div><div class='stat' id='completedTransports'>-</div></div>
+    <div class='panel p-4'><div class='label'>Total Trip Miles</div><div class='stat' id='totalTripMiles'>-</div></div>
+  </div>
+
+  <div class='grid grid-cols-1 md:grid-cols-2 gap-4'>
+    <div class='panel p-4'>
+      <h2 class='font-bold mb-2'>By Call Type</h2>
+      <div id='byCallType' class='text-sm space-y-1'>Loading...</div>
+    </div>
+    <div class='panel p-4'>
+      <h2 class='font-bold mb-2'>By Status</h2>
+      <div id='byStatus' class='text-sm space-y-1'>Loading...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+async function load(){
+  const days = document.getElementById('days').value;
+  const data = await api(`/reports/summary?days=${days}`);
+  document.getElementById('totalIncidents').textContent = data.incident_count ?? '-';
+  document.getElementById('openIncidents').textContent = data.open_incidents ?? '-';
+  document.getElementById('completedTransports').textContent = data.completed_transports ?? '-';
+  document.getElementById('totalTripMiles').textContent = data.total_trip_miles != null ? data.total_trip_miles + ' mi' : '-';
+  document.getElementById('byCallType').innerHTML = renderMap(data.by_call_type || {});
+  document.getElementById('byStatus').innerHTML = renderMap(data.by_status || {});
+}
+function renderMap(obj){
+  const keys = Object.keys(obj);
+  if(!keys.length) return '<div class="text-slate-500">No data</div>';
+  return keys.map(k=>`<div class='flex justify-between'><span>${k}</span><span class='font-bold'>${obj[k]}</span></div>`).join('');
+}
+load();
+</script>
+</body>
+</html>

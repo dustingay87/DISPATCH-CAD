@@ -2151,3 +2151,42 @@ def transport_legs_summary(current_user: dict = Depends(get_current_user), db: S
             'cleared_at': leg.cleared_at.isoformat() if leg.cleared_at else None
         })
     return rows
+
+@app.get('/reports/summary')
+def reports_summary(days: int = 7, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    since = datetime.utcnow() - timedelta(days=max(1, min(days, 90)))
+    incidents = db.query(Incident).filter(Incident.created_at >= since).all()
+    closed = [i for i in incidents if i.status == 'closed']
+    open_count = len([i for i in incidents if i.status != 'closed'])
+    legs = db.query(TransportLeg).filter(TransportLeg.created_at >= since).all()
+    completed_legs = [l for l in legs if l.status == 'cleared']
+    total_miles = 0.0
+    total_turnaround = 0
+    for leg in completed_legs:
+        if leg.pickup_mileage is not None and leg.dropoff_mileage is not None:
+            total_miles += max(0, leg.dropoff_mileage - leg.pickup_mileage)
+        if leg.arrived_at and leg.cleared_at:
+            total_turnaround += int((leg.cleared_at - leg.arrived_at).total_seconds())
+    by_call_type = {}
+    for i in incidents:
+        ct = i.call_type or 'Unknown'
+        by_call_type[ct] = by_call_type.get(ct, 0) + 1
+    by_status = {}
+    for i in incidents:
+        by_status[i.status] = by_status.get(i.status, 0) + 1
+    avg_turnaround = round(total_turnaround / len(completed_legs)) if completed_legs else None
+    return {
+        'period_days': days,
+        'incident_count': len(incidents),
+        'open_incidents': open_count,
+        'closed_incidents': len(closed),
+        'completed_transports': len(completed_legs),
+        'total_trip_miles': round(total_miles, 1),
+        'avg_turnaround_seconds': avg_turnaround,
+        'by_call_type': by_call_type,
+        'by_status': by_status
+    }
+
+@app.get('/reports-page')
+def reports_page():
+    return FileResponse('static/reports.html')
