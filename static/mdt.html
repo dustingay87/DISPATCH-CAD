@@ -189,7 +189,7 @@ window.setStatus = async function(code){
   const cfg=state.config;
   if(code==='CAN' || code==='TR' || code==='NPF'){ const d=prompt('Disposition?\n'+(cfg.dispositions||[]).join('\n')); if(d) extra.disposition=d; }
   const path = u.current_incident_id ? `/incidents/${u.current_incident_id}/units/${u.id}/status` : `/units/${u.id}/status`;
-  try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); if((code==='TR' || code==='ED') && u.current_incident_id){ await promptDestination(u.current_incident_id); } await load(); } catch(e){ alert(e.message); }
+  try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); if((code==='OS' || code==='TR' || code==='ED') && u.current_incident_id){ const m = prompt('Mileage (odometer)?'); if(m && !isNaN(parseFloat(m))) await api(`/incidents/${u.current_incident_id}/units/${u.id}/mileage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status_code:code,mileage:parseFloat(m)})}); } if((code==='TR' || code==='ED') && u.current_incident_id){ await promptDestination(u.current_incident_id); } await load(); } catch(e){ alert(e.message); }
 };
 
 window.toggleShift = async function(){

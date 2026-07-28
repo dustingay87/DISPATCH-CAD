@@ -166,6 +166,17 @@ class StatusEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     unit = relationship('Unit')
 
+class MileageReading(Base):
+    __tablename__ = 'mileage_readings'
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey('incidents.id'), nullable=False)
+    unit_id = Column(Integer, ForeignKey('units.id'), nullable=False)
+    status_code = Column(String(50), nullable=False)
+    mileage = Column(Float, nullable=False)
+    recorded_at = Column(DateTime, default=datetime.utcnow)
+    unit = relationship('Unit')
+    incident = relationship('Incident')
+
 class TaipPosition(Base):
     __tablename__ = 'taip_positions'
     id = Column(Integer, primary_key=True, index=True)
@@ -316,6 +327,20 @@ class IncidentDestinationOut(BaseModel):
     notes: Optional[dict] = None
     created_at: Optional[datetime] = None
     destination: DestinationOut
+    class Config:
+        from_attributes = True
+
+class MileageReadingCreate(BaseModel):
+    status_code: str
+    mileage: float
+
+class MileageReadingOut(BaseModel):
+    id: int
+    incident_id: int
+    unit_id: int
+    status_code: str
+    mileage: float
+    recorded_at: Optional[datetime] = None
     class Config:
         from_attributes = True
 
@@ -950,6 +975,17 @@ def set_incident_destination(incident_id: int, body: IncidentDestinationCreate, 
     db.add(idest); db.commit(); db.refresh(idest)
     _log_event(db, 'destination_set', 'incident', incident_id, data={'destination_id': dest_id, 'notes': body.notes}, agency_id=inc.agency_id)
     return idest
+
+@app.get('/incidents/{incident_id}/mileage', response_model=List[MileageReadingOut])
+def list_mileage(incident_id: int, db: Session = Depends(get_db)):
+    return db.query(MileageReading).filter(MileageReading.incident_id == incident_id).order_by(MileageReading.recorded_at.asc()).all()
+
+@app.post('/incidents/{incident_id}/units/{unit_id}/mileage', response_model=MileageReadingOut)
+def record_mileage(incident_id: int, unit_id: int, body: MileageReadingCreate, db: Session = Depends(get_db)):
+    r = MileageReading(incident_id=incident_id, unit_id=unit_id, status_code=body.status_code, mileage=body.mileage)
+    db.add(r); db.commit(); db.refresh(r)
+    _log_event(db, 'mileage_recorded', 'unit', unit_id, data={'incident_id': incident_id, 'status_code': body.status_code, 'mileage': body.mileage}, agency_id=None)
+    return r
 
 @app.post('/personnel', response_model=PersonnelOut)
 def create_personnel(body: PersonnelCreate, db: Session = Depends(get_db)):

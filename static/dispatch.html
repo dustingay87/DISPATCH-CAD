@@ -184,9 +184,14 @@ async function selectIncident(id){
         <div class='text-xs font-semibold text-slate-400 mb-1'>Destination</div>
         <div class='text-xs text-slate-500'>Loading...</div>
       </div>
+      <div class='border-t border-slate-700 pt-2' id='mileagePanel'>
+        <div class='text-xs font-semibold text-slate-400 mb-1'>Mileage</div>
+        <div class='text-xs text-slate-500'>Loading...</div>
+      </div>
     </div>`;
   await loadRecommendations(i.id);
   await loadDestination(i.id);
+  await loadMileage(i.id);
   renderMap();
 }
 
@@ -219,6 +224,16 @@ async function relayDestination(id){
   const d = dest.destination || {}; const n = dest.notes || {};
   const text = 'DEST ' + (d.name||'') + ' ' + (d.address||'') + ' ' + Object.entries(n).map(([k,v])=>`${k}:${v}`).join(' ');
   try { await api('/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({incident_id:id, channel:'mdt', message_text:text})}); log('Destination relayed to crew'); } catch(e){ log('Relay error: '+e.message); }
+}
+
+async function loadMileage(id){
+  const el = document.getElementById('mileagePanel'); if(!el) return;
+  try {
+    const readings = await api(`/incidents/${id}/mileage`);
+    const unitMap = {}; state.units.forEach(u=>unitMap[u.id]=u.call_sign);
+    const rows = readings.map(r=>`<div class='text-xs text-slate-300'><b>${unitMap[r.unit_id]||'Unit '+r.unit_id}</b> ${r.status_code}: ${r.mileage} mi @ ${fmtTime(r.recorded_at)}</div>`).join('');
+    el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Mileage</div>${rows || '<div class="text-slate-500">No readings</div>'}`;
+  } catch(e){ el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Mileage</div><div class='text-xs text-slate-500'>No readings</div>`; }
 }
 
 async function dispatchSelected(){
