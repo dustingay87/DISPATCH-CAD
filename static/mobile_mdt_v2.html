@@ -121,6 +121,7 @@ async function init(){
     state.me = me; state.agencies = agencies; state.agencyMap = {}; agencies.forEach(a=>state.agencyMap[a.id]=a);
     state.crossAgencies = me.cross_discipline_agencies || [];
     try { state.personnel = await api('/personnel/me'); } catch(e){ state.personnel = null; }
+    try { state.allUnits = await api('/units'); } catch(e){ state.allUnits = []; }
     if(!unitId){
       const role = roleFromAgencyType(state.agencyMap[me.agency_id]?.agency_type);
       if((role==='law'||role==='fire') && state.personnel?.current_unit_id){

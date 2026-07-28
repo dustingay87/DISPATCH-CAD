@@ -962,7 +962,7 @@ def calls_screen():
 
 @app.get('/mdt')
 def mdt():
-    return FileResponse('static/mdt.html')
+    return FileResponse('static/mobile_mdt_v2.html')
 
 @app.get('/mobile-mdt')
 def mobile_mdt():

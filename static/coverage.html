@@ -144,11 +144,14 @@ function renderZonesMap(){
 }
 
 async function init(){
-  [state.agencies, state.zones, state.units, state.postings] = await Promise.all([api('/agencies'), api('/post-zones'), api('/units'), api('/unit-postings')]);
+  try { state.agencies = await api('/agencies'); } catch(e){ console.error(e); }
+  try { state.zones = await api('/post-zones'); } catch(e){ console.error(e); }
+  try { state.units = await api('/units'); } catch(e){ console.error(e); }
+  try { state.postings = await api('/unit-postings'); } catch(e){ console.error(e); }
   const agencySel = document.getElementById('zoneAgency');
-  agencySel.innerHTML = state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
+  if(agencySel) agencySel.innerHTML = state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
   const postUnit = document.getElementById('postUnit');
-  postUnit.innerHTML = `<option value=''>Unit</option>` + state.units.filter(u=>u.current_status==='AQ'||u.current_status==='AFR'||u.current_status==='Available').map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
+  if(postUnit) postUnit.innerHTML = `<option value=''>Unit</option>` + state.units.filter(u=>u.current_status==='AQ'||u.current_status==='AFR'||u.current_status==='Available').map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
   initMap();
   renderZones(); renderPostings(); renderZonesMap();
 }
