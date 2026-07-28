@@ -1430,7 +1430,9 @@ def refresh_incident_status(db: Session, incident):
     """Set incident status based on the most advanced status of its currently assigned units."""
     units = db.query(Unit).filter(Unit.current_incident_id == incident.id).all()
     if not units:
-        new_status = 'open'
+        # If the incident has ever had a unit assigned and they are now all clear, mark cleared; otherwise open.
+        was_dispatched = db.query(IncidentUnit).filter_by(incident_id=incident.id).first() is not None
+        new_status = 'cleared' if (was_dispatched and incident.status not in ('closed',)) else 'open'
     else:
         statuses = [u.current_status for u in units]
         if any(s in ('OS','WATER','EXT','OVER') for s in statuses):
