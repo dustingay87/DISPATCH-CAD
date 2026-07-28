@@ -805,6 +805,14 @@ def login_page():
 
 @app.get('/')
 def index():
+    return FileResponse('static/dashboard_v6.html')
+
+@app.get('/dashboard_v6')
+def dashboard_v6():
+    return FileResponse('static/dashboard_v6.html')
+
+@app.get('/dashboard_v5')
+def dashboard_v5():
     return FileResponse('static/dashboard_v5.html')
 
 @app.get('/console')
