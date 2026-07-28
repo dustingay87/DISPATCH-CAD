@@ -414,6 +414,13 @@ class UserOut(BaseModel):
     class Config:
         from_attributes = True
 
+class UserUpdate(BaseModel):
+    email: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[str] = None
+    agency_id: Optional[int] = None
+    is_active: Optional[bool] = None
+
 class DestinationCreate(BaseModel):
     agency_id: Optional[int] = None
     name: str
@@ -1076,6 +1083,18 @@ class AgencyOut(AgencyCreate):
     class Config:
         from_attributes = True
 
+class AgencyUpdate(BaseModel):
+    name: Optional[str] = None
+    agency_type: Optional[str] = None
+    domain: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    approved: Optional[bool] = None
+
 class UnitCreate(BaseModel):
     agency_id: int
     name: str
@@ -1107,6 +1126,18 @@ class UnitOut(BaseModel):
     taip_id: Optional[str] = None
     class Config:
         from_attributes = True
+
+class UnitUpdate(BaseModel):
+    agency_id: Optional[int] = None
+    name: Optional[str] = None
+    call_sign: Optional[str] = None
+    unit_type: Optional[str] = None
+    radio_id: Optional[str] = None
+    taip_id: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    capabilities: Optional[dict] = None
+    is_active: Optional[bool] = None
 
 class PersonnelCreate(BaseModel):
     agency_id: int
@@ -1318,6 +1349,24 @@ def create_agency(body: AgencyCreate, db: Session = Depends(get_db)):
 def list_agencies(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     return db.query(Agency).offset(skip).limit(limit).all()
 
+@app.put('/agencies/{agency_id}', response_model=AgencyOut)
+def update_agency(agency_id: int, body: AgencyUpdate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    a = db.query(Agency).get(agency_id)
+    if not a:
+        raise HTTPException(status_code=404, detail='Agency not found')
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(a, k, v)
+    db.commit(); db.refresh(a)
+    return a
+
+@app.delete('/agencies/{agency_id}')
+def delete_agency(agency_id: int, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    a = db.query(Agency).get(agency_id)
+    if not a:
+        raise HTTPException(status_code=404, detail='Agency not found')
+    db.delete(a); db.commit()
+    return {'deleted': agency_id}
+
 @app.post('/units', response_model=UnitOut)
 def create_unit(body: UnitCreate, db: Session = Depends(get_db)):
     unit = Unit(**body.model_dump())
@@ -1339,6 +1388,24 @@ def get_unit(unit_id: int, db: Session = Depends(get_db)):
     if not unit:
         raise HTTPException(status_code=404, detail='Unit not found')
     return unit
+
+@app.put('/units/{unit_id}', response_model=UnitOut)
+def update_unit(unit_id: int, body: UnitUpdate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(unit, k, v)
+    db.commit(); db.refresh(unit)
+    return unit
+
+@app.delete('/units/{unit_id}')
+def delete_unit(unit_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    db.delete(unit); db.commit()
+    return {'deleted': unit_id}
 
 @app.get('/units/{unit_id}/messages', response_model=List[MessageOut])
 def get_unit_messages(unit_id: int, db: Session = Depends(get_db)):
@@ -1401,6 +1468,14 @@ def update_destination(destination_id: int, body: DestinationUpdate, db: Session
         setattr(d, k, v)
     db.commit(); db.refresh(d)
     return d
+
+@app.delete('/destinations/{destination_id}')
+def delete_destination(destination_id: int, db: Session = Depends(get_db)):
+    d = db.query(Destination).get(destination_id)
+    if not d:
+        raise HTTPException(status_code=404, detail='Destination not found')
+    db.delete(d); db.commit()
+    return {'deleted': destination_id}
 
 @app.get('/destinations/{destination_id}/status', response_model=List[DestinationStatusOut])
 def get_destination_status(destination_id: int, limit: int = 1, db: Session = Depends(get_db)):
@@ -1550,6 +1625,17 @@ def update_personnel(personnel_id: int, body: PersonnelUpdate, current_user: dic
         setattr(p, k, v)
     db.commit(); db.refresh(p)
     return p
+
+@app.delete('/personnel/{personnel_id}')
+def delete_personnel(personnel_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    p = db.query(Personnel).get(personnel_id)
+    if not p:
+        raise HTTPException(status_code=404, detail='Personnel not found')
+    u = db.query(User).get(current_user['user_id'])
+    if not (u and u.role in ('admin','super_admin')):
+        raise HTTPException(status_code=403, detail='Not authorized')
+    db.delete(p); db.commit()
+    return {'deleted': personnel_id}
 
 @app.post('/incidents', response_model=IncidentOut)
 def create_incident(request: Request, body: IncidentCreate, db: Session = Depends(get_db)):
@@ -2144,6 +2230,27 @@ def create_user(body: UserCreate, current_user: dict = Depends(require_admin), d
     db.add(u); db.commit(); db.refresh(u)
     _log_event(db, 'user_created', 'system', 0, user_id=current_user.get('user_id'), data={'new_user': u.id, 'role': u.role}, agency_id=body.agency_id)
     return u
+
+@app.put('/users/{user_id}', response_model=UserOut)
+def update_user(user_id: int, body: UserUpdate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    u = db.query(User).get(user_id)
+    if not u:
+        raise HTTPException(status_code=404, detail='User not found')
+    data = body.model_dump(exclude_unset=True)
+    if 'password' in data:
+        u.hashed_password = hash_password(data.pop('password'))
+    for k, v in data.items():
+        setattr(u, k, v)
+    db.commit(); db.refresh(u)
+    return u
+
+@app.delete('/users/{user_id}')
+def delete_user(user_id: int, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    u = db.query(User).get(user_id)
+    if not u:
+        raise HTTPException(status_code=404, detail='User not found')
+    db.delete(u); db.commit()
+    return {'deleted': user_id}
 
 @app.get('/users-page')
 def users_page():

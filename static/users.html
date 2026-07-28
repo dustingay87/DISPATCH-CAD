@@ -32,10 +32,11 @@
 
     <div class='grid grid-cols-1 md:grid-cols-3 gap-4'>
       <div class='card md:col-span-1'>
-        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Create User</h2>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2' id='userFormTitle'>Create User</h2>
         <form id='userForm' class='space-y-2'>
+          <input type='hidden' id='editUserId'>
           <input id='uEmail' type='email' placeholder='Email' required>
-          <input id='uPassword' type='password' placeholder='Password' required>
+          <input id='uPassword' type='password' placeholder='Password (leave blank to keep current)'>
           <select id='uRole'>
             <option value='admin'>Admin</option>
             <option value='supervisor'>Supervisor</option>
@@ -44,7 +45,11 @@
             <option value='unit'>Unit</option>
           </select>
           <select id='uAgency' class='w-full'><option value=''>No agency</option></select>
-          <button class='btn btn-primary w-full'>Create</button>
+          <label class='flex items-center gap-2 text-sm'><input type='checkbox' id='uActive' checked> Active</label>
+          <div class='flex gap-2'>
+            <button id='uSubmit' class='btn btn-primary flex-1'>Create</button>
+            <button type='button' id='uCancel' class='btn bg-slate-700 hover:bg-slate-600 text-white hidden' onclick='resetUserForm()'>Cancel</button>
+          </div>
         </form>
       </div>
 
@@ -76,8 +81,8 @@ async function loadUsers(){
   try {
     const users = await api('/users');
     const aMap = {}; state.agencies.forEach(a=>aMap[a.id]=a);
-    const rows = users.map(u=>`<tr><td>${u.id}</td><td>${u.email}</td><td>${u.role}</td><td>${u.is_active ? 'Active' : 'Inactive'}</td><td>${aMap[u.agency_id]?.name || '-'}</td></tr>`).join('');
-    document.getElementById('userList').innerHTML = rows ? `<table><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>Active</th><th>Agency</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="text-slate-500">No users</div>';
+    const rows = users.map(u=>`<tr><td>${u.id}</td><td>${u.email}</td><td>${u.role}</td><td>${u.is_active ? 'Active' : 'Inactive'}</td><td>${aMap[u.agency_id]?.name || '-'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editUser(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deleteUser(${u.id})'>Delete</button></td></tr>`).join('');
+    document.getElementById('userList').innerHTML = rows ? `<table><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>Active</th><th>Agency</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="text-slate-500">No users</div>';
   } catch(err){ showMsg(err.message, false); }
 }
 
@@ -85,12 +90,44 @@ document.getElementById('userForm').addEventListener('submit', async e=>{
   e.preventDefault();
   const body = {
     email: document.getElementById('uEmail').value,
-    password: document.getElementById('uPassword').value,
     role: document.getElementById('uRole').value,
-    agency_id: document.getElementById('uAgency').value ? parseInt(document.getElementById('uAgency').value) : null
+    agency_id: document.getElementById('uAgency').value ? parseInt(document.getElementById('uAgency').value) : null,
+    is_active: document.getElementById('uActive').checked
   };
-  try { await api('/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); showMsg('User created'); loadUsers(); document.getElementById('userForm').reset(); } catch(err){ showMsg(err.message, false); }
+  const pwd = document.getElementById('uPassword').value;
+  if(pwd) body.password = pwd;
+  const id = document.getElementById('editUserId').value;
+  try {
+    if(id){ await api(`/users/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); showMsg('User updated'); }
+    else { await api('/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); showMsg('User created'); }
+    resetUserForm(); loadUsers();
+  } catch(err){ showMsg(err.message, false); }
 });
+
+function resetUserForm(){
+  document.getElementById('userForm').reset(); document.getElementById('editUserId').value='';
+  document.getElementById('userFormTitle').textContent='Create User';
+  document.getElementById('uSubmit').textContent='Create';
+  document.getElementById('uCancel').classList.add('hidden');
+  document.getElementById('uPassword').required = true;
+}
+
+function editUser(u){
+  document.getElementById('editUserId').value=u.id;
+  document.getElementById('uEmail').value=u.email;
+  document.getElementById('uRole').value=u.role;
+  document.getElementById('uAgency').value=u.agency_id || '';
+  document.getElementById('uActive').checked = u.is_active;
+  document.getElementById('uPassword').value=''; document.getElementById('uPassword').required = false;
+  document.getElementById('userFormTitle').textContent='Edit User';
+  document.getElementById('uSubmit').textContent='Update';
+  document.getElementById('uCancel').classList.remove('hidden');
+}
+
+async function deleteUser(id){
+  if(!confirm('Delete this user?')) return;
+  try { await api(`/users/${id}`,{method:'DELETE'}); showMsg('User deleted'); loadUsers(); } catch(err){ showMsg(err.message, false); }
+}
 
 (async function(){ await loadAgencies(); loadUsers(); })();
 </script>

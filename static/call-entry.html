@@ -76,6 +76,10 @@
           <label class='text-xs text-slate-400 uppercase'>Narrative</label>
           <textarea id='narrative' rows='4' placeholder='Initial details...'></textarea>
         </div>
+        <div class='md:col-span-2'>
+          <label class='text-xs text-slate-400 uppercase block mb-1'>Quick Timestamps</label>
+          <div id='quickStamps' class='flex flex-wrap gap-2'></div>
+        </div>
         <div class='md:col-span-2 flex justify-end space-x-2'>
           <button type='submit' class='btn btn-primary'>Create Incident</button>
         </div>
@@ -86,7 +90,13 @@
 <script>
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 
-let state = { agencies:[], agencyMap:{}, configs:{}, DISCIPLINE:'police' };
+let state = { agencies:[], agencyMap:{}, configs:{}, DISCIPLINE:'police', user:null };
+const QUICK_STAMPS = {
+  police: ['Shots Fired','Object Thrown','Taser Deployed','Suspect in Custody','Officer Needs Assistance','Code 4','Suspect Fleeing'],
+  fire: ['Entry Made','Smoke Showing','Fire Knocked Down','Primary Search Complete','Secondary Search Complete','Ventilation Complete','Water on Fire','All Clear'],
+  ems: ['Patient Violent','Law Enforcement Needed','CPR in Progress','AED Applied','Medic on Scene','Transporting','Arrived at Hospital']
+};
+function moduleToDiscipline(m){ return {'law':'police','fire':'fire','ems':'ems'}[m] || m; }
 
 function showMsg(text, ok=true){
   const el = document.getElementById('msg'); el.classList.remove('hidden');
@@ -96,8 +106,20 @@ function showMsg(text, ok=true){
 
 function setDiscipline(d){
   state.DISCIPLINE = d;
-  document.querySelectorAll('#disciplineTabs .tab').forEach(t=>t.classList.toggle('active', t.dataset.d===d));
-  populateAgencies(); loadConfig();
+  document.querySelectorAll('#disciplineTabs .tab').forEach(t=>{ if(!t.classList.contains('hidden')) t.classList.toggle('active', t.dataset.d===d); });
+  populateAgencies(); loadConfig(); renderQuickStamps();
+}
+
+function renderQuickStamps(){
+  const labels = QUICK_STAMPS[state.DISCIPLINE] || [];
+  const el = document.getElementById('quickStamps');
+  el.innerHTML = labels.map(l=>`<button type='button' class='btn bg-slate-700 hover:bg-slate-600 text-white text-xs' onclick='addStamp(${JSON.stringify(l).replace(/'/g,"&#39;")})'>${l}</button>`).join('');
+}
+
+function addStamp(label){
+  const ta = document.getElementById('narrative');
+  const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  ta.value += (ta.value ? '\n' : '') + `[${now}] ${label}`;
 }
 
 function populateAgencies(){
@@ -157,10 +179,16 @@ document.getElementById('callForm').addEventListener('submit', async e=>{
 async function init(){
   try {
     const params = new URLSearchParams(window.location.search);
-    const d = params.get('discipline') || 'police';
+    const d = params.get('discipline');
+    const user = await api('/me'); state.user = user;
     state.agencies = await api('/agencies');
     state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
-    setDiscipline(['police','fire','ems'].includes(d) ? d : 'police');
+    const selectedModule = user?.selected_module;
+    const allowedDiscipline = selectedModule && selectedModule !== 'all' ? moduleToDiscipline(selectedModule) : (d || 'police');
+    if(selectedModule && selectedModule !== 'all'){
+      document.querySelectorAll('#disciplineTabs .tab').forEach(t=>t.classList.toggle('hidden', t.dataset.d !== allowedDiscipline));
+    }
+    setDiscipline(['police','fire','ems'].includes(allowedDiscipline) ? allowedDiscipline : 'police');
   } catch(err){ showMsg(err.message, false); }
 }
 init();
