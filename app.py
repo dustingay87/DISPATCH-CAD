@@ -470,6 +470,12 @@ class IncidentUpdate(BaseModel):
     lng: Optional[float] = None
     extra: Optional[dict] = None
 
+class MessageCreate(BaseModel):
+    unit_id: Optional[int] = None
+    incident_id: Optional[int] = None
+    channel: str = 'mdt'
+    message_text: str
+
 class MessageOut(BaseModel):
     id: int
     incident_id: Optional[int] = None
@@ -612,7 +618,22 @@ def get_unit(unit_id: int, db: Session = Depends(get_db)):
 
 @app.get('/units/{unit_id}/messages', response_model=List[MessageOut])
 def get_unit_messages(unit_id: int, db: Session = Depends(get_db)):
-    return db.query(DispatchMessage).filter(DispatchMessage.unit_id == unit_id).order_by(DispatchMessage.sent_at.desc()).limit(50).all()
+    return db.query(DispatchMessage).filter(or_(DispatchMessage.unit_id == unit_id, DispatchMessage.unit_id.is_(None))).order_by(DispatchMessage.sent_at.desc()).limit(50).all()
+
+@app.get('/messages', response_model=List[MessageOut])
+def list_messages(unit_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
+    q = db.query(DispatchMessage)
+    if unit_id:
+        q = q.filter(or_(DispatchMessage.unit_id == unit_id, DispatchMessage.unit_id.is_(None)))
+    return q.order_by(DispatchMessage.sent_at.desc()).limit(50).all()
+
+@app.post('/messages', response_model=MessageOut)
+def create_message(body: MessageCreate, db: Session = Depends(get_db)):
+    msg = DispatchMessage(**body.model_dump(), method=body.channel, sent_at=datetime.utcnow())
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    return msg
 
 @app.post('/personnel', response_model=PersonnelOut)
 def create_personnel(body: PersonnelCreate, db: Session = Depends(get_db)):
