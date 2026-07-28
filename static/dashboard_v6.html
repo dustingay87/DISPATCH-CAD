@@ -40,7 +40,6 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
     </div>
     <div class='flex items-center gap-2'>
       <a href='/dashboard_v5' class='bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs'>v5 Console</a>
-      <a href='/hud' class='bg-pink-700 hover:bg-pink-600 px-2 py-1 rounded text-xs'>HUD</a>
       <a href='/call-entry' class='bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-xs'>Call Entry</a>
       <a href='/scheduled-transports-page' class='bg-indigo-700 hover:bg-indigo-600 px-2 py-1 rounded text-xs'>Scheduled</a>
       <a href='/coverage-page' class='bg-teal-700 hover:bg-teal-600 px-2 py-1 rounded text-xs'>Coverage</a>
@@ -48,37 +47,58 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
       <a href='/mdt?unit_id=1' class='bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-xs'>MDT</a>
       <a href='/mobile-mdt?unit_id=1' class='bg-purple-800 hover:bg-purple-700 px-2 py-1 rounded text-xs'>Mobile MDT</a>
       <a href='/avl' class='bg-cyan-700 hover:bg-cyan-600 px-2 py-1 rounded text-xs'>AVL</a>
+      <button id='layoutBtn' class='bg-pink-700 hover:bg-pink-600 px-2 py-1 rounded text-xs' onclick='openLayoutEditor()'>Edit Layout</button>
     </div>
   </header>
   <main class='flex-1 grid grid-cols-12 gap-1 p-1 overflow-hidden'>
-    <section class='col-span-8 flex flex-col gap-1 min-h-0'>
-      <div class='panel flex-1 min-h-0'>
+    <section id='leftSection' class='col-span-8 flex flex-col gap-1 min-h-0'>
+      <div id='activeCallsPanel' class='panel flex-1 min-h-0'>
         <div class='panel-head flex justify-between'><span>Active Calls</span><span id='callCount' class='text-slate-400'>0</span></div>
         <div id='openWork' class='panel-body p-0'></div>
       </div>
-      <div class='panel h-2/5 min-h-0'>
+      <div id='mapPanel' class='panel h-2/5 min-h-0'>
         <div class='panel-head'>Map</div>
         <div class='panel-body p-0'><div id='map'></div></div>
       </div>
     </section>
-    <section class='col-span-4 flex flex-col gap-1 min-h-0'>
-      <div class='panel h-1/3 min-h-0'>
+    <section id='rightSection' class='col-span-4 flex flex-col gap-1 min-h-0'>
+      <div id='scheduledPanel' class='panel h-1/3 min-h-0'>
         <div class='panel-head flex justify-between'><span>Scheduled Transports</span><span id='scheduledCount' class='text-slate-400'>0</span></div>
         <div id='scheduledList' class='panel-body p-0'></div>
       </div>
-      <div class='panel flex-1 min-h-0'>
+      <div id='unitsPanel' class='panel flex-1 min-h-0'>
         <div class='panel-head flex justify-between'><span>On Duty Units</span><span id='unitCount' class='text-slate-400'>0</span></div>
         <div id='vehicleInfo' class='panel-body p-0'></div>
       </div>
-      <div class='panel h-2/5 min-h-0'>
+      <div id='summaryPanel' class='panel h-2/5 min-h-0'>
         <div class='panel-head'>Trip / Vehicle Summary</div>
         <div id='tripSummary' class='panel-body'></div>
       </div>
     </section>
   </main>
+
+  <div id='layoutModal' class='fixed inset-0 bg-slate-950/80 z-50 hidden items-center justify-center'>
+    <div class='bg-slate-900 border border-slate-700 rounded p-4 w-full max-w-sm shadow-lg'>
+      <h2 class='text-lg font-bold text-white mb-3'>Dashboard Layout</h2>
+      <div class='space-y-2 text-sm'>
+        <label class='flex items-center gap-2'><input type='checkbox' id='showActiveCalls' checked class='accent-blue-500'> Active Calls</label>
+        <label class='flex items-center gap-2'><input type='checkbox' id='showMap' checked class='accent-blue-500'> Map</label>
+        <label class='flex items-center gap-2'><input type='checkbox' id='showScheduled' checked class='accent-blue-500'> Scheduled Transports</label>
+        <label class='flex items-center gap-2'><input type='checkbox' id='showUnits' checked class='accent-blue-500'> On Duty Units</label>
+        <label class='flex items-center gap-2'><input type='checkbox' id='showSummary' checked class='accent-blue-500'> Trip / Vehicle Summary</label>
+        <label class='flex items-center gap-2 mt-2 pt-2 border-t border-slate-700'><input type='checkbox' id='lockLayout' class='accent-pink-500'> Lock layout</label>
+      </div>
+      <div class='flex gap-2 mt-4'>
+        <button class='bg-blue-700 hover:bg-blue-600 text-white px-3 py-1 rounded text-xs' onclick='saveDashboardLayout()'>Save</button>
+        <button class='bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded text-xs' onclick='closeLayoutEditor()'>Cancel</button>
+        <button class='bg-red-700 hover:bg-red-600 text-white px-3 py-1 rounded text-xs ml-auto' onclick='resetDashboardLayout()'>Reset</button>
+      </div>
+    </div>
+  </div>
 <script>
 const CENTER=[39.9612,-82.9988];
 let state={agencies:[],units:[],mapUnits:[],incidents:[],scheduled:[],agencyMap:{},postZones:[],unitPostings:[],postingMap:{},personnel:[],selectedTrip:null,selectedVehicle:null,user:null,crossAgencies:[]};
+const LAYOUT_STORAGE='d2d_dashboard_layout';
 const MODULE_LABELS={ems:'EMS',fire:'Fire',law:'Law',all:'Command'};
 const MODULE_BRAND={ems:'D2D EMS',fire:'D2D Fire',law:'D2D Law',all:'D2D Command'};
 const MODULE_COLOR={ems:'bg-emerald-700',fire:'bg-red-700',law:'bg-blue-700',all:'bg-purple-700'};
@@ -117,13 +137,80 @@ function populateModuleSelect(){
     }catch(err){console.error(err);}
   };
 }
+function defaultDashboardLayout(){
+  return {activeCalls:true, map:true, scheduled:true, onDutyUnits:true, summary:true, locked:false};
+}
+function loadDashboardLayout(){
+  try{ const raw=localStorage.getItem(LAYOUT_STORAGE); if(raw) return JSON.parse(raw); }catch(e){}
+  return defaultDashboardLayout();
+}
+function applyDashboardLayout(){
+  const layout=loadDashboardLayout();
+  document.getElementById('activeCallsPanel').classList.toggle('hidden', !layout.activeCalls);
+  document.getElementById('mapPanel').classList.toggle('hidden', !layout.map);
+  document.getElementById('scheduledPanel').classList.toggle('hidden', !layout.scheduled);
+  document.getElementById('unitsPanel').classList.toggle('hidden', !layout.onDutyUnits);
+  document.getElementById('summaryPanel').classList.toggle('hidden', !layout.summary);
+  const leftVis=layout.activeCalls || layout.map;
+  const rightVis=layout.scheduled || layout.onDutyUnits || layout.summary;
+  const left=document.getElementById('leftSection');
+  const right=document.getElementById('rightSection');
+  left.classList.toggle('hidden', !leftVis);
+  right.classList.toggle('hidden', !rightVis);
+  if(leftVis){ left.className = rightVis ? 'col-span-8 flex flex-col gap-1 min-h-0' : 'col-span-12 flex flex-col gap-1 min-h-0'; }
+  if(rightVis){ right.className = leftVis ? 'col-span-4 flex flex-col gap-1 min-h-0' : 'col-span-12 flex flex-col gap-1 min-h-0'; }
+  const btn=document.getElementById('layoutBtn');
+  if(btn) btn.textContent = layout.locked ? 'Unlock Layout' : 'Edit Layout';
+}
+function openLayoutEditor(){
+  let layout=loadDashboardLayout();
+  if(layout.locked){
+    layout.locked=false;
+    localStorage.setItem(LAYOUT_STORAGE, JSON.stringify(layout));
+    applyDashboardLayout();
+  }
+  document.getElementById('showActiveCalls').checked = layout.activeCalls;
+  document.getElementById('showMap').checked = layout.map;
+  document.getElementById('showScheduled').checked = layout.scheduled;
+  document.getElementById('showUnits').checked = layout.onDutyUnits;
+  document.getElementById('showSummary').checked = layout.summary;
+  document.getElementById('lockLayout').checked = layout.locked;
+  document.getElementById('layoutModal').classList.remove('hidden');
+  document.getElementById('layoutModal').classList.add('flex');
+}
+function closeLayoutEditor(){
+  document.getElementById('layoutModal').classList.add('hidden');
+  document.getElementById('layoutModal').classList.remove('flex');
+}
+function saveDashboardLayout(){
+  const layout={
+    activeCalls: document.getElementById('showActiveCalls').checked,
+    map: document.getElementById('showMap').checked,
+    scheduled: document.getElementById('showScheduled').checked,
+    onDutyUnits: document.getElementById('showUnits').checked,
+    summary: document.getElementById('showSummary').checked,
+    locked: document.getElementById('lockLayout').checked
+  };
+  if(!(layout.activeCalls||layout.map||layout.scheduled||layout.onDutyUnits||layout.summary)){ alert('Show at least one panel'); return; }
+  localStorage.setItem(LAYOUT_STORAGE, JSON.stringify(layout));
+  applyDashboardLayout();
+  closeLayoutEditor();
+}
+function resetDashboardLayout(){
+  if(!confirm('Reset dashboard layout to default?')) return;
+  localStorage.setItem(LAYOUT_STORAGE, JSON.stringify(defaultDashboardLayout()));
+  applyDashboardLayout();
+  closeLayoutEditor();
+}
+
 async function init(){
   try{
     state.user=await api('/me');
     state.crossAgencies=state.user.cross_discipline_agencies||[];
     localStorage.setItem('ur_module',state.user.selected_module||'all');
+    applyDashboardLayout();
     populateModuleSelect();applyModuleBadge();load();
-  }catch(e){console.error(e);load();}
+  }catch(e){console.error(e); load();}
 }
 async function load(){
   const aid=state.user?.agency_id;
