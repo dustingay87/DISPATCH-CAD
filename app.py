@@ -336,6 +336,10 @@ def login_page():
 def index():
     return FileResponse('static/dashboard_v5.html')
 
+@app.get('/console')
+def console():
+    return FileResponse('static/dispatch.html')
+
 @app.get('/units-screen')
 def units_screen():
     return FileResponse('static/screen.html')
