@@ -7,7 +7,7 @@
 <script src='https://cdn.tailwindcss.com'></script>
 <style>
   html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
-  .mdt-btn { padding:1.25rem; border-radius:0.75rem; font-size:1.25rem; font-weight:600; text-transform:uppercase; letter-spacing:0.03em; }
+  .mdt-btn { padding:1.25rem; border-radius:0.75rem; font-size:1.25rem; font-weight:600; text-transform:uppercase; letter-spacing:0.03em; min-height:4rem; width:100%; touch-action:manipulation; }
   .incident-card { background:#1e293b; border-left:8px solid; border-radius:0.75rem; padding:1.5rem; }
   .priority-1 { border-color:#ef4444; }
   .priority-2 { border-color:#f97316; }
@@ -28,8 +28,8 @@
     </div>
   </header>
 
-  <div class='flex-1 p-4 grid grid-cols-3 gap-4 overflow-hidden'>
-    <section class='col-span-2 flex flex-col space-y-4 overflow-hidden'>
+  <div class='flex-1 p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 overflow-hidden'>
+    <section class='col-span-1 lg:col-span-2 flex flex-col space-y-4 overflow-hidden'>
       <div class='flex items-center justify-between bg-slate-800 rounded-lg p-4'>
         <div class='text-xl'>Status: <span id='unitStatus' class='font-bold text-white'>--</span></div>
         <div class='text-xl'>Shift: <span id='shiftTimer' class='font-mono text-green-400'>--</span></div>
@@ -38,7 +38,7 @@
       <div id='callPanel' class='flex-1 overflow-y-auto space-y-4'></div>
     </section>
 
-    <section class='col-span-1 flex flex-col space-y-4 overflow-hidden'>
+    <section class='flex flex-col space-y-4 overflow-hidden'>
       <div class='card bg-slate-800 rounded-lg p-4 flex-1 flex flex-col min-h-0'>
         <div class='text-lg font-semibold border-b border-slate-600 pb-2 mb-2'>Status Buttons</div>
         <div id='statusButtons' class='grid grid-cols-2 gap-3 overflow-y-auto'></div>
@@ -72,7 +72,7 @@ function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}
 const url = new URL(window.location.href);
 let unitId = parseInt(url.searchParams.get('unit_id'));
 if(!unitId){ url.searchParams.set('unit_id','1'); unitId=1; history.replaceState(null,'',url); }
-let state = { unit:null, incident:null, messages:[], crew:[], agencyMap:{}, config:{statuses:[], dispositions:[], callTypes:[]} };
+let state = { unit:null, incident:null, messages:[], crew:[], agencyMap:{}, config:{statuses:[], dispositions:[], callTypes:[]}, lastIncidentId:null };
 
 function showLoading(msg){ const el=document.getElementById('loading'); el.textContent=msg; el.classList.remove('hidden'); }
 function hideLoading(){ document.getElementById('loading').classList.add('hidden'); }
@@ -123,6 +123,7 @@ function render(){
   } else document.getElementById('messages').innerHTML = '<div class=\'text-slate-500\'>No messages</div>';
 
   const call = state.incident;
+  if(call && call.id !== state.lastIncidentId){ notify(call); state.lastIncidentId = call.id; }
   if(call){
     document.getElementById('callPanel').innerHTML = `
       <div class='incident-card priority-${Math.min(Math.max(call.priority||2,1),4)}'>
@@ -139,6 +140,11 @@ function render(){
           <div class='col-span-2'><span class='text-slate-400'>Narrative:</span> ${call.narrative||'-'}</div>
           ${extraHtml(call.extra)}
         </div>
+        <div class='mt-4 flex flex-wrap gap-2'>
+          <button class='bg-blue-700 hover:bg-blue-600 text-white px-4 py-3 rounded text-lg' onclick='setStatus("AK")'>Acknowledge</button>
+          <button class='bg-yellow-700 hover:bg-yellow-600 text-white px-4 py-3 rounded text-lg' onclick='setStatus("ER")'>En Route</button>
+          <button class='bg-red-700 hover:bg-red-600 text-white px-4 py-3 rounded text-lg' onclick='setStatus("OS")'>On Scene</button>
+        </div>
       </div>`;
   } else {
     document.getElementById('callPanel').innerHTML = `<div class='flex-1 flex items-center justify-center text-2xl text-slate-500'>No active call assigned</div>`;
@@ -152,12 +158,13 @@ function extraHtml(extra){
 }
 
 window.setStatus = async function(code){
-  const u=state.unit; if(!u.current_incident_id){ alert('No active call'); return; }
+  const u=state.unit;
   let extra={status_code:code};
   if(code==='TR' || code==='CAN'){ const pc=prompt('Passenger/Patient count?'); if(pc) extra.passenger_count=parseInt(pc); }
-  const a=state.agencyMap[u.agency_id]; const cfg=state.config;
+  const cfg=state.config;
   if(code==='CAN' || code==='TR' || code==='NPF'){ const d=prompt('Disposition?\n'+(cfg.dispositions||[]).join('\n')); if(d) extra.disposition=d; }
-  try { await api(`/incidents/${u.current_incident_id}/units/${u.id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); await load(); } catch(e){ alert(e.message); }
+  const path = u.current_incident_id ? `/incidents/${u.current_incident_id}/units/${u.id}/status` : `/units/${u.id}/status`;
+  try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); await load(); } catch(e){ alert(e.message); }
 };
 
 window.toggleShift = async function(){
@@ -169,9 +176,11 @@ window.sendMessage = async function(){
   try { await api('/messages', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({unit_id:unitId, channel:'mdt', message_text:text})}); inp.value=''; await load(); } catch(e){ alert(e.message); }
 };
 
+function notify(call){ if('Notification' in window && Notification.permission==='granted'){ new Notification('New Call Assigned', {body:`${call.call_number||call.incident_number} - ${call.call_type}`, tag:'call_'+call.id}); } }
 function updateClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 updateClock(); setInterval(updateClock,1000);
 load();
+if('Notification' in window) Notification.requestPermission();
 setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); }, 10000);
 </script>
 </body>

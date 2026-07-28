@@ -691,6 +691,10 @@ class UnitCamera(BaseModel):
 class UnitShift(BaseModel):
     action: str
 
+class UnitStatus(BaseModel):
+    status_code: str
+    reason: Optional[str] = None
+
 class PersonnelAssign(BaseModel):
     unit_id: Optional[int] = None
 
@@ -1084,6 +1088,17 @@ def set_unit_shift(unit_id: int, body: UnitShift, db: Session = Depends(get_db))
         unit.current_status = 'off_duty'
     else:
         raise HTTPException(status_code=400, detail='Invalid action')
+    db.commit()
+    db.refresh(unit)
+    return unit
+
+@app.post('/units/{unit_id}/status', response_model=UnitOut)
+def set_unit_status(unit_id: int, body: UnitStatus, db: Session = Depends(get_db)):
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    unit.current_status = body.status_code
+    db.add(StatusEvent(unit_id=unit_id, incident_id=None, status_code=body.status_code, reason=body.reason))
     db.commit()
     db.refresh(unit)
     return unit
