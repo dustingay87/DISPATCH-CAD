@@ -3,7 +3,7 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>Unified Response v6</title>
+<title>D2D Unified Response</title>
 <script src='https://cdn.tailwindcss.com'></script>
 <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
 <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' crossorigin=''></script>
@@ -35,7 +35,7 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
 <body class='bg-slate-900 text-slate-200 text-xs h-screen flex flex-col'>
   <header class='h-14 bg-slate-950 border-b border-slate-700 flex items-center justify-between px-4 shrink-0'>
     <div class='flex items-center gap-2'>
-      <div class='font-bold text-lg text-white' id='brandTitle'>Unified Response</div>
+      <div class='font-bold text-lg text-white' id='brandTitle'>D2D Unified Response</div>
       <select id='moduleSelect' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden'></select>
     </div>
     <div class='flex items-center gap-2'>
@@ -78,10 +78,10 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
   </main>
 <script>
 const CENTER=[39.9612,-82.9988];
-let state={agencies:[],units:[],incidents:[],scheduled:[],agencyMap:{},postZones:[],unitPostings:[],postingMap:{},selectedTrip:null,selectedVehicle:null,user:null};
-const MODULE_LABELS={ems:'EMS',fire:'Fire',law:'Law',all:'All Modules'};
-const MODULE_BRAND={ems:'Unified RESPONSE EMS',fire:'Unified RESPONSE FIRE',law:'Unified Response LAW',all:'Unified RESPONSE (For All three)'};
-const MODULE_COLOR={ems:'bg-green-700',fire:'bg-red-700',law:'bg-blue-700',all:'bg-purple-700'};
+let state={agencies:[],units:[],mapUnits:[],incidents:[],scheduled:[],agencyMap:{},postZones:[],unitPostings:[],postingMap:{},personnel:[],selectedTrip:null,selectedVehicle:null,user:null,crossAgencies:[]};
+const MODULE_LABELS={ems:'EMS',fire:'Fire',law:'Law',all:'Command'};
+const MODULE_BRAND={ems:'D2D EMS',fire:'D2D Fire',law:'D2D Law',all:'D2D Command'};
+const MODULE_COLOR={ems:'bg-emerald-700',fire:'bg-red-700',law:'bg-blue-700',all:'bg-purple-700'};
 let map,layers;
 
 function api(path,opts={}){return fetch(path,{...opts,credentials:'include'}).then(r=>{if(r.status===401){window.location.href='/login';throw new Error('Unauthorized');}if(!r.ok)throw new Error(`${path} ${r.status}`);return r.json();});}
@@ -120,17 +120,25 @@ function populateModuleSelect(){
 async function init(){
   try{
     state.user=await api('/me');
+    state.crossAgencies=state.user.cross_discipline_agencies||[];
     localStorage.setItem('ur_module',state.user.selected_module||'all');
     populateModuleSelect();applyModuleBadge();load();
   }catch(e){console.error(e);load();}
 }
 async function load(){
-  const [agencies,units,incidents,postZones,unitPostings,scheduled]=await Promise.all([api('/agencies'),api('/units'),api('/incidents'),api('/post-zones'),api('/unit-postings'),api('/scheduled-transports?status=scheduled')]);
-  state.agencies=agencies;state.units=units;state.incidents=incidents;state.scheduled=scheduled||[];state.agencyMap={};state.agencies.forEach(a=>state.agencyMap[a.id]=a);
+  const aid=state.user?.agency_id;
+  const promises=[api('/agencies'),api('/units'),api('/incidents'),api('/post-zones'),api('/unit-postings'),api('/scheduled-transports?status=scheduled')];
+  if(aid) promises.push(api(`/personnel?agency_id=${aid}`));
+  const [agencies,units,incidents,postZones,unitPostings,scheduled,...rest]=await Promise.all(promises);
+  state.personnel=aid?rest[0]:[];
+  state.agencies=agencies;state.incidents=incidents;state.scheduled=scheduled||[];state.agencyMap={};state.agencies.forEach(a=>state.agencyMap[a.id]=a);
   if(state.user && state.user.selected_module && state.user.selected_module!=='all'){
     const sm=state.user.selected_module;
     state.incidents=state.incidents.filter(i=>{const at=(state.agencyMap[i.agency_id]||{}).agency_type;return (sm==='law'&&at==='police')||at===sm;});
-    state.units=state.units.filter(u=>{const at=(state.agencyMap[u.agency_id]||{}).agency_type;return (sm==='law'&&at==='police')||at===sm;});
+    state.units=units.filter(u=>{const at=(state.agencyMap[u.agency_id]||{}).agency_type;return (sm==='law'&&at==='police')||at===sm;});
+    state.mapUnits=units.filter(u=>{const at=(state.agencyMap[u.agency_id]||{}).agency_type; return (sm==='law'&&at==='police')||at===sm||state.crossAgencies.includes(u.agency_id);});
+  } else {
+    state.units=units; state.mapUnits=units;
   }
   state.postZones=postZones||[];state.unitPostings=unitPostings||[];state.postingMap={};
   (state.unitPostings||[]).forEach(p=>{ if(p.is_current) state.postingMap[p.unit_id]=p.post_zone; });
@@ -187,7 +195,7 @@ function renderMap(){
       gj.bindPopup(`<b>${z.name}</b><br>${z.zone_type||'post'}<br>Min units: ${z.minimum_units||0}`);
     } catch(e){ console.log('zone render error', z, e); }
   });
-  state.units.forEach(u=>{if(u.lat==null||u.lng==null)return;const col=u.current_status==='OS'?'#ef4444':u.current_status==='AQ'?'#22c55e':u.current_status==='ER'||u.current_status==='TR'||u.current_status==='DEL'?'#eab308':'#64748b';const m=L.circleMarker([u.lat,u.lng],{radius:6,color:col,fillColor:col,fillOpacity:0.9}).addTo(layers.units);m.bindPopup(`<b>${u.call_sign}</b><br>${statusLabel(u.current_status)}`);});
+  state.mapUnits.forEach(u=>{if(u.lat==null||u.lng==null)return;const col=u.current_status==='OS'?'#ef4444':u.current_status==='AQ'?'#22c55e':u.current_status==='ER'||u.current_status==='TR'||u.current_status==='DEL'?'#eab308':'#64748b';const a=state.agencyMap[u.agency_id]||{};const cross=a.agency_type && (a.agency_type!==(state.user?.selected_module==='law'?'police':state.user?.selected_module));const m=L.circleMarker([u.lat,u.lng],{radius:cross?4:6,color:col,fillColor:col,fillOpacity:0.9}).addTo(layers.units);m.bindPopup(`<b>${u.call_sign}</b><br>${statusLabel(u.current_status)}<br><span class='text-slate-400'>${a.name||a.agency_type||''}</span>`);});
   state.incidents.forEach(i=>{if(i.lat==null||i.lng==null)return;const col=i.priority===1?'#ef4444':i.priority===2?'#f97316':i.priority===3?'#eab308':'#22c55e';const m=L.circleMarker([i.lat,i.lng],{radius:8,color:col,fillColor:col,fillOpacity:0.6}).addTo(layers.incidents);m.bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${statusLabel(i.status)}`);});
 }
 
@@ -215,13 +223,20 @@ function renderTripSummary(){
   }else if(state.selectedVehicle){
     const u=state.units.find(x=>x.id===state.selectedVehicle);if(!u)return;
     const inc=u.current_incident_id?(state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id):'-';
+    const crew=state.personnel.filter(p=>p.current_unit_id===u.id);
+    const crewList=crew.map(p=>`<span class='inline-flex items-center gap-1 bg-slate-700 rounded px-1 py-0.5'>${p.first_name} ${p.last_name} <button class='text-red-400 hover:text-red-300' onclick='removeCrew(${p.id})'>&times;</button></span>`).join(' ')||'<span class="text-slate-500">-</span>';
+    const maxCrew=3;
+    const canAdd=crew.length<maxCrew;
+    const available=state.personnel.filter(p=>!p.current_unit_id && (p.duty_status==='off_duty'||p.duty_status==='on_duty')).map(p=>`<option value='${p.id}'>${p.first_name} ${p.last_name}</option>`).join('');
+    const addCrew=canAdd&&available?`<div class='flex gap-1 mt-1'><select id='addCrew' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value=''>Add crew</option>${available}</select><button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='addCrewToUnit(${u.id})'>Add</button></div>`:`<div class='text-xs text-slate-500 mt-1'>Crew full or none available (max ${maxCrew})</div>`;
     el.innerHTML=`<div class='space-y-1'>
       <div class='font-bold text-white'>${u.call_sign}</div>
       <div><span class='text-slate-400'>Status:</span> ${statusLabel(u.current_status)}</div>
       <div><span class='text-slate-400'>Type:</span> ${u.unit_type||'-'}</div>
       <div><span class='text-slate-400'>Agency:</span> ${state.agencyMap[u.agency_id]?.name||'-'}</div>
       <div><span class='text-slate-400'>Current Call:</span> ${inc}</div>
-      <div><span class='text-slate-400'>Crew:</span> -</div>
+      <div><span class='text-slate-400'>Crew:</span> ${crewList}</div>
+      ${addCrew}
     </div>`;
   }else{el.innerHTML='<div class="text-slate-500">Select a trip or vehicle.</div>';}
 }
@@ -229,6 +244,8 @@ function renderTripSummary(){
 window.selectTrip=function(id){state.selectedTrip=id;state.selectedVehicle=null;renderOpenWork();renderVehicleInfo();renderTripSummary();}
 window.selectVehicle=function(id){state.selectedVehicle=id;state.selectedTrip=null;renderOpenWork();renderVehicleInfo();renderTripSummary();}
 window.addUnitToTrip=async function(incidentId){const uid=document.getElementById('addUnit').value;if(!uid)return;try{await api(`/incidents/${incidentId}/dispatch/${uid}`,{method:'POST'});await load();}catch(e){alert(e.message);}}
+window.addCrewToUnit=async function(unitId){const pid=parseInt(document.getElementById('addCrew').value);if(!pid)return;try{await api(`/personnel/${pid}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_unit_id:unitId,duty_status:'on_duty'})});await load();}catch(e){alert(e.message);}}
+window.removeCrew=async function(personnelId){if(!confirm('Remove crew from unit?'))return;try{await api(`/personnel/${personnelId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_unit_id:null,duty_status:'off_duty'})});await load();}catch(e){alert(e.message);}}
 window.loadRecommendations=async function(incidentId){const el=document.getElementById('recs');if(!el)return;try{const recs=await api(`/incidents/${incidentId}/recommend`);el.innerHTML=recs.length?recs.map(r=>`<div class='flex justify-between items-center py-0.5 border-b border-slate-700'><div><b>${r.call_sign}</b> <span class='text-slate-400'>${r.service_level||''}</span> <span class='text-slate-500'>${r.distance_miles!=null?r.distance_miles.toFixed(1)+' mi':''}</span></div><div class='text-right'><div class='text-slate-400'>${r.reason}</div><button class='bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='addRecUnit(${incidentId},${r.unit_id})'>Add</button></div></div>`).join(''):'<span class="text-slate-500">No recommendations</span>';}catch(e){el.innerHTML='<span class="text-red-400">Error loading recommendations</span>';}}
 window.addRecUnit=async function(incidentId,unitId){try{await api(`/incidents/${incidentId}/dispatch/${unitId}`,{method:'POST'});await load();}catch(e){alert(e.message);}}
 function renderScheduled(){

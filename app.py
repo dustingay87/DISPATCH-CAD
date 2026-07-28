@@ -392,6 +392,8 @@ class UserMe(BaseModel):
     agency_id: Optional[int] = None
     modules: List[str] = []
     selected_module: Optional[str] = None
+    personnel_id: Optional[int] = None
+    cross_discipline_agencies: List[int] = []
 
 class UserModuleUpdate(BaseModel):
     module: str
@@ -805,15 +807,23 @@ def me(request: Request, db: Session = Depends(get_db)):
     u = db.query(User).get(user['user_id'])
     modules = []
     selected = None
+    personnel_id = None
+    cross_ids = []
     if u:
         if u.agency_id:
             cfg = db.query(CustomerConfig).filter_by(agency_id=u.agency_id, category='modules', key='defaults').first()
             if cfg and cfg.value:
                 modules = cfg.value if isinstance(cfg.value, list) else []
+            coop = db.query(CustomerConfig).filter_by(agency_id=u.agency_id, category='cooperating_agencies', key='defaults').first()
+            if coop and coop.value:
+                cross_ids = coop.value if isinstance(coop.value, list) else []
         sel = db.query(CustomerConfig).filter_by(category='user_module', key=str(u.id)).first()
         if sel:
             selected = sel.value
-    return {'user_id': user['user_id'], 'email': u.email if u else None, 'role': user['role'], 'agency_id': u.agency_id if u else None, 'modules': modules, 'selected_module': selected}
+        p = db.query(Personnel).filter(Personnel.user_id == u.id).first()
+        if p:
+            personnel_id = p.id
+    return {'user_id': user['user_id'], 'email': u.email if u else None, 'role': user['role'], 'agency_id': u.agency_id if u else None, 'modules': modules, 'selected_module': selected, 'personnel_id': personnel_id, 'cross_discipline_agencies': cross_ids}
 
 @app.put('/me/module')
 def set_user_module(body: UserModuleUpdate, request: Request, db: Session = Depends(get_db)):
@@ -885,7 +895,7 @@ def mdt():
 
 @app.get('/mobile-mdt')
 def mobile_mdt():
-    return FileResponse('static/mobile_mdt.html')
+    return FileResponse('static/mobile_mdt_v2.html')
 
 @app.get('/avl')
 def avl():
@@ -1114,6 +1124,16 @@ class PersonnelOut(PersonnelCreate):
     created_at: Optional[datetime] = None
     class Config:
         from_attributes = True
+
+class PersonnelUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    radio_id: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    sms_phone: Optional[str] = None
+    current_unit_id: Optional[int] = None
+    duty_status: Optional[str] = None
 
 class IncidentCreate(BaseModel):
     agency_id: int
@@ -1507,6 +1527,29 @@ def list_personnel(agency_id: Optional[int] = Query(None), unit_id: Optional[int
     if unit_id:
         q = q.filter(Personnel.current_unit_id == unit_id)
     return q.all()
+
+@app.get('/personnel/me', response_model=PersonnelOut)
+def get_my_personnel(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    p = db.query(Personnel).filter(Personnel.user_id == current_user['user_id']).first()
+    if not p:
+        raise HTTPException(status_code=404, detail='No personnel record linked to this user')
+    return p
+
+@app.put('/personnel/{personnel_id}', response_model=PersonnelOut)
+def update_personnel(personnel_id: int, body: PersonnelUpdate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    p = db.query(Personnel).get(personnel_id)
+    if not p:
+        raise HTTPException(status_code=404, detail='Personnel not found')
+    # allow self or admin/dispatch
+    u = db.query(User).get(current_user['user_id'])
+    is_admin = u and u.role in ('admin','super_admin')
+    is_self = p.user_id == current_user['user_id']
+    if not is_admin and not is_self:
+        raise HTTPException(status_code=403, detail='Not authorized')
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(p, k, v)
+    db.commit(); db.refresh(p)
+    return p
 
 @app.post('/incidents', response_model=IncidentOut)
 def create_incident(request: Request, body: IncidentCreate, db: Session = Depends(get_db)):
