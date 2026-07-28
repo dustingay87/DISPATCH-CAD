@@ -61,7 +61,13 @@
         <div class='p-2 text-slate-400'>Select a call from the left.</div>
       </div>
       <div class='card h-1/2 min-h-0'>
-        <div class='card-head'>Map</div>
+        <div class='card-head flex justify-between items-center'>
+          <span>Map</span>
+          <div class='flex gap-3 text-xs'>
+            <label class='flex items-center gap-1 cursor-pointer'><input id='trailToggle' type='checkbox' checked class='accent-blue-500'> Trails</label>
+            <label class='flex items-center gap-1 cursor-pointer'><input id='critToggle' type='checkbox' class='accent-red-500'> Critical</label>
+          </div>
+        </div>
         <div class='card-body p-0'><div id='map'></div></div>
       </div>
     </section>
@@ -89,7 +95,14 @@
   </footer>
 <script>
 const CONFIG = { center:[39.9612,-82.9988], zoom:11 };
-let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, selectedIncident:null, selectedUnit:null, logs:[] };
+const CRITICAL = [
+  {lat:39.962, lng:-82.998, type:'hospital', name:'Grant Hospital'},
+  {lat:39.965, lng:-82.995, type:'hydrant', name:'Hydrant 1'},
+  {lat:39.960, lng:-83.002, type:'hydrant', name:'Hydrant 2'},
+  {lat:39.958, lng:-82.993, type:'premise', name:'City Hall'},
+  {lat:39.968, lng:-83.005, type:'premise', name:'High School'}
+];
+let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false };
 const pathDisc = window.location.pathname.replace(/^\/|\/$/g,'');
 let DISCIPLINE = ['police','fire','ems'].includes(pathDisc) ? pathDisc : (new URLSearchParams(window.location.search).get('discipline') || 'all');
 let map, layers;
@@ -108,7 +121,7 @@ function log(msg){ state.logs.unshift(`${new Date().toLocaleTimeString([],{hour:
 function initMap(){
   map = L.map('map').setView(CONFIG.center, CONFIG.zoom);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'&copy; OpenStreetMap' }).addTo(map);
-  layers = { units:L.layerGroup().addTo(map), incidents:L.layerGroup().addTo(map) };
+  layers = { units:L.layerGroup().addTo(map), incidents:L.layerGroup().addTo(map), trails:L.layerGroup().addTo(map), critical:L.layerGroup().addTo(map) };
 }
 
 function renderLog(){ const el=document.getElementById('eventLog'); el.innerHTML = state.logs.map(l=>`<div class='border-l-2 border-slate-600 pl-1'>${l}</div>`).join(''); el.scrollTop=0; }
@@ -228,11 +241,19 @@ function uTimers(u){
   return { avail, scene, call: fmtDur(acc), shift };
 }
 
-function selectUnit(id){ state.selectedUnit=id; renderUnits(); }
+async function selectUnit(id){ state.selectedUnit=id; await loadTrails(id); renderUnits(); renderMap(); }
+
+async function loadTrails(unitId){
+  if(!unitId){ state.trails[unitId]=[]; return; }
+  try {
+    const pts = await api(`/taip/positions?unit_id=${unitId}&limit=50`);
+    state.trails[unitId] = pts.reverse().filter(p=>p.lat!=null && p.lng!=null);
+  } catch(e){ state.trails[unitId]=[]; }
+}
 
 function renderMap(){
   if(!map) initMap();
-  layers.units.clearLayers(); layers.incidents.clearLayers();
+  layers.units.clearLayers(); layers.incidents.clearLayers(); layers.trails.clearLayers(); layers.critical.clearLayers();
   const a=state.incidents.find(i=>i.id===state.selectedIncident);
   state.units.forEach(u=>{
     if(u.lat==null || u.lng==null) return;
@@ -247,6 +268,19 @@ function renderMap(){
     const m = L.circleMarker([i.lat,i.lng],{radius:8,color:col,fillColor:col,fillOpacity:0.6,weight:2}).addTo(layers.incidents);
     m.bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${i.location_text||''}`);
   });
+  if(state.showTrails && state.selectedUnit && state.trails[state.selectedUnit] && state.trails[state.selectedUnit].length){
+    const pts = state.trails[state.selectedUnit].map(p=>[p.lat,p.lng]);
+    L.polyline(pts,{color:'#3b82f6', opacity:0.7, weight:2}).addTo(layers.trails);
+    const last = pts[pts.length-1];
+    L.circleMarker(last,{radius:4, color:'#3b82f6', fillColor:'#3b82f6', fillOpacity:1}).addTo(layers.trails);
+  }
+  if(state.showCritical){
+    CRITICAL.forEach(c=>{
+      const col = c.type==='hydrant' ? '#0ea5e9' : c.type==='hospital' ? '#ef4444' : '#22c55e';
+      const m = L.circleMarker([c.lat,c.lng],{radius:4, color:col, fillColor:col, fillOpacity:0.8, weight:1}).addTo(layers.critical);
+      m.bindPopup(`<b>${c.name}</b><br>${c.type}`);
+    });
+  }
   if(a && a.lat!=null && a.lng!=null){ map.setView([a.lat,a.lng], 14); layers.incidents.getLayers().forEach(m=>{ if(m.getPopup().getContent().includes(a.call_number||a.incident_number)) m.openPopup(); }); }
 }
 
@@ -314,6 +348,8 @@ document.getElementById('cmdInput').addEventListener('keydown', e=>{ if(e.key===
 document.getElementById('msgSend').addEventListener('click', sendMessage);
 document.getElementById('msgText').addEventListener('keydown', e=>{ if(e.key==='Enter') sendMessage(); });
 document.getElementById('disciplineSelect').addEventListener('change', e=>{ DISCIPLINE = e.target.value; renderCalls(); renderUnits(); renderMap(); });
+document.getElementById('trailToggle').addEventListener('change', e=>{ state.showTrails = e.target.checked; renderMap(); });
+document.getElementById('critToggle').addEventListener('change', e=>{ state.showCritical = e.target.checked; renderMap(); });
 
 initMap();
 load();
