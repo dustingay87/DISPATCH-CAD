@@ -608,10 +608,10 @@ class ScheduledTransportOut(BaseModel):
     incident_id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    agency: Optional[AgencyOut] = None
+    agency: Optional["AgencyOut"] = None
     destination: Optional[DestinationOut] = None
-    unit: Optional[UnitOut] = None
-    incident: Optional[IncidentOut] = None
+    unit: Optional["UnitOut"] = None
+    incident: Optional["IncidentOut"] = None
     class Config:
         from_attributes = True
 
@@ -661,7 +661,7 @@ class UnitPostingOut(BaseModel):
     removed_at: Optional[datetime] = None
     is_current: Optional[bool] = True
     posted_by_user_id: Optional[int] = None
-    unit: Optional[UnitOut] = None
+    unit: Optional["UnitOut"] = None
     post_zone: Optional[PostZoneOut] = None
     class Config:
         from_attributes = True
@@ -680,7 +680,7 @@ class EpcrExportOut(BaseModel):
     status: Optional[str] = 'pending'
     external_id: Optional[str] = None
     response_body: Optional[str] = None
-    incident: Optional[IncidentOut] = None
+    incident: Optional["IncidentOut"] = None
     destination: Optional[DestinationOut] = None
     class Config:
         from_attributes = True
@@ -2487,3 +2487,7 @@ def unit_trail(unit_id: int, hours: int = 8, current_user: dict = Depends(get_cu
     since = datetime.utcnow() - timedelta(hours=max(1, min(hours, 72)))
     events = db.query(StatusEvent).filter(StatusEvent.unit_id == unit_id, StatusEvent.lat != None, StatusEvent.lng != None, StatusEvent.created_at >= since).order_by(StatusEvent.created_at.asc()).all()
     return [{'lat': e.lat, 'lng': e.lng, 'status_code': e.status_code, 'created_at': e.created_at.isoformat() if e.created_at else None} for e in events]
+
+# Resolve forward references now that all Pydantic models are defined
+for _fwd in (ScheduledTransportOut, UnitPostingOut, EpcrExportOut):
+    _fwd.model_rebuild()
