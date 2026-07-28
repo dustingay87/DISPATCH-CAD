@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query, Request, UploadFile,
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, or_, UniqueConstraint
-from sqlalchemy.orm import declarative_base, relationship, Session, sessionmaker
+from sqlalchemy.orm import declarative_base, relationship, backref, Session, sessionmaker
 from pydantic import BaseModel
 from datetime import datetime
 from typing import List, Optional, Any
@@ -214,6 +214,29 @@ class Event(Base):
     data = Column(JSON)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
+class Destination(Base):
+    __tablename__ = 'destinations'
+    id = Column(Integer, primary_key=True, index=True)
+    agency_id = Column(Integer, ForeignKey('agencies.id'), nullable=True)
+    name = Column(String(255), nullable=False)
+    address = Column(Text)
+    category = Column(String(50))
+    lat = Column(Float)
+    lng = Column(Float)
+    notes = Column(JSON)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class IncidentDestination(Base):
+    __tablename__ = 'incident_destinations'
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey('incidents.id'), nullable=False)
+    destination_id = Column(Integer, ForeignKey('destinations.id'), nullable=False)
+    notes = Column(JSON)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    destination = relationship('Destination')
+    incident = relationship('Incident', backref='destinations')
+
 class CustomerConfig(Base):
     __tablename__ = 'customer_config'
     id = Column(Integer, primary_key=True, index=True)
@@ -262,6 +285,37 @@ class UserOut(BaseModel):
     is_active: bool
     agency_id: Optional[int] = None
     created_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+class DestinationCreate(BaseModel):
+    agency_id: Optional[int] = None
+    name: str
+    address: Optional[str] = None
+    category: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    notes: Optional[dict] = None
+    is_active: Optional[bool] = True
+
+class DestinationOut(DestinationCreate):
+    id: int
+    created_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+class IncidentDestinationCreate(BaseModel):
+    destination_id: Optional[int] = None
+    destination: Optional[DestinationCreate] = None
+    notes: Optional[dict] = None
+
+class IncidentDestinationOut(BaseModel):
+    id: int
+    incident_id: int
+    destination_id: int
+    notes: Optional[dict] = None
+    created_at: Optional[datetime] = None
+    destination: DestinationOut
     class Config:
         from_attributes = True
 
@@ -859,6 +913,44 @@ def list_events(entity_type: Optional[str] = Query(None), entity_id: Optional[in
         q = q.filter(Event.agency_id == agency_id)
     return q.order_by(Event.timestamp.desc()).limit(limit).all()
 
+@app.get('/destinations', response_model=List[DestinationOut])
+def list_destinations(agency_id: Optional[int] = Query(None), category: Optional[str] = Query(None), db: Session = Depends(get_db)):
+    q = db.query(Destination).filter(Destination.is_active == True)
+    if agency_id:
+        q = q.filter(Destination.agency_id == agency_id)
+    if category:
+        q = q.filter(Destination.category == category)
+    return q.order_by(Destination.name.asc()).all()
+
+@app.post('/destinations', response_model=DestinationOut)
+def create_destination(body: DestinationCreate, db: Session = Depends(get_db)):
+    d = Destination(**body.model_dump(exclude_unset=True))
+    db.add(d); db.commit(); db.refresh(d)
+    return d
+
+@app.get('/incidents/{incident_id}/destination', response_model=IncidentDestinationOut)
+def get_incident_destination(incident_id: int, db: Session = Depends(get_db)):
+    result = db.query(IncidentDestination).filter(IncidentDestination.incident_id == incident_id).order_by(IncidentDestination.created_at.desc()).first()
+    if not result:
+        raise HTTPException(status_code=404, detail='No destination set for this incident')
+    return result
+
+@app.post('/incidents/{incident_id}/destination', response_model=IncidentDestinationOut)
+def set_incident_destination(incident_id: int, body: IncidentDestinationCreate, db: Session = Depends(get_db)):
+    inc = db.query(Incident).get(incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    dest_id = body.destination_id
+    if not dest_id and body.destination:
+        new_dest = Destination(**body.destination.model_dump(exclude_unset=True))
+        db.add(new_dest); db.flush(); dest_id = new_dest.id
+    if not dest_id:
+        raise HTTPException(status_code=400, detail='destination_id or destination object is required')
+    idest = IncidentDestination(incident_id=incident_id, destination_id=dest_id, notes=body.notes)
+    db.add(idest); db.commit(); db.refresh(idest)
+    _log_event(db, 'destination_set', 'incident', incident_id, data={'destination_id': dest_id, 'notes': body.notes}, agency_id=inc.agency_id)
+    return idest
+
 @app.post('/personnel', response_model=PersonnelOut)
 def create_personnel(body: PersonnelCreate, db: Session = Depends(get_db)):
     p = Personnel(**body.model_dump())
@@ -1225,6 +1317,14 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
         db.add(IncidentUnit(incident_id=inc.id, unit_id=u3.id))
         u3.current_incident_id = inc.id; u3.current_status = 'AK'; u3.last_assigned_at = datetime.utcnow()
         db.add(StatusEvent(unit_id=u3.id, incident_id=inc.id, status_code='AK', reason='Dispatched to incident'))
+    def ensure_destination(name, agency_id, category, address, notes, lat, lng):
+        d = db.query(Destination).filter(Destination.agency_id == agency_id, Destination.name == name).first()
+        if d: return d
+        d = Destination(agency_id=agency_id, name=name, address=address, category=category, lat=lat, lng=lng, notes=notes)
+        db.add(d); db.flush(); return d
+    ensure_destination('Grant Hospital', ems.id, 'hospital', '1100 Medical Center Dr', {'gate_code':'4721','door_code':'ER2','animals':'','people':''}, CENTER[0]+0.02, CENTER[1]+0.005)
+    ensure_destination('Riverside Medical', ems.id, 'hospital', '3300 Riverside Pkwy', {'gate_code':'','door_code':'','animals':'','people':'Security escort after 2200'}, CENTER[0]-0.015, CENTER[1]-0.005)
+    ensure_destination('County Jail', police.id, 'jail', '350 Justice Blvd', {'gate_code':'1092','people':'Violent offenders processed at intake 3','door_code':'Sallyport 1','animals':'K9 unit active M-F'}, CENTER[0]-0.02, CENTER[1]-0.01)
     db.commit()
     _log_event(db, 'pilot_seeded', 'system', 0, user_id=current_user.get('user_id'), data={'agencies':[police.id, fire.id, ems.id]}, agency_id=None)
     return {'status': 'seeded', 'agencies': [police.id, fire.id, ems.id], 'incident': inc.id}

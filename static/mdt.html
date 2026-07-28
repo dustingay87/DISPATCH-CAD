@@ -72,7 +72,7 @@ function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}
 const url = new URL(window.location.href);
 let unitId = parseInt(url.searchParams.get('unit_id'));
 if(!unitId){ url.searchParams.set('unit_id','1'); unitId=1; history.replaceState(null,'',url); }
-let state = { unit:null, incident:null, messages:[], crew:[], agencyMap:{}, config:{statuses:[], dispositions:[], callTypes:[]}, lastIncidentId:null };
+let state = { unit:null, incident:null, destination:null, messages:[], crew:[], agencyMap:{}, config:{statuses:[], dispositions:[], callTypes:[]}, lastIncidentId:null };
 
 function showLoading(msg){ const el=document.getElementById('loading'); el.textContent=msg; el.classList.remove('hidden'); }
 function hideLoading(){ document.getElementById('loading').classList.add('hidden'); }
@@ -89,8 +89,8 @@ async function load(){
       const disp = cfg.find(c=>c.category==='dispositions')?.value;
       state.config.dispositions = disp ? (Array.isArray(disp) ? disp : [disp]) : (unit.agency_type==='ems' ? ['Transport to hospital','Refused','Treated/Released','Deceased','AMA'] : ['Cleared','Cancelled','False alarm']);
     }
-    if(unit.current_incident_id){ state.incident = await api(`/incidents/${unit.current_incident_id}`); state.messages = await api(`/units/${unitId}/messages`); }
-    else { state.incident=null; state.messages = await api(`/units/${unitId}/messages`); }
+    if(unit.current_incident_id){ state.incident = await api(`/incidents/${unit.current_incident_id}`); state.messages = await api(`/units/${unitId}/messages`); try { state.destination = await api(`/incidents/${unit.current_incident_id}/destination`); } catch(e){ state.destination = null; } }
+    else { state.incident=null; state.destination=null; state.messages = await api(`/units/${unitId}/messages`); }
     render();
   } catch(e){ document.getElementById('callPanel').innerHTML = `<div class='text-red-400 p-4 text-xl'>Error: ${e.message}</div>`; }
 }
@@ -145,6 +145,7 @@ function render(){
           <button class='bg-yellow-700 hover:bg-yellow-600 text-white px-4 py-3 rounded text-lg' onclick='setStatus("ER")'>En Route</button>
           <button class='bg-red-700 hover:bg-red-600 text-white px-4 py-3 rounded text-lg' onclick='setStatus("OS")'>On Scene</button>
         </div>
+        ${destinationHtml(state.destination)}
       </div>`;
   } else {
     document.getElementById('callPanel').innerHTML = `<div class='flex-1 flex items-center justify-center text-2xl text-slate-500'>No active call assigned</div>`;
@@ -157,6 +158,30 @@ function extraHtml(extra){
   return Object.entries(extra).map(([k,v])=>`<div class='col-span-1'><span class='text-slate-400 capitalize'>${k}:</span> ${v}</div>`).join('');
 }
 
+function destinationHtml(dest){
+  if(!dest) return `<div class='mt-4 p-3 bg-slate-800 rounded text-slate-400'>No destination set. Use Transport status to set one.</div>`;
+  const d = dest.destination || {};
+  const n = dest.notes || {};
+  const notes = Object.entries(n).map(([k,v])=>`<div class='text-sm'><span class='text-slate-400 capitalize'>${k}:</span> ${v}</div>`).join('');
+  return `<div class='mt-4 p-3 bg-slate-800 rounded border border-slate-600'>
+    <div class='font-bold text-lg'>Destination: ${d.name||'-'}</div>
+    <div class='text-slate-300'>${d.address||''} ${d.category ? `(${d.category})` : ''}</div>
+    <div class='mt-2'>${notes || '<span class="text-slate-500">No notes</span>'}</div>
+  </div>`;
+}
+
+async function promptDestination(incidentId){
+  const name = prompt('Destination name (hospital/jail/facility):'); if(!name) return;
+  const address = prompt('Destination address:') || '';
+  const notes = {};
+  const gate = prompt('Gate code:'); if(gate) notes.gate_code = gate;
+  const door = prompt('Door code:'); if(door) notes.door_code = door;
+  const dogs = prompt('Vicious dogs / animal alerts:'); if(dogs) notes.animals = dogs;
+  const people = prompt('Disorderly persons / known hazards:'); if(people) notes.people = people;
+  const other = prompt('Other destination notes:'); if(other) notes.other = other;
+  await api(`/incidents/${incidentId}/destination`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({destination:{name, address, category:'transport', notes}, notes})});
+}
+
 window.setStatus = async function(code){
   const u=state.unit;
   let extra={status_code:code};
@@ -164,7 +189,7 @@ window.setStatus = async function(code){
   const cfg=state.config;
   if(code==='CAN' || code==='TR' || code==='NPF'){ const d=prompt('Disposition?\n'+(cfg.dispositions||[]).join('\n')); if(d) extra.disposition=d; }
   const path = u.current_incident_id ? `/incidents/${u.current_incident_id}/units/${u.id}/status` : `/units/${u.id}/status`;
-  try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); await load(); } catch(e){ alert(e.message); }
+  try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); if((code==='TR' || code==='ED') && u.current_incident_id){ await promptDestination(u.current_incident_id); } await load(); } catch(e){ alert(e.message); }
 };
 
 window.toggleShift = async function(){
