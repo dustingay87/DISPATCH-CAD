@@ -29,6 +29,13 @@
   .timer { font-variant-numeric:tabular-nums; }
   .selected { outline:2px solid #3b82f6; }
   #map { width:100%; height:100%; background:#0f172a; }
+  .legend { background:rgba(15,23,42,0.9); color:#e2e8f0; padding:0.5rem; border-radius:0.375rem; border:1px solid #334155; font-size:0.7rem; }
+  .legend .dot { display:inline-block; width:0.6rem; height:0.6rem; border-radius:50%; margin-right:0.3rem; }
+  .resizer { width:4px; background:#475569; cursor:col-resize; transition:background 0.1s; }
+  .resizer:hover { background:#3b82f6; }
+  .resizer-h { height:4px; background:#475569; cursor:row-resize; transition:background 0.1s; }
+  .resizer-h:hover { background:#3b82f6; }
+  .locked .resizer, .locked .resizer-h { display:none; }
   ::-webkit-scrollbar { width:6px; height:6px; }
   ::-webkit-scrollbar-track { background:#0f172a; }
   ::-webkit-scrollbar-thumb { background:#475569; border-radius:3px; }
@@ -42,25 +49,28 @@
     <button id='cmdBtn' class='bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded'>Run</button>
     <div class='text-slate-400 font-mono' id='clock'>--:--:--</div>
     <label class='flex items-center space-x-1'><input id='liveToggle' type='checkbox' checked class='accent-blue-500'> <span>Live</span></label>
+    <label class='flex items-center space-x-1 text-slate-300'><input id='lockLayout' type='checkbox' class='accent-pink-500'> <span>Lock</span></label>
     <button id='refreshBtn' class='bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded'>Refresh</button>
     <a href='/' class='bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-white'>Dash</a>
     <a href='/call-entry' class='bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-white'>Call Entry</a>
     <a href='/mdt?unit_id=1' target='_blank' class='bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-white'>MDT</a>
     <a href='/avl' target='_blank' class='bg-cyan-700 hover:bg-cyan-600 px-2 py-1 rounded text-white'>AVL</a>
   </header>
-  <main class='flex-1 grid grid-cols-12 gap-1 p-1 overflow-hidden'>
-    <aside class='col-span-3 flex flex-col gap-1 min-h-0'>
+  <main id='main' class='flex-1 grid p-1 overflow-hidden' style='grid-template-columns:var(--col1,25%) 4px var(--col2,45%) 4px var(--col3,30%);'>
+    <aside class='flex flex-col gap-1 min-h-0'>
       <div class='card flex-1 min-h-0'>
         <div class='card-head flex justify-between'><span>Active Calls</span><span id='callCount' class='text-slate-400'>0</span></div>
         <div id='callList' class='card-body'></div>
       </div>
     </aside>
-    <section class='col-span-5 flex flex-col gap-1 min-h-0'>
-      <div id='incidentPanel' class='card flex-1 min-h-0 overflow-auto'>
+    <div id='resizer1' class='resizer'></div>
+    <section id='center' class='flex flex-col gap-1 min-h-0' style='grid-template-rows:var(--rowTop,55%) 4px var(--rowBottom,45%); display:grid;'>
+      <div id='incidentPanel' class='card min-h-0 overflow-auto'>
         <div class='card-head'>Incident Workspace</div>
         <div class='p-2 text-slate-400'>Select a call from the left.</div>
       </div>
-      <div class='card h-1/2 min-h-0'>
+      <div id='resizerV' class='resizer-h'></div>
+      <div class='card min-h-0'>
         <div class='card-head flex justify-between items-center'>
           <span>Map</span>
           <div class='flex gap-3 text-xs'>
@@ -71,14 +81,16 @@
         <div class='card-body p-0'><div id='map'></div></div>
       </div>
     </section>
-    <aside class='col-span-4 flex flex-col gap-1 min-h-0'>
+    <div id='resizer2' class='resizer'></div>
+    <aside class='flex flex-col gap-1 min-h-0'>
       <div class='card flex-1 min-h-0'>
         <div class='card-head flex justify-between'><span>Unit Board</span><span id='unitCount' class='text-slate-400'>0</span></div>
         <div id='unitList' class='card-body'></div>
       </div>
     </aside>
   </main>
-  <footer class='h-36 shrink-0 p-1 flex gap-1 min-h-0'>
+  <div id='footerResizer' class='resizer-h'></div>
+  <footer id='footer' class='shrink-0 p-1 flex gap-1 min-h-0' style='height:var(--footer-h,9rem);'>
     <div class='card w-1/2'>
       <div class='card-head'>Event Log</div>
       <div id='eventLog' class='card-body log font-mono text-slate-300 space-y-0.5'></div>
@@ -99,6 +111,99 @@ let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], ag
 const pathDisc = window.location.pathname.replace(/^\/|\/$/g,'');
 let DISCIPLINE = ['police','fire','ems'].includes(pathDisc) ? pathDisc : (new URLSearchParams(window.location.search).get('discipline') || 'all');
 let map, layers;
+const LAYOUT_KEY='d2d_dispatch_layout';
+
+function loadLayout(){
+  try{ const raw=localStorage.getItem(LAYOUT_KEY); if(raw){ const l=JSON.parse(raw); applyLayout(l); return l; } }catch(e){}
+  return {col1:'25%',col2:'45%',col3:'30%',rowTop:'55%',rowBottom:'45%',footer:'9rem',locked:false};
+}
+function saveLayout(l){
+  localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
+}
+function applyLayout(l){
+  const main=document.getElementById('main');
+  const center=document.getElementById('center');
+  const footer=document.getElementById('footer');
+  if(main){ main.style.setProperty('--col1', l.col1); main.style.setProperty('--col2', l.col2); main.style.setProperty('--col3', l.col3); }
+  if(center){ center.style.setProperty('--rowTop', l.rowTop); center.style.setProperty('--rowBottom', l.rowBottom); }
+  if(footer){ footer.style.height = l.footer; }
+  document.body.classList.toggle('locked', !!l.locked);
+  const cb=document.getElementById('lockLayout'); if(cb) cb.checked=!!l.locked;
+}
+function setupResizers(){
+  const main=document.getElementById('main'), center=document.getElementById('center'), footer=document.getElementById('footer');
+  const r1=document.getElementById('resizer1'), r2=document.getElementById('resizer2'), rv=document.getElementById('resizerV'), fr=document.getElementById('footerResizer');
+
+  function pct(v){ return parseFloat(v); }
+  function setCol(idx, v){ main.style.setProperty('--col'+idx, v+'%'); }
+  function setRow(top, bottom){ center.style.setProperty('--rowTop', top+'%'); center.style.setProperty('--rowBottom', bottom+'%'); }
+
+  function hResize(idx, e){
+    e.preventDefault();
+    const startX=e.clientX, total=main.clientWidth-8;
+    const c1=pct(getComputedStyle(main).getPropertyValue('--col1')), c2=pct(getComputedStyle(main).getPropertyValue('--col2')), c3=pct(getComputedStyle(main).getPropertyValue('--col3'));
+    function move(ev){
+      const dx=ev.clientX-startX, dPct=dx/total*100;
+      if(idx===1){
+        const n1=Math.max(10, Math.min(80, c1+dPct)), n2=Math.max(10, Math.min(80, c2-dPct));
+        if(n1+n2<95){ setCol(1,n1); setCol(2,n2); }
+      } else {
+        const n2=Math.max(10, Math.min(80, c2+dPct)), n3=Math.max(10, Math.min(80, c3-dPct));
+        if(n2+n3<95){ setCol(2,n2); setCol(3,n3); }
+      }
+      window.dispatchEvent(new Event('resize'));
+    }
+    function up(){
+      document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
+      const l=loadLayout(); ['col1','col2','col3'].forEach((k,i)=>l[k]=getComputedStyle(main).getPropertyValue('--col'+(i+1)).trim()); saveLayout(l);
+    }
+    document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+  }
+  if(r1) r1.addEventListener('mousedown', e=>hResize(1,e));
+  if(r2) r2.addEventListener('mousedown', e=>hResize(2,e));
+
+  if(rv) rv.addEventListener('mousedown', e=>{
+    e.preventDefault();
+    const startY=e.clientY, total=center.clientHeight-4;
+    const top=pct(getComputedStyle(center).getPropertyValue('--rowTop')), bottom=pct(getComputedStyle(center).getPropertyValue('--rowBottom'));
+    function move(ev){
+      const dy=ev.clientY-startY, dPct=dy/total*100;
+      const nTop=Math.max(5, Math.min(90, top+dPct)), nBottom=Math.max(5, Math.min(90, bottom-dPct));
+      if(nTop+nBottom<=100) setRow(nTop,nBottom);
+      window.dispatchEvent(new Event('resize'));
+    }
+    function up(){
+      document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
+      const l=loadLayout(); l.rowTop=getComputedStyle(center).getPropertyValue('--rowTop').trim(); l.rowBottom=getComputedStyle(center).getPropertyValue('--rowBottom').trim(); saveLayout(l);
+    }
+    document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+  });
+
+  if(fr && footer) fr.addEventListener('mousedown', e=>{
+    e.preventDefault();
+    const startY=e.clientY, startH=footer.clientHeight;
+    function move(ev){
+      const dy=ev.clientY-startY, newH=Math.max(60, Math.min(400, startH-dy));
+      footer.style.height=newH+'px';
+      window.dispatchEvent(new Event('resize'));
+    }
+    function up(){
+      document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
+      const l=loadLayout(); l.footer=footer.style.height; saveLayout(l);
+    }
+    document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+  });
+}
+function initLayout(){
+  const l=loadLayout();
+  applyLayout(l);
+  setupResizers();
+  document.getElementById('lockLayout').addEventListener('change', e=>{
+    const locked=e.target.checked;
+    document.body.classList.toggle('locked', locked);
+    const l=loadLayout(); l.locked=locked; saveLayout(l);
+  });
+}
 
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
@@ -116,6 +221,24 @@ function initMap(){
   map = L.map('map');
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'&copy; OpenStreetMap' }).addTo(map);
   layers = { units:L.layerGroup().addTo(map), incidents:L.layerGroup().addTo(map), trails:L.layerGroup().addTo(map), critical:L.layerGroup().addTo(map) };
+  const legend = L.control({position:'bottomright'});
+  legend.onAdd = function(){
+    const d = L.DomUtil.create('div','legend');
+    d.innerHTML = `
+      <div class='font-bold mb-1'>Units</div>
+      <div class='mb-0.5'><span class='dot' style='background:#ef4444'></span>On Scene</div>
+      <div class='mb-0.5'><span class='dot' style='background:#22c55e'></span>Available</div>
+      <div class='mb-0.5'><span class='dot' style='background:#eab308'></span>En Route / Transport</div>
+      <div class='mb-1'><span class='dot' style='background:#64748b'></span>Other</div>
+      <div class='font-bold mb-1 border-t border-slate-600 pt-1 mt-1'>Incidents</div>
+      <div class='mb-0.5'><span class='dot' style='background:#ef4444'></span>P1 Emergency</div>
+      <div class='mb-0.5'><span class='dot' style='background:#f97316'></span>P2 Urgent</div>
+      <div class='mb-0.5'><span class='dot' style='background:#eab308'></span>P3</div>
+      <div class='mb-0.5'><span class='dot' style='background:#22c55e'></span>P4 Low</div>
+      <div class='mb-0.5'><span class='dot' style='background:#64748b'></span>Closed</div>`;
+    return d;
+  };
+  legend.addTo(map);
 }
 
 function renderLog(){ const el=document.getElementById('eventLog'); el.innerHTML = state.logs.map(l=>`<div class='border-l-2 border-slate-600 pl-1'>${l}</div>`).join(''); el.scrollTop=0; }
@@ -471,10 +594,12 @@ function startStream(){
   es.onerror = () => { es.close(); setTimeout(startStream, 5000); };
 }
 
+initLayout();
 initMap();
 load();
 startStream();
 updateClock(); setInterval(updateClock,1000);
+window.addEventListener('resize', ()=>{ if(map) map.invalidateSize(); });
 setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); },5000);
 setInterval(()=>{ renderUnits(); renderCalls(); },1000);
 </script>
