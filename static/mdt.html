@@ -36,6 +36,7 @@
     </div>
     <div class='flex items-center space-x-6 text-lg'>
       <div id='clock' class='font-mono text-2xl'></div>
+      <a id='mobileLink' href='/mobile-mdt?unit_id=1' class='text-sm bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded'>Mobile MDT</a>
       <label class='flex items-center space-x-2'><input id='liveToggle' type='checkbox' checked class='accent-blue-500 w-5 h-5'> <span>Live</span></label>
     </div>
   </header>
@@ -80,7 +81,7 @@ const CONFIG = {
 };
 function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
 function elapsed(iso){ return iso ? (Date.now()-new Date(iso).getTime())/1000 : 0; }
-function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene'}; return M[code]||code; }
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul'}; return M[code]||code; }
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 
 const url = new URL(window.location.href);

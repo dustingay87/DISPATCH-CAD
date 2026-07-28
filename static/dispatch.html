@@ -108,7 +108,7 @@ function elapsed(iso){ return (Date.now()-toMs(iso))/1000; }
 function priorityTarget(p){ return {1:180,2:420,3:720,4:1200}[Math.min(Math.max(p||2,1),4)] || 420; }
 function slaClass(sec,target){ return sec>target ? 'text-red-400 font-bold' : 'text-slate-400'; }
 function unitClass(st){ if(st==='OS') return 'unit-os'; if(st==='ER'||st==='TR'||st==='DEL') return 'unit-er'; if(st==='AQ') return 'unit-aq'; return 'unit-oth'; }
-function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene'}; return M[code]||code; }
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul'}; return M[code]||code; }
 function matchesDiscipline(t){ return DISCIPLINE==='all' || t===DISCIPLINE; }
 function log(msg){ state.logs.unshift(`${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${msg}`); if(state.logs.length>100) state.logs.pop(); renderLog(); }
 

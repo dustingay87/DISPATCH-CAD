@@ -835,6 +835,10 @@ def calls_screen():
 def mdt():
     return FileResponse('static/mdt.html')
 
+@app.get('/mobile-mdt')
+def mobile_mdt():
+    return FileResponse('static/mobile_mdt.html')
+
 @app.get('/avl')
 def avl():
     return FileResponse('static/avl.html')
@@ -887,7 +891,7 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
         raise HTTPException(status_code=404, detail='Agency not found')
     templates = {
         'police': {
-            'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TC','label':'Traffic Control'},{'code':'CT','label':'Citation'},{'code':'ARR','label':'Arrest'},{'code':'BK','label':'Booking'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
             'unit_types': ['patrol','detective','supervisor','k9','swat','traffic','rescue'],
             'call_types': [
                 {'label':'Traffic Accident', 'priority':2, 'fields':['vehicles','injuries']},
@@ -910,10 +914,11 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
                 'Assault': ['patrol','supervisor','k9'],
                 'Welfare Check': ['patrol'],
                 'Suspicious Person': ['patrol','k9']
-            }
+            },
+            'dispositions': ['Arrested','Cited','Warned','Referred','Report','No Action','False Alarm']
         },
         'fire': {
-            'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'WATER','label':'Water on Fire'},{'code':'EXT','label':'Extinguished'},{'code':'OVER','label':'Overhaul'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
             'unit_types': ['engine','ladder','rescue','brush','tanker','ambulance','chief'],
             'call_types': [
                 {'label':'Structure Fire', 'priority':1, 'fields':['exposures','occupants']},
@@ -936,7 +941,8 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
                 'Alarm': ['engine','ladder'],
                 'Vehicle Accident': ['engine','rescue','ambulance'],
                 'Brush Fire': ['brush','tanker']
-            }
+            },
+            'dispositions': ['Extinguished','Controlled','Under Control','False Alarm','No Fire','Cancelled']
         },
         'ems': {
             'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
@@ -1149,12 +1155,20 @@ class UnitShift(BaseModel):
 class UnitStatus(BaseModel):
     status_code: str
     reason: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 class PersonnelAssign(BaseModel):
     unit_id: Optional[int] = None
 
 class AlertCrew(BaseModel):
     message: Optional[str] = None
+
+class LocationUpdate(BaseModel):
+    lat: float
+    lng: float
+    speed: Optional[float] = None
+    heading: Optional[float] = None
 
 class TaipIngest(BaseModel):
     raw: str
@@ -1488,26 +1502,31 @@ def recommend_units(incident_id: int, limit: int = Query(5), db: Session = Depen
     recommended_types = plan.get(incident.call_type, []) if isinstance(plan, dict) else []
     als_keywords = ['cardiac','chest pain','overdose','respiratory','allergic','stroke','behavioral','choking','seizure','als','trauma','unconscious']
     call_lower = (incident.call_type or '').lower()
-    required_level = 'ALS' if agency and agency.agency_type == 'ems' and any(k in call_lower for k in als_keywords) else 'BLS'
+    agency_type = agency.agency_type if agency else 'ems'
+    required_level = 'ALS' if agency_type == 'ems' and any(k in call_lower for k in als_keywords) else 'BLS'
     units = db.query(Unit).filter(Unit.current_status == 'AQ').all()
     scored = []
     for u in units:
         s = 0
         reasons = []
         caps = u.capabilities or {}
-        unit_level = (caps.get('service_level') or 'BLS').upper()
-        if required_level == 'ALS':
-            if unit_level == 'ALS':
-                s += 300; reasons.append('ALS capable')
+        unit_level = (caps.get('service_level') or 'BLS').upper() if agency_type == 'ems' else (u.unit_type or '')
+        u_agency = db.query(Agency).get(u.agency_id)
+        if u_agency and u_agency.agency_type != agency_type:
+            s -= 1000; reasons.append('different agency type')
+        if u.agency_id == incident.agency_id:
+            s += 100; reasons.append('same agency')
+        if agency_type == 'ems':
+            if required_level == 'ALS':
+                if unit_level == 'ALS':
+                    s += 300; reasons.append('ALS capable')
+                else:
+                    s -= 500; reasons.append('BLS only')
             else:
-                s -= 500; reasons.append('BLS only')
-        else:
-            if unit_level == 'ALS':
-                s += 50; reasons.append('ALS available')
+                if unit_level == 'ALS':
+                    s += 50; reasons.append('ALS available')
         if u.unit_type in recommended_types:
             s += 100; reasons.append('run-card match')
-        if u.agency_id == incident.agency_id:
-            s += 50; reasons.append('same agency')
         dist = None
         if incident.lat is not None and incident.lng is not None and u.lat is not None and u.lng is not None:
             R = 3959
@@ -1518,7 +1537,8 @@ def recommend_units(incident_id: int, limit: int = Query(5), db: Session = Depen
             dist = 2*R*math.atan2(math.sqrt(a), math.sqrt(1-a))
             s -= dist * 20
         reasons.append(f"{dist:.1f} mi" if dist is not None else 'no GPS')
-        scored.append({'unit_id': u.id, 'call_sign': u.call_sign, 'unit_type': u.unit_type, 'agency_id': u.agency_id, 'service_level': unit_level, 'distance_miles': round(dist,2) if dist is not None else None, 'score': round(s,2), 'reason': ' | '.join(reasons)})
+        role = unit_level if agency_type == 'ems' else (u.unit_type or '')
+        scored.append({'unit_id': u.id, 'call_sign': u.call_sign, 'unit_type': u.unit_type, 'agency_id': u.agency_id, 'agency_type': u_agency.agency_type if u_agency else None, 'service_level': role, 'distance_miles': round(dist,2) if dist is not None else None, 'score': round(s,2), 'reason': ' | '.join(reasons)})
     scored.sort(key=lambda x: -x['score'])
     return scored[:limit]
 
@@ -1738,7 +1758,24 @@ def set_unit_status(unit_id: int, body: UnitStatus, db: Session = Depends(get_db
     if not unit:
         raise HTTPException(status_code=404, detail='Unit not found')
     unit.current_status = body.status_code
-    db.add(StatusEvent(unit_id=unit_id, incident_id=None, status_code=body.status_code, reason=body.reason))
+    if body.lat is not None: unit.lat = body.lat
+    if body.lng is not None: unit.lng = body.lng
+    db.add(StatusEvent(unit_id=unit_id, incident_id=None, status_code=body.status_code, reason=body.reason, lat=body.lat, lng=body.lng))
+    db.commit()
+    db.refresh(unit)
+    return unit
+
+@app.post('/units/{unit_id}/location', response_model=UnitOut)
+def update_unit_location(unit_id: int, body: LocationUpdate, db: Session = Depends(get_db)):
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    unit.lat = body.lat
+    unit.lng = body.lng
+    if body.speed is not None: unit.speed = body.speed
+    if body.heading is not None: unit.heading = body.heading
+    unit.last_seen_at = datetime.utcnow()
+    db.add(StatusEvent(unit_id=unit_id, incident_id=None, status_code='GPS', lat=body.lat, lng=body.lng, reason=f"speed={body.speed}" if body.speed is not None else None))
     db.commit()
     db.refresh(unit)
     return unit
@@ -1800,6 +1837,21 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
     police = ensure_agency('City Police', 'police', 'pilot.police', CENTER[0]-0.01, CENTER[1]+0.01)
     fire = ensure_agency('Metro Fire', 'fire', 'pilot.fire', CENTER[0]+0.01, CENTER[1]-0.01)
     ems = ensure_agency('County EMS', 'ems', 'pilot.ems', CENTER[0]+0.005, CENTER[1]-0.015)
+    db.commit()
+    def ensure_config(agency, template):
+        existing = db.query(CustomerConfig).filter_by(agency_id=agency.id, category='__seeded__').first()
+        if existing: return
+        for category, value in template.items():
+            db.add(CustomerConfig(agency_id=agency.id, category=category, key='defaults', value=value))
+        db.add(CustomerConfig(agency_id=agency.id, category='__seeded__', key='flag', value=True))
+    templates = {
+        'police': {'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TC','label':'Traffic Control'},{'code':'CT','label':'Citation'},{'code':'ARR','label':'Arrest'},{'code':'BK','label':'Booking'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}], 'dispositions': ['Arrested','Cited','Warned','Referred','Report','No Action','False Alarm']},
+        'fire': {'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'WATER','label':'Water on Fire'},{'code':'EXT','label':'Extinguished'},{'code':'OVER','label':'Overhaul'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}], 'dispositions': ['Extinguished','Controlled','Under Control','False Alarm','No Fire','Cancelled']},
+        'ems': {'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}], 'dispositions': ['Transport to hospital','Refused','Treated/Released','Deceased','AMA']}
+    }
+    ensure_config(police, templates['police'])
+    ensure_config(fire, templates['fire'])
+    ensure_config(ems, templates['ems'])
     db.commit()
     def ensure_unit(call_sign, agency_id, unit_type, lat, lng, taip_id, capabilities=None):
         u = db.query(Unit).filter(Unit.call_sign == call_sign).first()

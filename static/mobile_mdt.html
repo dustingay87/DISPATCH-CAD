@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang='en'>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width,initial-scale=1,viewport-fit=cover'>
+  <title>Mobile MDT</title>
+  <script src='https://cdn.tailwindcss.com'></script>
+  <style>
+    body { -webkit-tap-highlight-color:transparent; overscroll-behavior:none; }
+    .touch-btn { min-height:56px; }
+    .status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:0.5rem; }
+    @media (min-width:640px){ .status-grid { grid-template-columns:repeat(4,1fr); } }
+  </style>
+</head>
+<body class='bg-slate-950 text-slate-200 min-h-screen flex flex-col'>
+  <header class='bg-slate-900 border-b border-slate-700 p-3 sticky top-0 z-10'>
+    <div class='flex justify-between items-center'>
+      <div>
+        <div id='unitCallsign' class='text-lg font-bold text-white'>--</div>
+        <div id='unitAgency' class='text-xs text-slate-400'>--</div>
+      </div>
+      <div class='text-right'>
+        <div id='unitStatus' class='text-sm font-bold text-green-400'>--</div>
+        <div class='text-xs text-slate-500'>Shift <span id='shiftTimer'>--</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main class='flex-1 p-3 space-y-3'>
+    <section id='callPanel' class='bg-slate-900 rounded p-3 border border-slate-700'>
+      <div class='text-slate-500'>No active call</div>
+    </section>
+
+    <section>
+      <div class='text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide'>Status</div>
+      <div id='statusButtons' class='status-grid'>
+        <div class='text-slate-500 text-sm'>Loading status buttons...</div>
+      </div>
+    </section>
+
+    <section>
+      <div class='text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide'>Actions</div>
+      <div class='grid grid-cols-2 gap-2'>
+        <button class='touch-btn bg-blue-700 hover:bg-blue-600 rounded text-sm font-semibold' onclick='locate()'>Update GPS</button>
+        <button class='touch-btn bg-slate-700 hover:bg-slate-600 rounded text-sm font-semibold' onclick='sendQuickMessage()'>Quick Message</button>
+        <button class='touch-btn bg-slate-700 hover:bg-slate-600 rounded text-sm font-semibold' onclick='toggleInService()'>Toggle In/Out</button>
+        <button class='touch-btn bg-slate-700 hover:bg-slate-600 rounded text-sm font-semibold' onclick='window.location.href="/mdt?unit_id="+unitId'>Full MDT</button>
+      </div>
+    </section>
+
+    <section id='messagesPanel' class='bg-slate-900 rounded p-3 border border-slate-700'>
+      <div class='text-xs font-semibold text-slate-400 mb-1'>Messages</div>
+      <div id='messagesList' class='space-y-1 text-sm max-h-40 overflow-y-auto'></div>
+    </section>
+  </main>
+
+  <div id='loading' class='fixed inset-0 bg-slate-950/90 flex items-center justify-center text-2xl font-bold z-50 hidden'>Loading...</div>
+
+<script>
+const url = new URL(window.location.href);
+let unitId = parseInt(url.searchParams.get('unit_id'));
+if(!unitId){ url.searchParams.set('unit_id','1'); unitId=1; history.replaceState(null,'',url); }
+let state = { unit:null, incident:null, messages:[], agencyMap:{}, config:{statuses:[], dispositions:[], callTypes:[]}, destination:null, destinationStatus:null };
+
+function showLoading(msg='Loading...'){ const el=document.getElementById('loading'); el.textContent=msg; el.classList.remove('hidden'); }
+function hideLoading(){ document.getElementById('loading').classList.add('hidden'); }
+function api(path,opts={}){ return fetch(path,{...opts,credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
+function elapsed(iso){ return iso ? (Date.now()-new Date(iso).getTime())/1000 : 0; }
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul'}; return M[code]||code; }
+
+async function load(){
+  showLoading();
+  try {
+    const agencies=await api('/agencies'); state.agencyMap={}; agencies.forEach(a=>state.agencyMap[a.id]=a);
+    const unit=await api(`/units/${unitId}`); state.unit=unit;
+    if(unit.agency_id){
+      const cfg=await api(`/config?agency_id=${unit.agency_id}`);
+      state.config.statuses = cfg.find(c=>c.category==='statuses')?.value || [];
+      state.config.callTypes = cfg.find(c=>c.category==='call_types')?.value || [];
+      const disp = cfg.find(c=>c.category==='dispositions')?.value;
+      state.config.dispositions = disp ? (Array.isArray(disp) ? disp : [disp]) : [];
+    }
+    if(unit.current_incident_id){ state.incident = await api(`/incidents/${unit.current_incident_id}`); state.messages = await api(`/units/${unitId}/messages`); try { state.destination = await api(`/incidents/${unit.current_incident_id}/destination`); } catch(e){ state.destination=null; } }
+    else { state.incident=null; state.destination=null; state.messages = await api(`/units/${unitId}/messages`); }
+    state.destinationStatus = null;
+    if(state.destination && state.destination.destination && state.destination.destination.id){ try { state.destinationStatus = await api(`/destinations/${state.destination.destination.id}/status?limit=1`); } catch(e){} }
+    render();
+  } catch(e){ document.getElementById('callPanel').innerHTML = `<div class='text-red-400 p-4 text-xl'>Error: ${e.message}</div>`; }
+  hideLoading();
+}
+
+function render(){
+  const u=state.unit; const a=state.agencyMap[u.agency_id]||{};
+  document.getElementById('unitCallsign').textContent = u.call_sign;
+  document.getElementById('unitAgency').textContent = a.name || a.agency_type || '';
+  document.getElementById('unitStatus').textContent = statusLabel(u.current_status);
+  document.getElementById('shiftTimer').textContent = u.in_service_at ? fmtDur(elapsed(u.in_service_at)) : '--';
+  renderCallPanel();
+  renderStatusButtons();
+  renderMessages();
+}
+
+function renderCallPanel(){
+  const el=document.getElementById('callPanel');
+  const i=state.incident;
+  if(!i){ el.innerHTML = `<div class='text-slate-500'>No active call</div>`; return; }
+  const agency=state.agencyMap[i.agency_id]||{};
+  let dest='';
+  if(state.destination && state.destination.destination){
+    const d=state.destination.destination;
+    const st=state.destinationStatus && state.destinationStatus.length ? state.destinationStatus[0] : null;
+    const statusBadge = st ? `<span class='ml-1 px-1.5 bg-slate-700 rounded text-xs'>${st.status.toUpperCase()}</span>` : '';
+    dest = `<div class='mt-2 pt-2 border-t border-slate-700'><div class='font-bold text-sm'>Destination: ${d.name||'-'}${statusBadge}</div><div class='text-xs text-slate-300'>${d.address||''}</div></div>`;
+  }
+  const elapsedCall = fmtDur(elapsed(i.created_at));
+  el.innerHTML = `
+    <div class='font-bold text-lg text-white mb-1'>${i.call_number||i.incident_number}</div>
+    <div class='text-sm'>${i.call_type} <span class='text-slate-400'>P${i.priority}</span></div>
+    <div class='text-xs text-slate-300 mt-1'>${i.location_text||'-'}</div>
+    <div class='text-xs text-slate-400 mt-1'>Elapsed: ${elapsedCall}</div>
+    ${dest}
+  `;
+}
+
+function renderStatusButtons(){
+  const el=document.getElementById('statusButtons');
+  const statuses = state.config.statuses.length ? state.config.statuses : [{code:'AQ',label:'Available'},{code:'ER',label:'En Route'},{code:'OS',label:'On Scene'},{code:'TR',label:'Transport'},{code:'CAN',label:'Cancelled'},{code:'OOS',label:'OOS'}];
+  const colors = {AQ:'bg-green-700 hover:bg-green-600',ER:'bg-blue-700 hover:bg-blue-600',OS:'bg-red-700 hover:bg-red-600',TR:'bg-purple-700 hover:bg-purple-600',CAN:'bg-slate-700 hover:bg-slate-600',LUN:'bg-slate-700 hover:bg-slate-600',OOS:'bg-slate-700 hover:bg-slate-600',MAINT:'bg-slate-700 hover:bg-slate-600',WATER:'bg-orange-700 hover:bg-orange-600',EXT:'bg-green-800 hover:bg-green-700',OVER:'bg-teal-700 hover:bg-teal-600',TC:'bg-yellow-700 hover:bg-yellow-600',CT:'bg-yellow-700 hover:bg-yellow-600',ARR:'bg-red-800 hover:bg-red-700',BK:'bg-slate-700 hover:bg-slate-600'};
+  el.innerHTML = statuses.map(s=>{
+    const col = colors[s.code] || 'bg-slate-700 hover:bg-slate-600';
+    return `<button class='touch-btn ${col} rounded font-semibold text-sm' onclick='setStatus("${s.code}")'>${s.label||s.code}</button>`;
+  }).join('');
+}
+
+function renderMessages(){
+  const el=document.getElementById('messagesList');
+  if(!state.messages || !state.messages.length){ el.innerHTML = '<div class=\'text-slate-500\'>No messages</div>'; return; }
+  el.innerHTML = state.messages.slice(0,20).map(m=>`<div class='border-b border-slate-800 pb-1'><span class='text-slate-400 text-xs'>${new Date(m.sent_at||m.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span> ${m.message_text}</div>`).join('');
+}
+
+window.setStatus = async function(code){
+  const u=state.unit; if(!u) return;
+  let extra={status_code:code, lat:u.lat, lng:u.lng};
+  if(['TR','CAN','ARR','CT'].includes(code)){ const pc=prompt('Count / note:'); if(pc) extra.reason=pc; }
+  const cfg=state.config;
+  if(['CAN','TR','ARR','NPF'].includes(code) && cfg.dispositions.length){ const d=prompt('Disposition?\n'+cfg.dispositions.join('\n')); if(d) extra.disposition=d; }
+  if(u.current_incident_id && ['OS','ER','TR','ED','DEL','AQ'].includes(code)){
+    const m = prompt('Mileage (odometer)?'); if(m && !isNaN(parseFloat(m))) extra.mileage = parseFloat(m);
+  }
+  if((code==='TR' || code==='ED') && u.current_incident_id){
+    let dest = state.destination;
+    if(!dest || !dest.destination_id){ dest = await promptDestination(u.current_incident_id); if(dest) state.destination = dest; }
+    if(dest && dest.destination_id) extra.destination_id = dest.destination_id;
+  }
+  const path = u.current_incident_id ? `/incidents/${u.current_incident_id}/units/${u.id}/status` : `/units/${u.id}/status`;
+  try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); await load(); } catch(e){ alert(e.message); }
+};
+
+async function promptDestination(incidentId){
+  const name=prompt('Destination name (hospital/jail/facility):'); if(!name) return;
+  const address=prompt('Destination address:') || '';
+  const result = await api(`/incidents/${incidentId}/destination`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({destination:{name, address, category:'transport'}, notes:{}})});
+  state.destination = result; return result;
+}
+
+window.locate = function(){
+  if(!navigator.geolocation){ alert('Geolocation not supported'); return; }
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    try { await api(`/units/${unitId}/location`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({lat:pos.coords.latitude, lng:pos.coords.longitude, speed:pos.coords.speed, heading:pos.coords.heading})}); } catch(e){}
+    state.unit.lat = pos.coords.latitude; state.unit.lng = pos.coords.longitude;
+    alert('GPS updated');
+  }, e=>alert('GPS error: '+e.message), {enableHighAccuracy:true});
+};
+
+window.sendQuickMessage = async function(){
+  const text = prompt('Message:'); if(!text) return;
+  const payload = state.incident ? {incident_id:state.incident.id, channel:'mdt', message_text:text} : {channel:'mdt', message_text:text};
+  try { await api('/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); await load(); } catch(e){ alert(e.message); }
+};
+
+window.toggleInService = async function(){
+  const u=state.unit; if(!u) return;
+  const code = u.current_status === 'OOS' ? 'AQ' : 'OOS';
+  try { await api(`/units/${unitId}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status_code:code})}); await load(); } catch(e){ alert(e.message); }
+};
+
+load(); setInterval(load, 8000);
+</script>
+</body>
+</html>
