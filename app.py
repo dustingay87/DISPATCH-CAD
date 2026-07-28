@@ -198,6 +198,17 @@ class DispatchMessage(Base):
     sent_at = Column(DateTime)
     delivered_at = Column(DateTime)
 
+class Event(Base):
+    __tablename__ = 'events'
+    id = Column(Integer, primary_key=True, index=True)
+    event_type = Column(String(100), index=True)
+    entity_type = Column(String(100), index=True)
+    entity_id = Column(Integer, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    agency_id = Column(Integer, ForeignKey('agencies.id'), nullable=True)
+    data = Column(JSON)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
 class CustomerConfig(Base):
     __tablename__ = 'customer_config'
     id = Column(Integer, primary_key=True, index=True)
@@ -295,6 +306,9 @@ def seed_default_admin():
 @app.on_event('startup')
 def startup():
     seed_default_admin()
+
+def _log_event(db: Session, event_type: str, entity_type: str, entity_id: int, user_id: Optional[int] = None, data: Optional[dict] = None, agency_id: Optional[int] = None):
+    db.add(Event(event_type=event_type, entity_type=entity_type, entity_id=entity_id, user_id=user_id, data=data, agency_id=agency_id))
 
 @app.middleware('http')
 async def auth_middleware(request: Request, call_next):
@@ -505,6 +519,18 @@ class MessageOut(BaseModel):
     class Config:
         from_attributes = True
 
+class EventOut(BaseModel):
+    id: int
+    event_type: str
+    entity_type: str
+    entity_id: int
+    user_id: Optional[int] = None
+    agency_id: Optional[int] = None
+    data: Optional[dict] = None
+    timestamp: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
 class TaipPositionOut(BaseModel):
     id: int
     unit_id: Optional[int] = None
@@ -652,6 +678,17 @@ def create_message(body: MessageCreate, db: Session = Depends(get_db)):
     db.refresh(msg)
     return msg
 
+@app.get('/events', response_model=List[EventOut])
+def list_events(entity_type: Optional[str] = Query(None), entity_id: Optional[int] = Query(None), agency_id: Optional[int] = Query(None), limit: int = 100, db: Session = Depends(get_db)):
+    q = db.query(Event)
+    if entity_type:
+        q = q.filter(Event.entity_type == entity_type)
+    if entity_id:
+        q = q.filter(Event.entity_id == entity_id)
+    if agency_id:
+        q = q.filter(Event.agency_id == agency_id)
+    return q.order_by(Event.timestamp.desc()).limit(limit).all()
+
 @app.post('/personnel', response_model=PersonnelOut)
 def create_personnel(body: PersonnelCreate, db: Session = Depends(get_db)):
     p = Personnel(**body.model_dump())
@@ -670,15 +707,18 @@ def list_personnel(agency_id: Optional[int] = Query(None), unit_id: Optional[int
     return q.all()
 
 @app.post('/incidents', response_model=IncidentOut)
-def create_incident(body: IncidentCreate, db: Session = Depends(get_db)):
+def create_incident(request: Request, body: IncidentCreate, db: Session = Depends(get_db)):
     data = body.model_dump()
     if not data.get('incident_number'):
         count = db.query(Incident).filter(Incident.agency_id == data['agency_id']).count()
         data['incident_number'] = f"{data['agency_id']}-{count + 1:05d}"
     if not data.get('call_number'):
         data['call_number'] = data['incident_number']
+    user = get_current_user(request)
     incident = Incident(**data)
     db.add(incident)
+    db.flush()
+    _log_event(db, 'incident_created', 'incident', incident.id, user_id=user.get('user_id'), data=data, agency_id=data.get('agency_id'))
     db.commit()
     db.refresh(incident)
     return incident
@@ -722,20 +762,23 @@ def timeline(incident_id: int, db: Session = Depends(get_db)):
     return {'incident': to_dict(incident), 'events': events, 'logs': logs, 'messages': messages, 'assignments': assignments}
 
 @app.put('/incidents/{incident_id}', response_model=IncidentOut)
-def update_incident(incident_id: int, body: IncidentUpdate, db: Session = Depends(get_db)):
+def update_incident(request: Request, incident_id: int, body: IncidentUpdate, db: Session = Depends(get_db)):
     incident = db.query(Incident).get(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail='Incident not found')
-    for k, v in body.model_dump(exclude_unset=True).items():
+    user = get_current_user(request)
+    changes = body.model_dump(exclude_unset=True)
+    for k, v in changes.items():
         setattr(incident, k, v)
     if body.status == 'closed' and not incident.closed_at:
         incident.closed_at = datetime.utcnow()
+    _log_event(db, 'incident_updated', 'incident', incident.id, user_id=user.get('user_id'), data=changes, agency_id=incident.agency_id)
     db.commit()
     db.refresh(incident)
     return incident
 
 @app.post('/incidents/{incident_id}/dispatch/{unit_id}')
-def dispatch_unit(incident_id: int, unit_id: int, notes: Optional[str] = None, db: Session = Depends(get_db)):
+def dispatch_unit(request: Request, incident_id: int, unit_id: int, notes: Optional[str] = None, db: Session = Depends(get_db)):
     incident = db.query(Incident).get(incident_id)
     unit = db.query(Unit).get(unit_id)
     if not incident or not unit:
@@ -743,12 +786,15 @@ def dispatch_unit(incident_id: int, unit_id: int, notes: Optional[str] = None, d
     existing = db.query(IncidentUnit).filter_by(incident_id=incident_id, unit_id=unit_id).first()
     if existing:
         raise HTTPException(status_code=400, detail='Unit already dispatched to incident')
+    user = get_current_user(request)
     iu = IncidentUnit(incident_id=incident_id, unit_id=unit_id, notes=notes)
     unit.current_incident_id = incident_id
     unit.last_assigned_at = datetime.utcnow()
     unit.current_status = 'AK'
     incident.status = 'dispatched'
     db.add(iu)
+    db.flush()
+    _log_event(db, 'unit_dispatched', 'incident', incident_id, user_id=user.get('user_id'), data={'unit_id': unit_id, 'notes': notes}, agency_id=incident.agency_id)
     db.add(StatusEvent(unit_id=unit_id, incident_id=incident_id, status_code='AK', reason='Dispatched to incident'))
     db.commit()
     db.refresh(iu)
@@ -760,7 +806,7 @@ def dispatch_unit(incident_id: int, unit_id: int, notes: Optional[str] = None, d
     }
 
 @app.post('/incidents/{incident_id}/units/{unit_id}/status')
-def update_unit_status(incident_id: int, unit_id: int, body: StatusUpdate, db: Session = Depends(get_db)):
+def update_unit_status(request: Request, incident_id: int, unit_id: int, body: StatusUpdate, db: Session = Depends(get_db)):
     iu = db.query(IncidentUnit).filter_by(incident_id=incident_id, unit_id=unit_id).first()
     if not iu:
         raise HTTPException(status_code=404, detail='Unit not assigned to incident')
@@ -787,6 +833,7 @@ def update_unit_status(incident_id: int, unit_id: int, body: StatusUpdate, db: S
         incident.status = 'on_scene'
     elif body.status_code == 'ER' and incident.status == 'open':
         incident.status = 'en_route'
+    user = get_current_user(request)
     db.add(StatusEvent(
         unit_id=unit_id,
         incident_id=incident_id,
@@ -795,6 +842,7 @@ def update_unit_status(incident_id: int, unit_id: int, body: StatusUpdate, db: S
         lat=body.lat,
         lng=body.lng
     ))
+    _log_event(db, 'unit_status_changed', 'incident', incident_id, user_id=user.get('user_id'), data={'unit_id': unit_id, 'status_code': body.status_code, 'disposition': body.disposition, 'lat': body.lat, 'lng': body.lng}, agency_id=incident.agency_id)
     db.commit()
     return {'incident_id': incident_id, 'unit_id': unit_id, 'status': body.status_code}
 
