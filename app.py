@@ -672,6 +672,7 @@ class UnitCreate(BaseModel):
     name: str
     call_sign: str
     unit_type: str = 'engine'
+    capabilities: Optional[dict] = None
     radio_id: Optional[str] = None
     taip_id: Optional[str] = None
     lat: Optional[float] = None
@@ -693,6 +694,7 @@ class UnitOut(BaseModel):
     last_assigned_at: Optional[datetime] = None
     in_service_at: Optional[datetime] = None
     accumulated_call_seconds: Optional[float] = None
+    capabilities: Optional[dict] = None
     taip_id: Optional[str] = None
     class Config:
         from_attributes = True
@@ -1051,27 +1053,43 @@ def recommend_units(incident_id: int, limit: int = Query(5), db: Session = Depen
     incident = db.query(Incident).get(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail='Incident not found')
+    agency = db.query(Agency).get(incident.agency_id)
     cfg = db.query(CustomerConfig).filter_by(agency_id=incident.agency_id, category='response_plans', key='defaults').first()
     plan = (cfg.value or {}) if cfg else {}
     recommended_types = plan.get(incident.call_type, []) if isinstance(plan, dict) else []
+    als_keywords = ['cardiac','chest pain','overdose','respiratory','allergic','stroke','behavioral','choking','seizure','als','trauma','unconscious']
+    call_lower = (incident.call_type or '').lower()
+    required_level = 'ALS' if agency and agency.agency_type == 'ems' and any(k in call_lower for k in als_keywords) else 'BLS'
     units = db.query(Unit).filter(Unit.current_status == 'AQ').all()
     scored = []
     for u in units:
         s = 0
         reasons = []
+        caps = u.capabilities or {}
+        unit_level = (caps.get('service_level') or 'BLS').upper()
+        if required_level == 'ALS':
+            if unit_level == 'ALS':
+                s += 300; reasons.append('ALS capable')
+            else:
+                s -= 500; reasons.append('BLS only')
+        else:
+            if unit_level == 'ALS':
+                s += 50; reasons.append('ALS available')
         if u.unit_type in recommended_types:
-            s += 100
-            reasons.append('run-card')
+            s += 100; reasons.append('run-card match')
         if u.agency_id == incident.agency_id:
-            s += 20
-            reasons.append('same-agency')
+            s += 50; reasons.append('same agency')
         dist = None
-        if incident.lat is not None and u.lat is not None and u.lng is not None:
-            dy = (u.lat - incident.lat) * 69.0
-            dx = (u.lng - incident.lng) * 69.0 * math.cos(math.radians(incident.lat))
-            dist = math.sqrt(dx*dx + dy*dy)
-            s -= dist * 5
-        scored.append({'unit_id': u.id, 'call_sign': u.call_sign, 'unit_type': u.unit_type, 'agency_id': u.agency_id, 'distance_miles': dist, 'score': s, 'reason': ' / '.join(reasons) or 'available'})
+        if incident.lat is not None and incident.lng is not None and u.lat is not None and u.lng is not None:
+            R = 3959
+            toR = math.pi/180
+            dlat = (u.lat - incident.lat)*toR
+            dlng = (u.lng - incident.lng)*toR
+            a = math.sin(dlat/2)**2 + math.cos(incident.lat*toR)*math.cos(u.lat*toR)*math.sin(dlng/2)**2
+            dist = 2*R*math.atan2(math.sqrt(a), math.sqrt(1-a))
+            s -= dist * 20
+        reasons.append(f"{dist:.1f} mi" if dist is not None else 'no GPS')
+        scored.append({'unit_id': u.id, 'call_sign': u.call_sign, 'unit_type': u.unit_type, 'agency_id': u.agency_id, 'service_level': unit_level, 'distance_miles': round(dist,2) if dist is not None else None, 'score': round(s,2), 'reason': ' | '.join(reasons)})
     scored.sort(key=lambda x: -x['score'])
     return scored[:limit]
 
@@ -1326,14 +1344,14 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
     fire = ensure_agency('Metro Fire', 'fire', 'pilot.fire', CENTER[0]+0.01, CENTER[1]-0.01)
     ems = ensure_agency('County EMS', 'ems', 'pilot.ems', CENTER[0]+0.005, CENTER[1]-0.015)
     db.commit()
-    def ensure_unit(call_sign, agency_id, unit_type, lat, lng, taip_id):
+    def ensure_unit(call_sign, agency_id, unit_type, lat, lng, taip_id, capabilities=None):
         u = db.query(Unit).filter(Unit.call_sign == call_sign).first()
         if u: return u
-        u = Unit(name=call_sign, call_sign=call_sign, agency_id=agency_id, unit_type=unit_type, lat=lat, lng=lng, taip_id=taip_id, in_service_at=datetime.utcnow(), current_status='AQ', current_incident_id=None, accumulated_call_seconds=0)
+        u = Unit(name=call_sign, call_sign=call_sign, agency_id=agency_id, unit_type=unit_type, capabilities=capabilities, lat=lat, lng=lng, taip_id=taip_id, in_service_at=datetime.utcnow(), current_status='AQ', current_incident_id=None, accumulated_call_seconds=0)
         db.add(u); db.flush(); return u
-    u1 = ensure_unit('A12', police.id, 'patrol', CENTER[0]-0.008, CENTER[1]+0.012, 'TAIP-A12')
-    u2 = ensure_unit('E1', fire.id, 'engine', CENTER[0]+0.012, CENTER[1]-0.012, 'TAIP-E1')
-    u3 = ensure_unit('M1', ems.id, 'ambulance', CENTER[0]+0.007, CENTER[1]-0.017, 'TAIP-M1')
+    u1 = ensure_unit('A12', police.id, 'patrol', CENTER[0]-0.008, CENTER[1]+0.012, 'TAIP-A12', {'service_level':'patrol','equipment':['lightbar','patrol']})
+    u2 = ensure_unit('E1', fire.id, 'engine', CENTER[0]+0.012, CENTER[1]-0.012, 'TAIP-E1', {'apparatus':'engine','water':1000,'equipment':['hose','ladder']})
+    u3 = ensure_unit('M1', ems.id, 'ambulance', CENTER[0]+0.007, CENTER[1]-0.017, 'TAIP-M1', {'service_level':'ALS','equipment':['monitor','defibrillator','oxygen']})
     db.commit()
     if db.query(Personnel).filter(Personnel.email == 'john@pilot.example').count() == 0:
         db.add(Personnel(agency_id=police.id, first_name='John', last_name='Doe', email='john@pilot.example', current_unit_id=u1.id))
