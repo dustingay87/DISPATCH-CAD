@@ -99,8 +99,8 @@ const DEFAULT_CENTER = [39.9612,-82.9988];
 
 const ROLE_BADGE = { ems:{label:'D2D EMS',color:'bg-emerald-700'}, fire:{label:'D2D Fire',color:'bg-red-700'}, law:{label:'D2D Law',color:'bg-blue-700'}, all:{label:'D2D Command',color:'bg-purple-700'} };
 
-function showLoading(msg='Loading...'){ const el=document.getElementById('loading'); el.textContent=msg; el.classList.remove('hidden'); }
-function hideLoading(){ document.getElementById('loading').classList.add('hidden'); }
+function showLoading(msg='Loading...'){ const el=document.getElementById('loading'); if(!el) return; el.textContent=msg; el.classList.remove('hidden'); }
+function hideLoading(){ const el=document.getElementById('loading'); if(!el) return; el.classList.add('hidden'); }
 function api(path,opts={}){ return fetch(path,{...opts,credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
 function elapsed(iso){ return iso ? (Date.now()-new Date(iso).getTime())/1000 : 0; }
@@ -136,6 +136,7 @@ async function init(){
 }
 
 function showUnitPicker(){
+  hideLoading();
   const me = state.me; const role = roleFromAgencyType(state.agencyMap[me.agency_id]?.agency_type);
   document.getElementById('pickerTitle').textContent = role==='ems' ? 'Select Your Unit' : 'Select Unit';
   document.getElementById('pickerSub').textContent = 'Choose the unit you are assigned to for this session.';
@@ -184,8 +185,15 @@ async function start(){
     if(unit.current_incident_id){ state.incident = await api(`/incidents/${unit.current_incident_id}`); }
     else { state.incident = null; }
     render();
-  } catch(e){ document.body.innerHTML = `<div class='p-4 text-red-400'>Error: ${e.message}</div>`; }
-  hideLoading();
+  } catch(e){
+    console.error(e);
+    if(e.message && e.message.startsWith(`/units/${unitId}`) && e.message.includes('404')){
+      unitId = null;
+      showUnitPicker();
+      return;
+    }
+    document.body.innerHTML = `<div class='p-4 text-red-400'>Error: ${e.message}</div>`;
+  } finally { hideLoading(); }
 }
 
 function render(){
