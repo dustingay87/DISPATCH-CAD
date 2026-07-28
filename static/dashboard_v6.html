@@ -67,7 +67,7 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
         <div id='scheduledList' class='panel-body p-0'></div>
       </div>
       <div class='panel flex-1 min-h-0'>
-        <div class='panel-head flex justify-between'><span>Vehicle Information</span><span id='unitCount' class='text-slate-400'>0</span></div>
+        <div class='panel-head flex justify-between'><span>On Duty Units</span><span id='unitCount' class='text-slate-400'>0</span></div>
         <div id='vehicleInfo' class='panel-body p-0'></div>
       </div>
       <div class='panel h-2/5 min-h-0'>
@@ -177,7 +177,7 @@ function renderVehicleInfo(){
       <td class='font-bold'>${u.call_sign}</td>
       <td>${u.unit_type||'-'}</td>
       <td>${svc}</td>
-      <td class='${statClass(u.current_status)}'>${statusLabel(u.current_status)}</td>
+      <td class='${statClass(u.current_status)} cursor-context-menu' oncontextmenu='showUnitStatusMenu(event, ${u.id}); return false;'>${statusLabel(u.current_status)}</td>
       <td>${inc}</td>
       <td>${post}</td>
       <td>${u.lat!=null&&u.lng!=null?'GPS':'-'}</td>
@@ -245,6 +245,31 @@ window.selectTrip=function(id){state.selectedTrip=id;state.selectedVehicle=null;
 window.selectVehicle=function(id){state.selectedVehicle=id;state.selectedTrip=null;renderOpenWork();renderVehicleInfo();renderTripSummary();}
 window.addUnitToTrip=async function(incidentId){const uid=document.getElementById('addUnit').value;if(!uid)return;try{await api(`/incidents/${incidentId}/dispatch/${uid}`,{method:'POST'});await load();}catch(e){alert(e.message);}}
 window.addCrewToUnit=async function(unitId){const pid=parseInt(document.getElementById('addCrew').value);if(!pid)return;try{await api(`/personnel/${pid}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_unit_id:unitId,duty_status:'on_duty'})});await load();}catch(e){alert(e.message);}}
+
+let statusMenuUnit=null;
+async function showUnitStatusMenu(event,unitId){
+  event.preventDefault();event.stopPropagation();
+  statusMenuUnit=state.units.find(u=>u.id===unitId); if(!statusMenuUnit) return;
+  let menu=document.getElementById('unitStatusMenu');
+  if(!menu){ menu=document.createElement('div'); menu.id='unitStatusMenu'; menu.className='hidden fixed z-50 bg-slate-800 border border-slate-600 rounded p-1 shadow-lg min-w-[160px]'; document.body.appendChild(menu); }
+  try{
+    const cfg=await api(`/config?agency_id=${statusMenuUnit.agency_id}&category=statuses`);
+    const statuses=(cfg && cfg.length && cfg[0].value) ? cfg[0].value : [{code:'AQ',label:'Available'},{code:'ER',label:'En Route'},{code:'OS',label:'On Scene'},{code:'TR',label:'Transport'},{code:'CAN',label:'Cancelled'},{code:'OOS',label:'OOS'}];
+    menu.innerHTML=statuses.map(s=>`<div class='px-2 py-1 text-xs hover:bg-slate-700 cursor-pointer' onclick='setUnitStatus(${unitId}, "${s.code}")'>${s.label||s.code}</div>`).join('') + `<div class='border-t border-slate-600 my-1'></div><div class='px-2 py-1 text-xs text-red-400 hover:bg-slate-700 cursor-pointer' onclick='setUnitStatus(${unitId}, "OOS")'>Out of Service</div>`;
+    menu.style.left=Math.min(event.clientX, window.innerWidth-180)+'px';
+    menu.style.top=Math.min(event.clientY, window.innerHeight-200)+'px';
+    menu.classList.remove('hidden');
+    const hide=(e)=>{ if(!menu.contains(e.target)){ menu.classList.add('hidden'); document.removeEventListener('click',hide); } };
+    setTimeout(()=>document.addEventListener('click',hide), 10);
+  }catch(e){ console.error(e); }
+}
+window.setUnitStatus=async function(unitId,code){
+  try{
+    await api(`/units/${unitId}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status_code:code})});
+    const menu=document.getElementById('unitStatusMenu'); if(menu) menu.classList.add('hidden');
+    await load();
+  }catch(e){ alert(e.message); }
+}
 window.removeCrew=async function(personnelId){if(!confirm('Remove crew from unit?'))return;try{await api(`/personnel/${personnelId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_unit_id:null,duty_status:'off_duty'})});await load();}catch(e){alert(e.message);}}
 window.loadRecommendations=async function(incidentId){const el=document.getElementById('recs');if(!el)return;try{const recs=await api(`/incidents/${incidentId}/recommend`);el.innerHTML=recs.length?recs.map(r=>`<div class='flex justify-between items-center py-0.5 border-b border-slate-700'><div><b>${r.call_sign}</b> <span class='text-slate-400'>${r.service_level||''}</span> <span class='text-slate-500'>${r.distance_miles!=null?r.distance_miles.toFixed(1)+' mi':''}</span></div><div class='text-right'><div class='text-slate-400'>${r.reason}</div><button class='bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='addRecUnit(${incidentId},${r.unit_id})'>Add</button></div></div>`).join(''):'<span class="text-slate-500">No recommendations</span>';}catch(e){el.innerHTML='<span class="text-red-400">Error loading recommendations</span>';}}
 window.addRecUnit=async function(incidentId,unitId){try{await api(`/incidents/${incidentId}/dispatch/${unitId}`,{method:'POST'});await load();}catch(e){alert(e.message);}}
