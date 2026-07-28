@@ -21,6 +21,8 @@ load_dotenv()
 SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-change-me')
 INSECURE_DEV = os.getenv('INSECURE_DEV', 'false').lower() == 'true'
 
+login_attempts = {}
+
 DATABASE_URL = os.getenv('SUPABASE_DB_URL', 'sqlite:///./volcad.db')
 
 if DATABASE_URL.startswith('sqlite'):
@@ -321,7 +323,9 @@ def seed_default_admin():
     db = SessionLocal()
     try:
         if db.query(User).count() == 0:
-            db.add(User(email='dustin@dispatchtodiscipleship.net', hashed_password=hash_password('Warrior/202601!'), role='admin', is_active=True))
+            email = os.getenv('ADMIN_EMAIL', 'dustin@dispatchtodiscipleship.net')
+            password = os.getenv('ADMIN_PASSWORD', 'Warrior/202601!')
+            db.add(User(email=email, hashed_password=hash_password(password), role='admin', is_active=True))
             db.commit()
     finally:
         db.close()
@@ -334,25 +338,42 @@ def _log_event(db: Session, event_type: str, entity_type: str, entity_id: int, u
     db.add(Event(event_type=event_type, entity_type=entity_type, entity_id=entity_id, user_id=user_id, data=data, agency_id=agency_id))
 
 @app.middleware('http')
+def _security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    if not INSECURE_DEV:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
 async def auth_middleware(request: Request, call_next):
     if request.method in ('GET', 'OPTIONS', 'HEAD') or request.url.path.startswith('/static/'):
-        return await call_next(request)
+        return _security_headers(await call_next(request))
     if request.url.path in ('/login', '/logout', '/docs', '/openapi.json', '/taip/ingest'):
-        return await call_next(request)
+        return _security_headers(await call_next(request))
     session = request.cookies.get('session')
     payload = verify_session(session)
     if not payload:
-        return JSONResponse(status_code=401, content={'detail': 'Not authenticated'})
+        return _security_headers(JSONResponse(status_code=401, content={'detail': 'Not authenticated'}))
     if request.url.path == '/config' and request.method in ('POST', 'PUT', 'DELETE') and payload.get('role') != 'admin':
-        return JSONResponse(status_code=403, content={'detail': 'Admin required'})
-    return await call_next(request)
+        return _security_headers(JSONResponse(status_code=403, content={'detail': 'Admin required'}))
+    return _security_headers(await call_next(request))
 
 @app.post('/login')
-def login(body: LoginRequest, response: Response, db: Session = Depends(get_db)):
+def login(body: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    ip = request.client.host or 'unknown'
+    now = time.time()
+    attempts = login_attempts.get(ip, [])
+    attempts = [t for t in attempts if now - t < 900]
+    if len(attempts) >= 5:
+        raise HTTPException(status_code=429, detail='Too many login attempts. Try again later.')
     user = db.query(User).filter(User.email == body.email).first()
     if not user or user.hashed_password != hash_password(body.password):
+        attempts.append(now)
+        login_attempts[ip] = attempts
         raise HTTPException(status_code=401, detail='Invalid credentials')
-    response.set_cookie(key='session', value=make_session(user), httponly=True, samesite='lax', path='/', max_age=86400)
+    login_attempts.pop(ip, None)
+    response.set_cookie(key='session', value=make_session(user), httponly=True, samesite='lax' if INSECURE_DEV else 'strict', secure=not INSECURE_DEV, path='/', max_age=86400)
     return {'email': user.email, 'role': user.role, 'agency_id': user.agency_id}
 
 @app.post('/logout')
