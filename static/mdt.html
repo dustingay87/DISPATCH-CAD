@@ -80,6 +80,7 @@ const CONFIG = {
 };
 function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
 function elapsed(iso){ return iso ? (Date.now()-new Date(iso).getTime())/1000 : 0; }
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene'}; return M[code]||code; }
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 
 const url = new URL(window.location.href);
@@ -113,7 +114,7 @@ function render(){
   const u = state.unit; const a=state.agencyMap[u.agency_id] || {}; const cfg=CONFIG[a.agency_type] || {statuses:[]};
   document.getElementById('unitCallsign').textContent = u.call_sign;
   document.getElementById('unitAgency').textContent = a.name || a.agency_type || '';
-  document.getElementById('unitStatus').textContent = u.current_status;
+  document.getElementById('unitStatus').textContent = statusLabel(u.current_status);
   document.getElementById('shiftTimer').textContent = u.in_service_at ? fmtDur(elapsed(u.in_service_at)) : '--';
   const onCall = ['OS','ER','TR','AK','dispatched'].includes(u.current_status) && u.last_assigned_at;
   document.getElementById('callTimer').textContent = onCall ? fmtDur(elapsed(u.last_assigned_at)) : '--';
@@ -124,7 +125,7 @@ function render(){
     else if(s.code==='ER'||s.code==='TR'||s.code==='DEL') color='bg-yellow-700 hover:bg-yellow-600';
     else if(s.code==='AQ') color='bg-green-700 hover:bg-green-600';
     else if(s.code==='CAN'||s.code==='NPF'||s.code==='OOS'||s.code==='MAINT'||s.code==='LUN'||s.code==='AFR') color='bg-slate-600 hover:bg-slate-500';
-    return `<button class='mdt-btn ${color} text-white' onclick='setStatus("${s.code}")'>${s.label}</button>`;
+    return `<button class='mdt-btn ${color} text-white' onclick='setStatus("${s.code}")'>${statusLabel(s.code)}</button>`;
   }).join('') + `<button class='mdt-btn bg-indigo-700 hover:bg-indigo-600 text-white' onclick='toggleShift()'>Start/End Shift</button>`;
 
   document.getElementById('crew').innerHTML = state.crew.length ? state.crew.map(p=>`${p.first_name||''} ${p.last_name||''}`).join('<br>') : 'No crew assigned';

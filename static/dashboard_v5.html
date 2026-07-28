@@ -201,6 +201,7 @@ function priorityClass(p){ return `priority-${Math.min(Math.max(p||2,1),4)}`; }
 function priorityTarget(p){ return {1:180,2:420,3:720,4:1200}[Math.min(Math.max(p||2,1),4)] || 420; }
 function slaClass(sec,target){ return sec>target ? 'text-red-400 font-bold' : 'text-slate-400'; }
 function unitClass(st){ if(st==='OS') return 'unit-os'; if(st==='ER'||st==='TR'||st==='DEL') return 'unit-er'; if(st==='AQ') return 'unit-aq'; return 'unit-oth'; }
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene'}; return M[code]||code; }
 
 function unitTimers(u){
   const onCall = ['OS','ER','TR','AK','dispatched','LUN','OOS','MAINT','DEL','NPF'].includes(u.current_status);
@@ -235,7 +236,7 @@ function renderMap(){
     if(u.lat!=null && u.lng!=null){
       const col = u.current_status==='OS' ? '#ef4444' : u.current_status==='ER' || u.current_status==='TR' || u.current_status==='DEL' ? '#eab308' : u.current_status==='AQ' ? '#22c55e' : '#64748b';
       const t=unitTimers(u);
-      L.circleMarker([u.lat,u.lng],{radius:7,color:col,fillColor:col,fillOpacity:.9}).addTo(layers.units).bindPopup(`<b>${u.call_sign}</b><br>${u.current_status}<br>${unitIncident(u)}<br>On scene: ${t.scene}<br>Call: ${t.call}<br>Shift: ${t.shift}`).on('click',()=>findNearest(u));
+      L.circleMarker([u.lat,u.lng],{radius:7,color:col,fillColor:col,fillOpacity:.9}).addTo(layers.units).bindPopup(`<b>${u.call_sign}</b><br>${statusLabel(u.current_status)}<br>${unitIncident(u)}<br>On scene: ${t.scene}<br>Call: ${t.call}<br>Shift: ${t.shift}`).on('click',()=>findNearest(u));
     }
   });
   state.incidents.forEach(i=>{
@@ -346,7 +347,7 @@ function renderActiveCalls(){
       </div>
       <div class='p-2 space-y-1'>
         <div class='flex space-x-3 text-sm text-slate-400'>
-          <span>Status: <b>${i.status}</b></span>
+          <span>Status: <b>${statusLabel(i.status)}</b></span>
           <span>Loc: ${i.location_text||'-'}</span>
           <span class='${slaClass(sec,target)}'>Elapsed: ${fmtDur(sec)} / Target: ${fmtDur(target)}</span>
         </div>
@@ -377,7 +378,7 @@ function renderUnitBoard(){
   document.getElementById('unitCount').textContent = data.length;
   const html = data.map(u=>{
     const a=state.agencyMap[u.agency_id]||{}; const cfg=CONFIG[a.agency_type]||{statuses:[]}; const t=unitTimers(u);
-    const btns=cfg.statuses.map(s=>`<button class='btn-sm ${s.code===u.current_status?"bg-slate-600":"bg-slate-800 hover:bg-slate-700 border border-slate-600"}' onclick='setUnitStatus(${u.id},"${s.code}")'>${s.label}</button>`).join(' ');
+    const btns=cfg.statuses.map(s=>`<button class='btn-sm ${s.code===u.current_status?"bg-slate-600":"bg-slate-800 hover:bg-slate-700 border border-slate-600"}' onclick='setUnitStatus(${u.id},"${s.code}")'>${statusLabel(s.code)}</button>`).join(' ');
     const cam = u.camera_url ? `<a href='${u.camera_url}' target='_blank' class='text-blue-400 underline text-xs'>Cam</a>` : '<span class="text-slate-600">-</span>';
     return `<div class='card ${unitClass(u.current_status)}'>
       <div class='p-2 bg-slate-950 border-b border-slate-700 flex justify-between'>
@@ -385,7 +386,7 @@ function renderUnitBoard(){
         <span class='text-xs text-slate-400'>${a.agency_type ? a.agency_type.toUpperCase() : '-'}</span>
       </div>
       <div class='p-2 space-y-1'>
-        <div class='flex justify-between text-sm'><span>Status</span><b>${u.current_status}</b></div>
+        <div class='flex justify-between text-sm'><span>Status</span><b>${statusLabel(u.current_status)}</b></div>
         <div class='flex justify-between text-sm text-slate-400'><span>Incident</span><span>${unitIncident(u)}</span></div>
         <div class='grid grid-cols-2 gap-1 text-xs text-slate-300'>
           <div>Scene: <span class='timer'>${t.scene}</span></div>

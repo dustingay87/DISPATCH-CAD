@@ -108,6 +108,7 @@ function elapsed(iso){ return (Date.now()-toMs(iso))/1000; }
 function priorityTarget(p){ return {1:180,2:420,3:720,4:1200}[Math.min(Math.max(p||2,1),4)] || 420; }
 function slaClass(sec,target){ return sec>target ? 'text-red-400 font-bold' : 'text-slate-400'; }
 function unitClass(st){ if(st==='OS') return 'unit-os'; if(st==='ER'||st==='TR'||st==='DEL') return 'unit-er'; if(st==='AQ') return 'unit-aq'; return 'unit-oth'; }
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene'}; return M[code]||code; }
 function matchesDiscipline(t){ return DISCIPLINE==='all' || t===DISCIPLINE; }
 function log(msg){ state.logs.unshift(`${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${msg}`); if(state.logs.length>100) state.logs.pop(); renderLog(); }
 
@@ -132,7 +133,7 @@ function renderCalls(){
       <td class='font-bold'>${i.call_number||i.incident_number}</td>
       <td>${i.call_type}</td>
       <td class='text-center'>P${i.priority}</td>
-      <td>${i.status}</td>
+      <td>${statusLabel(i.status)}</td>
       <td>${i.location_text||'-'}</td>
       <td>${assigned}</td>
       <td class='timer ${slaClass(sec,target)}'>${fmtDur(sec)}<br><span class='text-slate-500'>/${fmtDur(target)}</span></td>
@@ -158,7 +159,7 @@ async function selectIncident(id){
       <div class='flex flex-wrap gap-4 text-xs text-slate-400'>
         <span>Agency: <b class='text-white'>${a.name||'-'}</b></span>
         <span>Priority: <b class='text-white'>P${i.priority}</b></span>
-        <span>Status: <b class='text-white'>${i.status}</b></span>
+        <span>Status: <b class='text-white'>${statusLabel(i.status)}</b></span>
         <span class='${slaClass(sec,target)}'>Elapsed: ${fmtDur(sec)} / Target: ${fmtDur(target)}</span>
       </div>
       <div class='text-xs text-slate-400'>Location: <b class='text-white'>${i.location_text||'-'}</b></div>
@@ -170,11 +171,11 @@ async function selectIncident(id){
         <button class='bg-red-800 hover:bg-red-700 px-2 py-0.5 rounded text-xs' onclick='closeSelected()'>Close</button>
       </div>
       <div class='text-xs text-slate-300'>
-        <b>Assigned:</b> ${assigned.map(u=>`${u.call_sign} (${u.current_status})`).join(', ') || 'none'}
+        <b>Assigned:</b> ${assigned.map(u=>`${u.call_sign} (${statusLabel(u.current_status)})`).join(', ') || 'none'}
       </div>
       <div class='border-t border-slate-700 pt-2'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Timeline</div>
-        <div class='space-y-1 text-xs'>${(timeline.events||[]).slice(0,6).map(e=>`<div class='text-slate-300'>${fmtTime(e.created_at)} ${e.status_code} ${e.reason||''}</div>`).join('') || '<div class=\'text-slate-500\'>No events</div>'}</div>
+        <div class='space-y-1 text-xs'>${(timeline.events||[]).slice(0,6).map(e=>`<div class='text-slate-300'>${fmtTime(e.created_at)} ${statusLabel(e.status_code)} ${e.reason||''}</div>`).join('') || '<div class=\'text-slate-500\'>No events</div>'}</div>
       </div>
       <div class='border-t border-slate-700 pt-2'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Recommended Units</div>
@@ -231,7 +232,7 @@ async function loadMileage(id){
   try {
     const readings = await api(`/incidents/${id}/mileage`);
     const unitMap = {}; state.units.forEach(u=>unitMap[u.id]=u.call_sign);
-    const rows = readings.map(r=>`<div class='text-xs text-slate-300'><b>${unitMap[r.unit_id]||'Unit '+r.unit_id}</b> ${r.status_code}: ${r.mileage} mi @ ${fmtTime(r.recorded_at)}</div>`).join('');
+    const rows = readings.map(r=>`<div class='text-xs text-slate-300'><b>${unitMap[r.unit_id]||'Unit '+r.unit_id}</b> ${statusLabel(r.status_code)}: ${r.mileage} mi @ ${fmtTime(r.recorded_at)}</div>`).join('');
     el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Mileage</div>${rows || '<div class="text-slate-500">No readings</div>'}`;
   } catch(e){ el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Mileage</div><div class='text-xs text-slate-500'>No readings</div>`; }
 }
@@ -256,7 +257,7 @@ function renderUnits(){
     return `<tr class='${unitClass(u.current_status)} ${state.selectedUnit===u.id?'selected':''}' onclick='selectUnit(${u.id})'>
       <td class='font-bold'>${u.call_sign}</td>
       <td>${a.agency_type ? a.agency_type.toUpperCase() : '-'}</td>
-      <td>${u.current_status}</td>
+      <td>${statusLabel(u.current_status)}</td>
       <td>${inc}</td>
       <td class='timer'>${t.avail}</td>
       <td class='timer'>${t.scene}</td>
@@ -295,7 +296,7 @@ function renderMap(){
     if(u.lat==null || u.lng==null) return;
     const col = u.current_status==='OS' ? '#ef4444' : u.current_status==='AQ' ? '#22c55e' : '#eab308';
     const m = L.circleMarker([u.lat,u.lng],{radius:6,color:col,fillColor:col,fillOpacity:0.9,weight:2}).addTo(layers.units);
-    m.bindPopup(`<b>${u.call_sign}</b><br>${u.current_status}<br>${state.agencyMap[u.agency_id]?.name||''}`);
+    m.bindPopup(`<b>${u.call_sign}</b><br>${statusLabel(u.current_status)}<br>${state.agencyMap[u.agency_id]?.name||''}`);
     if(state.selectedUnit===u.id) m.openPopup();
   });
   state.incidents.forEach(i=>{
