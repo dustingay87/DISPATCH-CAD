@@ -903,6 +903,10 @@ def admin():
 def customer_admin():
     return FileResponse('static/customer-admin.html')
 
+@app.get('/hud')
+def hud():
+    return FileResponse('static/hud.html')
+
 @app.get('/roster')
 def roster():
     return FileResponse('static/roster.html')
