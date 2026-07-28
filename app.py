@@ -395,6 +395,10 @@ def history():
 def admin():
     return FileResponse('static/admin.html')
 
+@app.get('/roster')
+def roster():
+    return FileResponse('static/roster.html')
+
 @app.get('/call-entry')
 def call_entry():
     return FileResponse('static/call-entry.html')

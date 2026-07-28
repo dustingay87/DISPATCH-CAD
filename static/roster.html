@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>VolCAD Roster</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .card { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1rem; }
+  .btn { padding:0.5rem 1rem; border-radius:0.375rem; font-size:0.875rem; }
+  .btn-primary { background:#2563eb; color:#fff; }
+  .btn-primary:hover { background:#1d4ed8; }
+  input, select { background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:0.35rem 0.5rem; border-radius:0.25rem; width:100%; }
+  table { width:100%; border-collapse:collapse; font-size:0.8rem; }
+  th, td { padding:0.5rem; border-bottom:1px solid #334155; text-align:left; }
+  th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
+  .hidden { display:none; }
+</style>
+</head>
+<body class='p-4'>
+  <div class='max-w-6xl mx-auto space-y-4'>
+    <div class='flex justify-between items-center'>
+      <h1 class='text-2xl font-bold'>VolCAD <span class='text-slate-400 font-normal'>Roster</span></h1>
+      <div class='space-x-2'>
+        <a href='/admin' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Admin</a>
+        <a href='/console' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Console</a>
+      </div>
+    </div>
+
+    <div id='msg' class='hidden px-4 py-2 rounded text-sm'></div>
+
+    <div class='grid grid-cols-1 md:grid-cols-2 gap-4'>
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Create Unit</h2>
+        <form id='unitForm' class='space-y-2'>
+          <select id='uAgency' class='w-full' required></select>
+          <input id='uName' placeholder='Unit name' required>
+          <input id='uCallSign' placeholder='Call sign' required>
+          <select id='uType' class='w-full'><option value='engine'>engine</option><option value='ladder'>ladder</option><option value='rescue'>rescue</option><option value='ambulance'>ambulance</option><option value='medic'>medic</option><option value='patrol'>patrol</option><option value='supervisor'>supervisor</option><option value='k9'>k9</option><option value='traffic'>traffic</option><option value='chief'>chief</option><option value='brush'>brush</option><option value='tanker'>tanker</option><option value='air'>air</option></select>
+          <input id='uTaip' placeholder='TAIP ID'>
+          <div class='grid grid-cols-2 gap-2'>
+            <input id='uLat' type='number' step='any' placeholder='Lat'>
+            <input id='uLng' type='number' step='any' placeholder='Lng'>
+          </div>
+          <button class='btn btn-primary w-full'>Create Unit</button>
+        </form>
+      </div>
+
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Create Personnel</h2>
+        <form id='personForm' class='space-y-2'>
+          <select id='pAgency' class='w-full' required></select>
+          <select id='pUnit' class='w-full'><option value=''>No unit</option></select>
+          <input id='pFirst' placeholder='First name' required>
+          <input id='pLast' placeholder='Last name' required>
+          <input id='pEmail' type='email' placeholder='Email'>
+          <input id='pPhone' placeholder='Phone'>
+          <input id='pSMS' placeholder='SMS phone'>
+          <button class='btn btn-primary w-full'>Create Personnel</button>
+        </form>
+      </div>
+    </div>
+
+    <div class='card'>
+      <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Unit Roster</h2>
+      <div id='roster' class='overflow-x-auto'><div class='text-slate-500'>Loading...</div></div>
+    </div>
+  </div>
+
+<script>
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+
+let state = { agencies:[], units:[], personnel:[], agencyMap:{} };
+
+function showMsg(text, ok=true){
+  const el = document.getElementById('msg'); el.classList.remove('hidden');
+  el.className = ok ? 'px-4 py-2 rounded text-sm bg-green-900 text-green-100' : 'px-4 py-2 rounded text-sm bg-red-900 text-red-100';
+  el.textContent = text; setTimeout(()=>el.classList.add('hidden'), 4000);
+}
+
+async function loadRoster(){
+  try {
+    const [agencies, units, personnel] = await Promise.all([api('/agencies'), api('/units'), api('/personnel')]);
+    state.agencies = agencies; state.units = units; state.personnel = personnel;
+    state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
+    const opts = agencies.map(a=>`<option value='${a.id}'>${a.name} (${a.agency_type})</option>`).join('');
+    document.getElementById('uAgency').innerHTML = '<option value="">Select agency</option>' + opts;
+    document.getElementById('pAgency').innerHTML = '<option value="">Select agency</option>' + opts;
+    const uopts = units.map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
+    document.getElementById('pUnit').innerHTML = '<option value="">No unit</option>' + uopts;
+    const rows = units.map(u=>{
+      const crew = personnel.filter(p=>p.current_unit_id===u.id).map(p=>`${p.first_name||''} ${p.last_name||''}`).join(', ') || '-';
+      const a = state.agencyMap[u.agency_id] || {};
+      return `<tr><td>${u.id}</td><td>${u.call_sign}</td><td>${u.name}</td><td>${u.unit_type}</td><td>${a.name||'-'}</td><td>${u.current_status||'-'}</td><td>${u.lat?u.lat.toFixed(4):'-'} / ${u.lng?u.lng.toFixed(4):'-'}</td><td>${crew}</td><td><a href='/mdt?unit_id=${u.id}' class='text-blue-400 hover:underline' target='_blank'>MDT</a></td></tr>`;
+    }).join('');
+    document.getElementById('roster').innerHTML = rows ? `<table><thead><tr><th>ID</th><th>Call Sign</th><th>Name</th><th>Type</th><th>Agency</th><th>Status</th><th>Lat/Lng</th><th>Crew</th><th>MDT</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="text-slate-500">No units</div>';
+  } catch(err){ showMsg(err.message, false); }
+}
+
+document.getElementById('unitForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const body = {
+    agency_id: parseInt(document.getElementById('uAgency').value),
+    name: document.getElementById('uName').value,
+    call_sign: document.getElementById('uCallSign').value,
+    unit_type: document.getElementById('uType').value,
+    taip_id: document.getElementById('uTaip').value,
+    lat: document.getElementById('uLat').value ? parseFloat(document.getElementById('uLat').value) : null,
+    lng: document.getElementById('uLng').value ? parseFloat(document.getElementById('uLng').value) : null
+  };
+  try { await api('/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); showMsg('Unit created'); loadRoster(); document.getElementById('unitForm').reset(); } catch(err){ showMsg(err.message, false); }
+});
+
+document.getElementById('personForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const body = {
+    agency_id: parseInt(document.getElementById('pAgency').value),
+    first_name: document.getElementById('pFirst').value,
+    last_name: document.getElementById('pLast').value,
+    email: document.getElementById('pEmail').value,
+    phone: document.getElementById('pPhone').value,
+    sms_phone: document.getElementById('pSMS').value,
+    current_unit_id: document.getElementById('pUnit').value ? parseInt(document.getElementById('pUnit').value) : null
+  };
+  try { await api('/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); showMsg('Personnel created'); loadRoster(); document.getElementById('personForm').reset(); } catch(err){ showMsg(err.message, false); }
+});
+
+loadRoster();
+</script>
+</body>
+</html>
