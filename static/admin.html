@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>VolCAD Admin</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .card { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1rem; }
+  .btn { padding:0.35rem 0.75rem; border-radius:0.375rem; font-size:0.875rem; }
+  .btn-primary { background:#2563eb; }
+  .btn-primary:hover { background:#1d4ed8; }
+  .btn-danger { background:#dc2626; }
+  .btn-danger:hover { background:#b91c1c; }
+  input, select, textarea { background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:0.35rem 0.5rem; border-radius:0.25rem; font-size:0.875rem; }
+  table { width:100%; border-collapse:collapse; font-size:0.8rem; }
+  th, td { padding:0.5rem; border-bottom:1px solid #334155; text-align:left; }
+  th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
+  .hidden { display:none; }
+</style>
+</head>
+<body class='p-4'>
+  <div class='max-w-6xl mx-auto space-y-4'>
+    <div class='flex justify-between items-center'>
+      <h1 class='text-2xl font-bold'>VolCAD <span class='text-slate-400 font-normal'>Admin</span></h1>
+      <div class='space-x-2'>
+        <a href='/' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Dashboard</a>
+        <a href='/console' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Console</a>
+      </div>
+    </div>
+
+    <div id='msg' class='hidden px-4 py-2 rounded text-sm'></div>
+
+    <div class='grid grid-cols-1 md:grid-cols-2 gap-4'>
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Create Agency</h2>
+        <form id='agencyForm' class='space-y-2'>
+          <input id='aName' placeholder='Agency name' class='w-full' required>
+          <select id='aType' class='w-full'>
+            <option value='police'>Police</option>
+            <option value='fire'>Fire</option>
+            <option value='ems'>EMS</option>
+          </select>
+          <input id='aCity' placeholder='City' class='w-full'>
+          <input id='aState' placeholder='State (2 chars)' maxlength='2' class='w-full'>
+          <input id='aDomain' placeholder='Domain' class='w-full'>
+          <button class='btn btn-primary text-white w-full'>Create</button>
+        </form>
+      </div>
+
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Seed Configuration Template</h2>
+        <div class='space-y-2'>
+          <select id='seedAgency' class='w-full'><option value=''>Select agency</option></select>
+          <select id='seedTemplate' class='w-full'>
+            <option value='police'>Police</option>
+            <option value='fire'>Fire</option>
+            <option value='ems'>EMS</option>
+          </select>
+          <button id='seedBtn' class='btn btn-primary text-white w-full'>Apply Template</button>
+          <p class='text-xs text-slate-400'>Loads default statuses, unit types, call types, priorities, and response plans.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class='card'>
+      <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Agencies</h2>
+      <div id='agencyList' class='overflow-x-auto'><div class='text-slate-500'>Loading...</div></div>
+    </div>
+
+    <div class='card'>
+      <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Configuration</h2>
+      <div class='flex gap-2 mb-2'>
+        <select id='configAgency' class=''><option value=''>All agencies</option></select>
+        <select id='configCategory' class=''>
+          <option value=''>All categories</option>
+          <option value='statuses'>Statuses</option>
+          <option value='unit_types'>Unit Types</option>
+          <option value='call_types'>Call Types</option>
+          <option value='priorities'>Priorities</option>
+          <option value='response_plans'>Response Plans</option>
+        </select>
+        <button id='loadConfig' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Load</button>
+      </div>
+      <div id='configList' class='overflow-x-auto'><div class='text-slate-500'>Select filters and load.</div></div>
+    </div>
+  </div>
+
+<script>
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+
+function showMsg(text, ok=true){
+  const el = document.getElementById('msg');
+  el.textContent = text; el.classList.remove('hidden');
+  el.className = ok ? 'px-4 py-2 rounded text-sm bg-green-900 text-green-100' : 'px-4 py-2 rounded text-sm bg-red-900 text-red-100';
+  setTimeout(()=>el.classList.add('hidden'), 4000);
+}
+
+async function loadAgencies(){
+  const agencies = await api('/agencies');
+  const aSel = document.getElementById('seedAgency');
+  const cSel = document.getElementById('configAgency');
+  aSel.innerHTML = '<option value="">Select agency</option>' + agencies.map(a=>`<option value='${a.id}'>${a.name} (${a.agency_type})</option>`).join('');
+  cSel.innerHTML = '<option value="">All agencies</option>' + agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
+  document.getElementById('agencyList').innerHTML = agencies.length ? `<table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>City</th><th>State</th><th>Domain</th></tr></thead><tbody>${agencies.map(a=>`<tr><td>${a.id}</td><td>${a.name}</td><td>${a.agency_type}</td><td>${a.city||'-'}</td><td>${a.state||'-'}</td><td>${a.domain||'-'}</td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No agencies</div>';
+}
+
+document.getElementById('agencyForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const body = {
+    name: document.getElementById('aName').value,
+    agency_type: document.getElementById('aType').value,
+    city: document.getElementById('aCity').value,
+    state: document.getElementById('aState').value,
+    domain: document.getElementById('aDomain').value
+  };
+  try { await api('/agencies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); showMsg('Agency created'); loadAgencies(); } catch(err){ showMsg(err.message, false); }
+});
+
+document.getElementById('seedBtn').addEventListener('click', async ()=>{
+  const agency_id = document.getElementById('seedAgency').value;
+  const template = document.getElementById('seedTemplate').value;
+  if(!agency_id){ showMsg('Select agency', false); return; }
+  try { await api('/config/seed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:parseInt(agency_id),template})}); showMsg('Template applied'); loadConfig(); } catch(err){ showMsg(err.message, false); }
+});
+
+document.getElementById('loadConfig').addEventListener('click', loadConfig);
+
+async function loadConfig(){
+  const agency = document.getElementById('configAgency').value;
+  const category = document.getElementById('configCategory').value;
+  let url = '/config';
+  const qs = [];
+  if(agency) qs.push(`agency_id=${agency}`);
+  if(category) qs.push(`category=${category}`);
+  if(qs.length) url += '?' + qs.join('&');
+  try {
+    const cfg = await api(url);
+    document.getElementById('configList').innerHTML = cfg.length ? `<table><thead><tr><th>Agency</th><th>Category</th><th>Key</th><th>Value</th></tr></thead><tbody>${cfg.map(c=>`<tr><td>${c.agency_id||'-'}</td><td>${c.category}</td><td>${c.key}</td><td><pre class='text-xs text-slate-300'>${JSON.stringify(c.value,null,2).slice(0,400)}</pre></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No config found.</div>';
+  } catch(err){ showMsg(err.message, false); }
+}
+
+loadAgencies();
+</script>
+</body>
+</html>

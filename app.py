@@ -257,6 +257,10 @@ class CustomerConfigOut(CustomerConfigCreate):
     class Config:
         from_attributes = True
 
+class SeedConfigRequest(BaseModel):
+    agency_id: int
+    template: str
+
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
@@ -374,6 +378,10 @@ def avl():
 def history():
     return FileResponse('static/history.html')
 
+@app.get('/admin')
+def admin():
+    return FileResponse('static/admin.html')
+
 @app.get('/config', response_model=List[CustomerConfigOut])
 def list_config(agency_id: Optional[int] = Query(None), category: Optional[str] = Query(None), db: Session = Depends(get_db)):
     q = db.query(CustomerConfig)
@@ -398,6 +406,104 @@ def create_config(body: CustomerConfigCreate, current_user: dict = Depends(requi
     db.commit()
     db.refresh(cfg)
     return cfg
+
+@app.post('/config/seed', response_model=dict)
+def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    agency = db.query(Agency).get(body.agency_id)
+    if not agency:
+        raise HTTPException(status_code=404, detail='Agency not found')
+    templates = {
+        'police': {
+            'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'unit_types': ['patrol','detective','supervisor','k9','swat','traffic','rescue'],
+            'call_types': [
+                {'label':'Traffic Accident', 'priority':2, 'fields':['vehicles','injuries']},
+                {'label':'Theft', 'priority':3, 'fields':['property','suspect']},
+                {'label':'Domestic', 'priority':2, 'fields':['weapons','children']},
+                {'label':'Assault', 'priority':1, 'fields':['weapons','injuries']},
+                {'label':'Welfare Check', 'priority':3, 'fields':['age']},
+                {'label':'Suspicious Person', 'priority':3, 'fields':['armed']}
+            ],
+            'priorities': [
+                {'priority':1,'label':'Emergency','target_seconds':180},
+                {'priority':2,'label':'Urgent','target_seconds':420},
+                {'priority':3,'label':'Routine','target_seconds':720},
+                {'priority':4,'label':'Low','target_seconds':1200}
+            ],
+            'response_plans': {
+                'Traffic Accident': ['patrol','supervisor','rescue'],
+                'Theft': ['patrol','detective'],
+                'Domestic': ['patrol','supervisor'],
+                'Assault': ['patrol','supervisor','k9'],
+                'Welfare Check': ['patrol'],
+                'Suspicious Person': ['patrol','k9']
+            }
+        },
+        'fire': {
+            'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'unit_types': ['engine','ladder','rescue','brush','tanker','ambulance','chief'],
+            'call_types': [
+                {'label':'Structure Fire', 'priority':1, 'fields':['exposures','occupants']},
+                {'label':'Vehicle Fire', 'priority':2, 'fields':['hazmat']},
+                {'label':'Medical Assist', 'priority':2, 'fields':['age','conscious']},
+                {'label':'Alarm', 'priority':3, 'fields':['type']},
+                {'label':'Vehicle Accident', 'priority':1, 'fields':['extrication','injuries']},
+                {'label':'Brush Fire', 'priority':2, 'fields':['size']}
+            ],
+            'priorities': [
+                {'priority':1,'label':'Working Fire','target_seconds':180},
+                {'priority':2,'label':'Urgent','target_seconds':420},
+                {'priority':3,'label':'Routine','target_seconds':720},
+                {'priority':4,'label':'Low','target_seconds':1200}
+            ],
+            'response_plans': {
+                'Structure Fire': ['engine','ladder','rescue','chief'],
+                'Vehicle Fire': ['engine','brush','tanker'],
+                'Medical Assist': ['rescue','ambulance'],
+                'Alarm': ['engine','ladder'],
+                'Vehicle Accident': ['engine','rescue','ambulance'],
+                'Brush Fire': ['brush','tanker']
+            }
+        },
+        'ems': {
+            'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'unit_types': ['ambulance','medic','supervisor','air','rescue'],
+            'call_types': [
+                {'label':'Cardiac Arrest', 'priority':1, 'fields':['age','conscious']},
+                {'label':'Chest Pain', 'priority':1, 'fields':['age','conscious']},
+                {'label':'Respiratory', 'priority':1, 'fields':['age','conscious']},
+                {'label':'Fall', 'priority':2, 'fields':['age','conscious']},
+                {'label':'Motor Vehicle Accident', 'priority':1, 'fields':['extrication','injuries']},
+                {'label':'Overdose', 'priority':1, 'fields':['age','conscious','substance']}
+            ],
+            'priorities': [
+                {'priority':1,'label':'Priority 1','target_seconds':180},
+                {'priority':2,'label':'Priority 2','target_seconds':420},
+                {'priority':3,'label':'Priority 3','target_seconds':720},
+                {'priority':4,'label':'Priority 4','target_seconds':1200}
+            ],
+            'response_plans': {
+                'Cardiac Arrest': ['ambulance','medic','supervisor'],
+                'Chest Pain': ['ambulance','medic'],
+                'Respiratory': ['ambulance','medic'],
+                'Fall': ['ambulance'],
+                'Motor Vehicle Accident': ['ambulance','rescue','medic'],
+                'Overdose': ['ambulance','medic','supervisor']
+            }
+        }
+    }
+    cfg = templates.get(body.template.lower())
+    if not cfg:
+        raise HTTPException(status_code=400, detail='Template not found')
+    for category, value in cfg.items():
+        existing = db.query(CustomerConfig).filter_by(agency_id=body.agency_id, category=category, key='defaults').first()
+        if existing:
+            existing.value = value
+            existing.updated_at = datetime.utcnow()
+        else:
+            db.add(CustomerConfig(agency_id=body.agency_id, category=category, key='defaults', value=value))
+    db.commit()
+    return {'status': 'seeded', 'agency_id': body.agency_id, 'template': body.template}
 
 @app.get('/health')
 def health():
