@@ -41,6 +41,7 @@
         <option value=''>All agencies</option>
       </select>
       <label class='flex items-center space-x-1'><input id='liveToggle' type='checkbox' checked class='accent-blue-500'> <span>Live</span></label>
+      <label class='flex items-center space-x-1'><input id='trailsToggle' type='checkbox' class='accent-blue-500'> <span>Trails</span></label>
       <button id='refreshBtn' class='bg-slate-700 hover:bg-slate-600 btn-sm'>Refresh</button>
       <button id='seedBtn' class='bg-green-700 hover:bg-green-600 btn-sm'>Seed</button>
       <a href='/units-screen' target='_blank' class='bg-indigo-700 hover:bg-indigo-600 btn-sm text-white'>Units</a>
@@ -187,7 +188,7 @@ const CONFIG = {
 };
 
 const CENTER = [39.9612, -82.9988];
-let state = { agencies:[], units:[], incidents:[], personnel:[], logs:[], messages:[], agencyMap:{}, filter:'' };
+let state = { agencies:[], units:[], incidents:[], personnel:[], logs:[], messages:[], positions:[], agencyMap:{}, filter:'' };
 let map, layers;
 
 function api(path, opts={}) { return fetch(path, {...opts, credentials:'include'}).then(r => { if (r.status === 401) { window.location.href = '/login'; throw new Error('Unauthorized'); } if (!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
@@ -222,12 +223,13 @@ function findNearest(unit){
 function initMap(){
   map = L.map('map', { center: CENTER, zoom: 11 });
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
-  layers = { agencies:L.layerGroup().addTo(map), units:L.layerGroup().addTo(map), incidents:L.layerGroup().addTo(map) };
+  layers = { agencies:L.layerGroup().addTo(map), units:L.layerGroup().addTo(map), incidents:L.layerGroup().addTo(map), trails:L.layerGroup().addTo(map) };
 }
 
 function renderMap(){
   if(!map) initMap();
-  layers.agencies.clearLayers(); layers.units.clearLayers(); layers.incidents.clearLayers();
+  layers.agencies.clearLayers(); layers.units.clearLayers(); layers.incidents.clearLayers(); layers.trails.clearLayers();
+  if(document.getElementById('trailsToggle').checked) drawTrails();
   state.agencies.forEach(a=>{ if(a.lat!=null && a.lng!=null) L.circleMarker([a.lat,a.lng],{radius:6,color:'#60a5fa',fillColor:'#60a5fa',fillOpacity:.8}).addTo(layers.agencies).bindPopup(`<b>${a.name}</b><br>${a.agency_type}`); });
   state.units.forEach(u=>{
     if(u.lat!=null && u.lng!=null){
@@ -238,6 +240,18 @@ function renderMap(){
   });
   state.incidents.forEach(i=>{
     if(i.lat!=null && i.lng!=null){ const col=i.priority===1?'#ef4444':i.priority===2?'#f97316':i.priority===3?'#eab308':'#22c55e'; L.circleMarker([i.lat,i.lng],{radius:9,color:col,fillColor:col,fillOpacity:.9}).addTo(layers.incidents).bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${i.status}`); }
+  });
+}
+
+function drawTrails(){
+  if(!state.positions || !state.positions.length) return;
+  const grouped={}; state.positions.forEach(p=>{ if(p.lat==null || p.lng==null) return; if(!grouped[p.unit_id]) grouped[p.unit_id]=[]; grouped[p.unit_id].push([p.lat,p.lng]); });
+  const colors=['#ef4444','#22c55e','#3b82f6','#eab308','#a855f7','#f97316'];
+  Object.entries(grouped).forEach(([uid,pts],idx)=>{
+    if(pts.length<2) return;
+    L.polyline(pts,{color:colors[idx % colors.length],weight:2,opacity:0.7}).addTo(layers.trails);
+    const last=pts[pts.length-1];
+    L.circleMarker(last,{radius:4,color:colors[idx % colors.length],fillOpacity:1}).addTo(layers.trails).bindPopup(`Unit ${uid}`);
   });
 }
 
@@ -440,8 +454,8 @@ function updateClock(){ document.getElementById('clock').textContent = new Date(
 
 async function load(){
   try {
-    const [agencies,units,incidents,personnel,messages] = await Promise.all([api('/agencies'),api('/units'),api('/incidents'),api('/personnel'),api('/messages')]);
-    state.agencies=agencies; state.units=units; state.incidents=incidents; state.personnel=personnel; state.messages=messages; state.agencyMap={}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
+    const [agencies,units,incidents,personnel,messages,positions] = await Promise.all([api('/agencies'),api('/units'),api('/incidents'),api('/personnel'),api('/messages'),api('/taip/positions?limit=200')]);
+    state.agencies=agencies; state.units=units; state.incidents=incidents; state.personnel=personnel; state.messages=messages; state.positions=positions||[]; state.agencyMap={}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
     const filterSel=document.getElementById('agencyFilter');
     if(filterSel.options.length<=1){ state.agencies.forEach(a=>{ filterSel.innerHTML+=`<option value='${a.agency_type}'>${a.name}</option>`; }); }
     renderCallEntry(); renderActiveCalls(); renderUnitBoard(); renderMessages(); renderMap();
@@ -452,6 +466,7 @@ document.getElementById('agencyFilter').addEventListener('change',e=>{ state.fil
 document.getElementById('refreshBtn').addEventListener('click', load);
 document.getElementById('seedBtn').addEventListener('click', seedData);
 document.getElementById('msgSend').addEventListener('click', sendMessage);
+document.getElementById('trailsToggle').addEventListener('change', renderMap);
 document.getElementById('msgText').addEventListener('keydown',e=>{ if(e.key==='Enter') sendMessage(); });
 
 async function seedData(){
