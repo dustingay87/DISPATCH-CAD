@@ -249,6 +249,25 @@ class IncidentDestination(Base):
     destination = relationship('Destination')
     incident = relationship('Incident', backref='destinations')
 
+class TransportLeg(Base):
+    __tablename__ = 'transport_legs'
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey('incidents.id'), nullable=False)
+    unit_id = Column(Integer, ForeignKey('units.id'), nullable=False)
+    destination_id = Column(Integer, ForeignKey('destinations.id'), nullable=True)
+    status = Column(String(50), default='requested')
+    requested_at = Column(DateTime, default=datetime.utcnow)
+    en_route_at = Column(DateTime)
+    arrived_at = Column(DateTime)
+    transfer_completed_at = Column(DateTime)
+    cleared_at = Column(DateTime)
+    pickup_mileage = Column(Float)
+    dropoff_mileage = Column(Float)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    destination = relationship('Destination')
+    unit = relationship('Unit')
+    incident = relationship('Incident', backref='transport_legs')
+
 class CustomerConfig(Base):
     __tablename__ = 'customer_config'
     id = Column(Integer, primary_key=True, index=True)
@@ -340,6 +359,46 @@ class IncidentDestinationOut(BaseModel):
     notes: Optional[dict] = None
     created_at: Optional[datetime] = None
     destination: DestinationOut
+    class Config:
+        from_attributes = True
+
+class TransportLegCreate(BaseModel):
+    incident_id: int
+    unit_id: int
+    destination_id: Optional[int] = None
+    status: Optional[str] = 'requested'
+    pickup_mileage: Optional[float] = None
+
+class TransportLegUpdate(BaseModel):
+    destination_id: Optional[int] = None
+    status: Optional[str] = None
+    en_route_at: Optional[datetime] = None
+    arrived_at: Optional[datetime] = None
+    transfer_completed_at: Optional[datetime] = None
+    cleared_at: Optional[datetime] = None
+    pickup_mileage: Optional[float] = None
+    dropoff_mileage: Optional[float] = None
+
+class TransportLegStatusUpdate(BaseModel):
+    status: str
+    mileage: Optional[float] = None
+    timestamp: Optional[datetime] = None
+
+class TransportLegOut(BaseModel):
+    id: int
+    incident_id: int
+    unit_id: int
+    destination_id: Optional[int] = None
+    status: str
+    requested_at: Optional[datetime] = None
+    en_route_at: Optional[datetime] = None
+    arrived_at: Optional[datetime] = None
+    transfer_completed_at: Optional[datetime] = None
+    cleared_at: Optional[datetime] = None
+    pickup_mileage: Optional[float] = None
+    dropoff_mileage: Optional[float] = None
+    created_at: Optional[datetime] = None
+    destination: Optional[DestinationOut] = None
     class Config:
         from_attributes = True
 
@@ -815,6 +874,8 @@ class StatusUpdate(BaseModel):
     reason: Optional[str] = None
     disposition: Optional[str] = None
     passenger_count: Optional[int] = None
+    destination_id: Optional[int] = None
+    mileage: Optional[float] = None
 
 class UnitCamera(BaseModel):
     camera_url: str
@@ -1007,6 +1068,63 @@ def set_incident_destination(incident_id: int, body: IncidentDestinationCreate, 
     db.add(idest); db.commit(); db.refresh(idest)
     _log_event(db, 'destination_set', 'incident', incident_id, data={'destination_id': dest_id, 'notes': body.notes}, agency_id=inc.agency_id)
     return idest
+
+@app.get('/incidents/{incident_id}/transport-legs', response_model=List[TransportLegOut])
+def list_transport_legs(incident_id: int, db: Session = Depends(get_db)):
+    return db.query(TransportLeg).filter(TransportLeg.incident_id == incident_id).order_by(TransportLeg.created_at.desc()).all()
+
+@app.post('/incidents/{incident_id}/transport-legs', response_model=TransportLegOut)
+def create_transport_leg(incident_id: int, body: TransportLegCreate, db: Session = Depends(get_db)):
+    inc = db.query(Incident).get(incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    leg = TransportLeg(**body.model_dump(exclude_unset=True), incident_id=incident_id)
+    db.add(leg); db.commit(); db.refresh(leg)
+    _log_event(db, 'transport_leg_created', 'incident', incident_id, data={'unit_id': leg.unit_id, 'destination_id': leg.destination_id}, agency_id=inc.agency_id)
+    return leg
+
+@app.get('/transport-legs/{leg_id}', response_model=TransportLegOut)
+def get_transport_leg(leg_id: int, db: Session = Depends(get_db)):
+    leg = db.query(TransportLeg).get(leg_id)
+    if not leg:
+        raise HTTPException(status_code=404, detail='Transport leg not found')
+    return leg
+
+@app.put('/transport-legs/{leg_id}', response_model=TransportLegOut)
+def update_transport_leg(leg_id: int, body: TransportLegUpdate, db: Session = Depends(get_db)):
+    leg = db.query(TransportLeg).get(leg_id)
+    if not leg:
+        raise HTTPException(status_code=404, detail='Transport leg not found')
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(leg, k, v)
+    db.commit(); db.refresh(leg)
+    _log_event(db, 'transport_leg_updated', 'incident', leg.incident_id, data={'leg_id': leg.id, 'status': leg.status}, agency_id=None)
+    return leg
+
+@app.post('/transport-legs/{leg_id}/status', response_model=TransportLegOut)
+def update_transport_leg_status(leg_id: int, body: TransportLegStatusUpdate, db: Session = Depends(get_db)):
+    leg = db.query(TransportLeg).get(leg_id)
+    if not leg:
+        raise HTTPException(status_code=404, detail='Transport leg not found')
+    status = body.status
+    ts = body.timestamp or datetime.utcnow()
+    if status == 'en_route' and not leg.en_route_at:
+        leg.en_route_at = ts
+    elif status == 'arrived' and not leg.arrived_at:
+        leg.arrived_at = ts
+    elif status == 'transfer_completed' and not leg.transfer_completed_at:
+        leg.transfer_completed_at = ts
+    elif status == 'cleared' and not leg.cleared_at:
+        leg.cleared_at = ts
+    if body.mileage is not None:
+        if leg.pickup_mileage is None and status in ('en_route','requested'):
+            leg.pickup_mileage = body.mileage
+        else:
+            leg.dropoff_mileage = body.mileage
+    leg.status = status
+    db.commit(); db.refresh(leg)
+    _log_event(db, 'transport_leg_status', 'incident', leg.incident_id, data={'leg_id': leg.id, 'status': status, 'mileage': body.mileage}, agency_id=None)
+    return leg
 
 @app.get('/incidents/{incident_id}/mileage', response_model=List[MileageReadingOut])
 def list_mileage(incident_id: int, db: Session = Depends(get_db)):
@@ -1208,6 +1326,34 @@ def update_unit_status(request: Request, incident_id: int, unit_id: int, body: S
         incident.status = 'on_scene'
     elif body.status_code == 'ER' and incident.status == 'open':
         incident.status = 'en_route'
+    # Transport leg lifecycle
+    if incident:
+        open_leg = db.query(TransportLeg).filter_by(incident_id=incident.id, unit_id=unit_id).filter(TransportLeg.status != 'cleared').order_by(TransportLeg.created_at.desc()).first()
+        if body.status_code in ('TR','ED'):
+            if not open_leg:
+                dest_id = body.destination_id
+                if not dest_id:
+                    latest = db.query(IncidentDestination).filter_by(incident_id=incident.id).order_by(IncidentDestination.created_at.desc()).first()
+                    dest_id = latest.destination_id if latest else None
+                open_leg = TransportLeg(incident_id=incident.id, unit_id=unit_id, destination_id=dest_id, status='en_route', en_route_at=datetime.utcnow())
+                db.add(open_leg); db.flush()
+            else:
+                open_leg.status = 'en_route'
+                if not open_leg.en_route_at:
+                    open_leg.en_route_at = datetime.utcnow()
+            if body.mileage is not None and open_leg.pickup_mileage is None:
+                open_leg.pickup_mileage = body.mileage
+        elif body.status_code == 'OS' and open_leg and open_leg.status == 'en_route':
+            open_leg.status = 'arrived'
+            if not open_leg.arrived_at:
+                open_leg.arrived_at = datetime.utcnow()
+        elif body.status_code in ('DEL','AQ','CAN'):
+            if open_leg:
+                open_leg.status = 'cleared'
+                if not open_leg.cleared_at:
+                    open_leg.cleared_at = datetime.utcnow()
+                if body.mileage is not None and open_leg.dropoff_mileage is None:
+                    open_leg.dropoff_mileage = body.mileage
     user = get_current_user(request)
     db.add(StatusEvent(
         unit_id=unit_id,

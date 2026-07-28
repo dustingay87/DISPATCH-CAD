@@ -211,7 +211,8 @@ async function promptDestination(incidentId){
   const dogs = prompt('Vicious dogs / animal alerts:'); if(dogs) notes.animals = dogs;
   const people = prompt('Disorderly persons / known hazards:'); if(people) notes.people = people;
   const other = prompt('Other destination notes:'); if(other) notes.other = other;
-  await api(`/incidents/${incidentId}/destination`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({destination:{name, address, category:'transport', notes}, notes})});
+  const result = await api(`/incidents/${incidentId}/destination`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({destination:{name, address, category:'transport', notes}, notes})});
+  state.destination = result; return result;
 }
 
 window.setStatus = async function(code){
@@ -220,8 +221,16 @@ window.setStatus = async function(code){
   if(code==='TR' || code==='CAN'){ const pc=prompt('Passenger/Patient count?'); if(pc) extra.passenger_count=parseInt(pc); }
   const cfg=state.config;
   if(code==='CAN' || code==='TR' || code==='NPF'){ const d=prompt('Disposition?\n'+(cfg.dispositions||[]).join('\n')); if(d) extra.disposition=d; }
+  if(u.current_incident_id && ['OS','ER','TR','ED','DEL','AQ'].includes(code)){
+    const m = prompt('Mileage (odometer)?'); if(m && !isNaN(parseFloat(m))) extra.mileage = parseFloat(m);
+  }
+  if((code==='TR' || code==='ED') && u.current_incident_id){
+    let dest = state.destination;
+    if(!dest || !dest.destination_id){ dest = await promptDestination(u.current_incident_id); if(dest) state.destination = dest; }
+    if(dest && dest.destination_id) extra.destination_id = dest.destination_id;
+  }
   const path = u.current_incident_id ? `/incidents/${u.current_incident_id}/units/${u.id}/status` : `/units/${u.id}/status`;
-  try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); if((code==='OS' || code==='TR' || code==='ED') && u.current_incident_id){ const m = prompt('Mileage (odometer)?'); if(m && !isNaN(parseFloat(m))) await api(`/incidents/${u.current_incident_id}/units/${u.id}/mileage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status_code:code,mileage:parseFloat(m)})}); } if((code==='TR' || code==='ED') && u.current_incident_id){ await promptDestination(u.current_incident_id); } await load(); } catch(e){ alert(e.message); }
+  try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); await load(); } catch(e){ alert(e.message); }
 };
 
 window.toggleShift = async function(){
