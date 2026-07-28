@@ -233,6 +233,19 @@ class UserMe(BaseModel):
     email: Optional[str] = None
     agency_id: Optional[int] = None
 
+class CustomerConfigCreate(BaseModel):
+    agency_id: Optional[int] = None
+    category: str
+    key: str
+    value: Optional[dict] = None
+
+class CustomerConfigOut(CustomerConfigCreate):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
 @app.middleware('http')
 async def auth_middleware(request: Request, call_next):
     if request.method in ('GET', 'OPTIONS', 'HEAD') or request.url.path.startswith('/static/'):
@@ -466,19 +479,6 @@ class MessageOut(BaseModel):
     method: Optional[str] = None
     sent_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
-    class Config:
-        from_attributes = True
-
-class CustomerConfigCreate(BaseModel):
-    agency_id: Optional[int] = None
-    category: str
-    key: str
-    value: Optional[dict] = None
-
-class CustomerConfigOut(CustomerConfigCreate):
-    id: int
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
     class Config:
         from_attributes = True
 
