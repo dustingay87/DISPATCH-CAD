@@ -27,6 +27,7 @@ th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
       <div class='space-x-2'>
         <a href='/' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Dashboard</a>
         <a href='/admin' class='btn bg-slate-700 hover:bg-slate-600 text-white'>System Admin</a>
+        <button class='btn btn-danger' onclick='logout()'>Logout</button>
       </div>
     </div>
 
@@ -249,6 +250,11 @@ document.getElementById('personnelForm').addEventListener('submit', async e=>{
   document.getElementById('personnelForm').reset();
   await loadPersonnel();
 });
+
+async function logout(){
+  try{ await api('/logout',{method:'POST'}); }catch(e){}
+  window.location.href='/login';
+}
 
 loadAgencies();
 </script>

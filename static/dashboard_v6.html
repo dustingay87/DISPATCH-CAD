@@ -39,7 +39,6 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
       <select id='moduleSelect' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden'></select>
     </div>
     <div class='flex items-center gap-2'>
-      <a href='/dashboard_v5' class='bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs'>v5 Console</a>
       <a href='/call-entry' class='bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-xs'>Call Entry</a>
       <a href='/scheduled-transports-page' class='bg-indigo-700 hover:bg-indigo-600 px-2 py-1 rounded text-xs'>Scheduled</a>
       <a href='/coverage-page' class='bg-teal-700 hover:bg-teal-600 px-2 py-1 rounded text-xs'>Coverage</a>
@@ -48,6 +47,8 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
       <a href='/mobile-mdt?unit_id=1' class='bg-purple-800 hover:bg-purple-700 px-2 py-1 rounded text-xs'>Mobile MDT</a>
       <a href='/avl' class='bg-cyan-700 hover:bg-cyan-600 px-2 py-1 rounded text-xs'>AVL</a>
       <button id='layoutBtn' class='bg-pink-700 hover:bg-pink-600 px-2 py-1 rounded text-xs' onclick='openLayoutEditor()'>Edit Layout</button>
+      <a href='/admin' id='adminLink' class='hidden bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs'>Admin</a>
+      <button class='bg-red-700 hover:bg-red-600 px-2 py-1 rounded text-xs' onclick='logout()'>Logout</button>
     </div>
   </header>
   <main class='flex-1 grid grid-cols-12 gap-1 p-1 overflow-hidden'>
@@ -203,11 +204,19 @@ function resetDashboardLayout(){
   closeLayoutEditor();
 }
 
+async function logout(){
+  try{ await api('/logout',{method:'POST'}); }catch(e){}
+  window.location.href='/login';
+}
+
 async function init(){
   try{
     state.user=await api('/me');
     state.crossAgencies=state.user.cross_discipline_agencies||[];
     localStorage.setItem('ur_module',state.user.selected_module||'all');
+    if(state.user && (state.user.role==='admin'||state.user.role==='super_admin')){
+      document.getElementById('adminLink').classList.remove('hidden');
+    }
     applyDashboardLayout();
     populateModuleSelect();applyModuleBadge();load();
   }catch(e){console.error(e); load();}
