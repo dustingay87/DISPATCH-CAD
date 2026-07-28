@@ -3,7 +3,7 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>VolCAD v6 RescueNet</title>
+<title>Unified Response v6</title>
 <script src='https://cdn.tailwindcss.com'></script>
 <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
 <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' crossorigin=''></script>
@@ -34,7 +34,10 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
 </head>
 <body class='bg-slate-900 text-slate-200 text-xs h-screen flex flex-col'>
   <header class='h-14 bg-slate-950 border-b border-slate-700 flex items-center justify-between px-4 shrink-0'>
-    <div class='font-bold text-lg text-white'>VolCAD <span class='text-slate-500 font-normal'>v6 RescueNet</span></div>
+    <div class='flex items-center gap-2'>
+      <div class='font-bold text-lg text-white' id='brandTitle'>Unified Response</div>
+      <select id='moduleSelect' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden'></select>
+    </div>
     <div class='flex items-center gap-2'>
       <a href='/dashboard_v5' class='bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs'>v5 Console</a>
       <a href='/call-entry' class='bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-xs'>Call Entry</a>
@@ -74,7 +77,10 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
   </main>
 <script>
 const CENTER=[39.9612,-82.9988];
-let state={agencies:[],units:[],incidents:[],scheduled:[],agencyMap:{},postZones:[],unitPostings:[],postingMap:{},selectedTrip:null,selectedVehicle:null};
+let state={agencies:[],units:[],incidents:[],scheduled:[],agencyMap:{},postZones:[],unitPostings:[],postingMap:{},selectedTrip:null,selectedVehicle:null,user:null};
+const MODULE_LABELS={ems:'EMS',fire:'Fire',law:'Law',all:'All Modules'};
+const MODULE_BRAND={ems:'Unified RESPONSE EMS',fire:'Unified RESPONSE FIRE',law:'Unified Response LAW',all:'Unified RESPONSE (For All three)'};
+const MODULE_COLOR={ems:'bg-green-700',fire:'bg-red-700',law:'bg-blue-700',all:'bg-purple-700'};
 let map,layers;
 
 function api(path,opts={}){return fetch(path,{...opts,credentials:'include'}).then(r=>{if(r.status===401){window.location.href='/login';throw new Error('Unauthorized');}if(!r.ok)throw new Error(`${path} ${r.status}`);return r.json();});}
@@ -85,9 +91,46 @@ function elapsed(iso){return iso?(Date.now()-new Date(iso).getTime())/1000:0;}
 function priorityClass(p){return `pri-${Math.min(Math.max(p||2,1),4)}`;}
 function statClass(c){if(c==='AQ')return 'stat-AQ';if(c==='OS')return 'stat-OS';if(['ER','TR','DEL'].includes(c))return 'stat-ER';return 'text-slate-400';}
 
+function applyModuleBadge(){
+  const m=state.user?.selected_module||localStorage.getItem('ur_module')||'all';
+  document.getElementById('brandTitle').textContent=MODULE_BRAND[m]||MODULE_BRAND.all;
+  document.title=MODULE_BRAND[m]||MODULE_BRAND.all;
+  const sel=document.getElementById('moduleSelect');
+  if(sel){ sel.value=m; }
+}
+function populateModuleSelect(){
+  const mods=state.user?.modules||[];
+  const sel=document.getElementById('moduleSelect');
+  if(!mods.length){ sel.classList.add('hidden'); return; }
+  const options=[...mods.map(m=>`<option value='${m}'>${MODULE_LABELS[m]||m}</option>`),`<option value='all'>${MODULE_LABELS.all}</option>`];
+  sel.innerHTML=options.join('');
+  sel.classList.remove('hidden');
+  sel.onchange=async (e)=>{
+    const m=e.target.value;
+    try{
+      await api('/me/module',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({module:m})});
+      if(state.user) state.user.selected_module=m;
+      localStorage.setItem('ur_module',m);
+      applyModuleBadge();
+      load();
+    }catch(err){console.error(err);}
+  };
+}
+async function init(){
+  try{
+    state.user=await api('/me');
+    localStorage.setItem('ur_module',state.user.selected_module||'all');
+    populateModuleSelect();applyModuleBadge();load();
+  }catch(e){console.error(e);load();}
+}
 async function load(){
   const [agencies,units,incidents,postZones,unitPostings,scheduled]=await Promise.all([api('/agencies'),api('/units'),api('/incidents'),api('/post-zones'),api('/unit-postings'),api('/scheduled-transports?status=scheduled')]);
   state.agencies=agencies;state.units=units;state.incidents=incidents;state.scheduled=scheduled||[];state.agencyMap={};state.agencies.forEach(a=>state.agencyMap[a.id]=a);
+  if(state.user && state.user.selected_module && state.user.selected_module!=='all'){
+    const sm=state.user.selected_module;
+    state.incidents=state.incidents.filter(i=>{const at=(state.agencyMap[i.agency_id]||{}).agency_type;return (sm==='law'&&at==='police')||at===sm;});
+    state.units=state.units.filter(u=>{const at=(state.agencyMap[u.agency_id]||{}).agency_type;return (sm==='law'&&at==='police')||at===sm;});
+  }
   state.postZones=postZones||[];state.unitPostings=unitPostings||[];state.postingMap={};
   (state.unitPostings||[]).forEach(p=>{ if(p.is_current) state.postingMap[p.unit_id]=p.post_zone; });
   renderOpenWork();renderVehicleInfo();renderMap();renderTripSummary();renderScheduled();
@@ -233,7 +276,7 @@ window.loadDestinationStatusSummary=async function(incidentId){
   } catch(e){ el.innerHTML = `<b>Destination status:</b> <span class='text-slate-500'>unavailable</span>`; }
 }
 
-load();setInterval(load,5000);
+init();setInterval(load,5000);
 </script>
 </body>
 </html>

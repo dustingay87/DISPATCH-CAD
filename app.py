@@ -390,6 +390,11 @@ class UserMe(BaseModel):
     role: str
     email: Optional[str] = None
     agency_id: Optional[int] = None
+    modules: List[str] = []
+    selected_module: Optional[str] = None
+
+class UserModuleUpdate(BaseModel):
+    module: str
 
 class UserCreate(BaseModel):
     email: str
@@ -795,9 +800,42 @@ def logout(response: Response):
     return {'ok': True}
 
 @app.get('/me', response_model=UserMe)
-def me(request: Request):
+def me(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request)
-    return {'user_id': user['user_id'], 'role': user['role']}
+    u = db.query(User).get(user['user_id'])
+    modules = []
+    selected = None
+    if u:
+        if u.agency_id:
+            cfg = db.query(CustomerConfig).filter_by(agency_id=u.agency_id, category='modules', key='enabled').first()
+            if cfg and cfg.value:
+                modules = cfg.value if isinstance(cfg.value, list) else []
+        sel = db.query(CustomerConfig).filter_by(category='user_module', key=str(u.id)).first()
+        if sel:
+            selected = sel.value
+    return {'user_id': user['user_id'], 'email': u.email if u else None, 'role': user['role'], 'agency_id': u.agency_id if u else None, 'modules': modules, 'selected_module': selected}
+
+@app.put('/me/module')
+def set_user_module(body: UserModuleUpdate, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request)
+    u = db.query(User).get(user['user_id'])
+    if not u:
+        raise HTTPException(status_code=404, detail='User not found')
+    if u.agency_id:
+        agency_modules = []
+        cfg = db.query(CustomerConfig).filter_by(agency_id=u.agency_id, category='modules', key='enabled').first()
+        if cfg and cfg.value:
+            agency_modules = cfg.value if isinstance(cfg.value, list) else []
+        if agency_modules and body.module not in agency_modules and body.module != 'all':
+            raise HTTPException(status_code=400, detail='Module not enabled for agency')
+    sel = db.query(CustomerConfig).filter_by(category='user_module', key=str(u.id)).first()
+    if not sel:
+        sel = CustomerConfig(category='user_module', key=str(u.id), value=body.module)
+        db.add(sel)
+    else:
+        sel.value = body.module
+    db.commit()
+    return {'selected_module': body.module}
 
 @app.get('/login')
 def login_page():
@@ -900,6 +938,7 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
     templates = {
         'police': {
             'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TC','label':'Traffic Control'},{'code':'CT','label':'Citation'},{'code':'ARR','label':'Arrest'},{'code':'BK','label':'Booking'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'modules': ['law'],
             'unit_types': ['patrol','detective','supervisor','k9','swat','traffic','rescue'],
             'call_types': [
                 {'label':'Traffic Accident', 'priority':2, 'fields':['vehicles','injuries']},
@@ -927,6 +966,7 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
         },
         'fire': {
             'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'WATER','label':'Water on Fire'},{'code':'EXT','label':'Extinguished'},{'code':'OVER','label':'Overhaul'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'modules': ['fire'],
             'unit_types': ['engine','ladder','rescue','brush','tanker','ambulance','chief'],
             'call_types': [
                 {'label':'Structure Fire', 'priority':1, 'fields':['exposures','occupants']},
@@ -954,6 +994,7 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
         },
         'ems': {
             'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'modules': ['ems'],
             'unit_types': ['ambulance','medic','supervisor','air','rescue'],
             'call_types': [
                 {'label':'Cardiac Arrest', 'priority':1, 'fields':['age','conscious']},
@@ -1857,6 +1898,7 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
     templates = {
         'police': {
             'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TC','label':'Traffic Control'},{'code':'CT','label':'Citation'},{'code':'ARR','label':'Arrest'},{'code':'BK','label':'Booking'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'modules': ['law'],
             'unit_types': ['patrol','detective','supervisor','k9','swat','traffic','rescue'],
             'call_types': [
                 {'label':'Traffic Accident', 'priority':2, 'fields':['vehicles','injuries']},
@@ -1884,6 +1926,7 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
         },
         'fire': {
             'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'WATER','label':'Water on Fire'},{'code':'EXT','label':'Extinguished'},{'code':'OVER','label':'Overhaul'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'modules': ['fire'],
             'unit_types': ['engine','ladder','rescue','brush','tanker','ambulance','chief'],
             'call_types': [
                 {'label':'Structure Fire', 'priority':1, 'fields':['exposures','occupants']},
@@ -1911,6 +1954,7 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
         },
         'ems': {
             'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'modules': ['ems'],
             'unit_types': ['ambulance','medic','supervisor','air','rescue'],
             'call_types': [
                 {'label':'Cardiac Arrest', 'priority':1, 'fields':['age','conscious']},
