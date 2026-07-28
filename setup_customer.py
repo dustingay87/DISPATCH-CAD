@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import json
@@ -10,15 +11,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def get_db_url():
-    db_url = os.getenv('SUPABASE_DB_URL')
+    db_url = os.getenv('SUPABASE_DB_URL') or os.getenv('DATABASE_URL')
     if not db_url:
-        print('Error: SUPABASE_DB_URL not set in environment or .env')
+        print('Error: No database URL configured. Set SUPABASE_DB_URL or DATABASE_URL in .env')
         sys.exit(1)
     return db_url.replace('postgresql+psycopg2://', 'postgresql://')
 
 def run_schema():
     print('Ensuring schema is applied...')
-    result = subprocess.run([sys.executable, 'setup_db.py'], capture_output=True, text=True)
+    # setup_db.py will not backup here; the caller is responsible for backup.
+    result = subprocess.run([sys.executable, 'setup_db.py', '--no-backup'], capture_output=True, text=True)
     print(result.stdout)
     if result.returncode != 0:
         print(result.stderr)
@@ -42,8 +44,18 @@ def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 def main():
-    customer_path = sys.argv[1] if len(sys.argv) > 1 else 'customer.json'
+    parser = argparse.ArgumentParser(description='Seed or update a customer configuration without destroying existing data.')
+    parser.add_argument('customer', nargs='?', default='customer.json', help='Path to customer JSON config')
+    parser.add_argument('--no-backup', action='store_true', help='Skip the pre-update database backup (not recommended).')
+    args = parser.parse_args()
+
+    customer_path = args.customer
     data = load_customer(customer_path)
+
+    if not args.no_backup:
+        print('Creating pre-update backup...')
+        subprocess.run([sys.executable, 'backup.py'], check=True)
+
     run_schema()
     db_url = get_db_url()
     conn = psycopg2.connect(db_url)

@@ -55,6 +55,34 @@ See `.env.example`.
    - Start: `uvicorn app:app --host 0.0.0.0 --port $PORT`
 4. Add environment variables (`DATABASE_URL`, `SECRET_KEY`).
 
+## Safe update procedure
+
+The `update.py` script is the safe way to pull the latest code and apply schema changes without purging customer data.
+
+```powershell
+cd C:\Users\Dustin\CascadeProjects\volcad-prototype
+python update.py --customer customer.json
+```
+
+What it does:
+
+1. `git pull`
+2. `backup.py` - backs up the full database to `backups/`
+3. `setup_db.py` - applies `schema.sql`, but only additive/IF-NOT-EXISTS statements; destructive statements are blocked unless `--force` is used
+4. `setup_customer.py` - re-applies your customer config using `ON CONFLICT` upserts (no deletions)
+
+Manual equivalents:
+
+```powershell
+python backup.py          # always backup first
+python setup_db.py        # apply schema changes
+python setup_customer.py customer.json
+```
+
+`setup_db.py` will refuse to run `DROP`, `TRUNCATE`, or `DELETE FROM` statements. If you ever need a destructive migration, run `python backup.py` first, then `python setup_db.py --force`, and only restore if you are sure.
+
+**Never run `setup_db.py` without a backup in production.**
+
 ## Pilot workflow
 
 1. Log in at `/login`.
