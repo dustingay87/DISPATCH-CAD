@@ -165,8 +165,21 @@ async function selectIncident(id){
         <div class='text-xs font-semibold text-slate-400 mb-1'>Timeline</div>
         <div class='space-y-1 text-xs'>${(timeline.events||[]).slice(0,6).map(e=>`<div class='text-slate-300'>${fmtTime(e.created_at)} ${e.status_code} ${e.reason||''}</div>`).join('') || '<div class=\'text-slate-500\'>No events</div>'}</div>
       </div>
+      <div class='border-t border-slate-700 pt-2'>
+        <div class='text-xs font-semibold text-slate-400 mb-1'>Recommended Units</div>
+        <div id='recs' class='space-y-1 text-xs text-slate-300'>Loading...</div>
+      </div>
     </div>`;
+  await loadRecommendations(i.id);
   renderMap();
+}
+
+async function loadRecommendations(id){
+  const el = document.getElementById('recs'); if(!el) return;
+  try {
+    const recs = await api(`/incidents/${id}/recommend`);
+    el.innerHTML = recs.length ? recs.map(r=>`<div class='text-slate-300'>${r.call_sign} (${r.unit_type}) <span class='text-slate-500'>${r.distance_miles!=null ? r.distance_miles.toFixed(1)+' mi' : 'no loc'}</span> <span class='text-blue-400'>${r.reason}</span></div>`).join('') : '<div class=\'text-slate-500\'>No available recommended units</div>';
+  } catch(e){ el.innerHTML = '<div class=\'text-slate-500\'>Recommendations unavailable</div>'; }
 }
 
 async function dispatchSelected(){

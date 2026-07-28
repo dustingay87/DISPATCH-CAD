@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import List, Optional
 import os
 import re
+import math
 import time
 import hmac
 import hashlib
@@ -853,6 +854,35 @@ def get_incident(incident_id: int, db: Session = Depends(get_db)):
     if not incident:
         raise HTTPException(status_code=404, detail='Incident not found')
     return incident
+
+@app.get('/incidents/{incident_id}/recommend')
+def recommend_units(incident_id: int, limit: int = Query(5), db: Session = Depends(get_db)):
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    cfg = db.query(CustomerConfig).filter_by(agency_id=incident.agency_id, category='response_plans', key='defaults').first()
+    plan = (cfg.value or {}) if cfg else {}
+    recommended_types = plan.get(incident.call_type, []) if isinstance(plan, dict) else []
+    units = db.query(Unit).filter(Unit.current_status == 'AQ').all()
+    scored = []
+    for u in units:
+        s = 0
+        reasons = []
+        if u.unit_type in recommended_types:
+            s += 100
+            reasons.append('run-card')
+        if u.agency_id == incident.agency_id:
+            s += 20
+            reasons.append('same-agency')
+        dist = None
+        if incident.lat is not None and u.lat is not None and u.lng is not None:
+            dy = (u.lat - incident.lat) * 69.0
+            dx = (u.lng - incident.lng) * 69.0 * math.cos(math.radians(incident.lat))
+            dist = math.sqrt(dx*dx + dy*dy)
+            s -= dist * 5
+        scored.append({'unit_id': u.id, 'call_sign': u.call_sign, 'unit_type': u.unit_type, 'agency_id': u.agency_id, 'distance_miles': dist, 'score': s, 'reason': ' / '.join(reasons) or 'available'})
+    scored.sort(key=lambda x: -x['score'])
+    return scored[:limit]
 
 @app.get('/incidents/{incident_id}/timeline')
 def timeline(incident_id: int, db: Session = Depends(get_db)):
