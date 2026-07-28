@@ -1191,3 +1191,7 @@ def import_csv(entity: str, file: UploadFile = File(...), current_user: dict = D
 @app.get('/import')
 def import_page():
     return FileResponse('static/import.html')
+
+@app.get('/reports')
+def reports():
+    return FileResponse('static/reporting.html')

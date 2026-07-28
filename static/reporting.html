@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>VolCAD Reporting</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .card { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1rem; }
+  .tile { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1rem; }
+  .bar { height:1rem; border-radius:0.25rem; background:#334155; overflow:hidden; }
+  .bar-fill { height:100%; background:#2563eb; }
+  .hidden { display:none; }
+</style>
+</head>
+<body class='p-4'>
+  <div class='max-w-6xl mx-auto space-y-4'>
+    <div class='flex justify-between items-center'>
+      <h1 class='text-2xl font-bold'>VolCAD <span class='text-slate-400 font-normal'>Reporting</span></h1>
+      <div class='space-x-2'>
+        <a href='/admin' class='px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-white text-sm'>Admin</a>
+        <a href='/console' class='px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-white text-sm'>Console</a>
+      </div>
+    </div>
+
+    <div id='msg' class='hidden px-4 py-2 rounded text-sm'></div>
+
+    <div class='grid grid-cols-2 md:grid-cols-4 gap-4' id='kpi'>
+      <div class='tile text-center'><div class='text-3xl font-bold' id='kTotal'>-</div><div class='text-xs text-slate-400 uppercase'>Total Calls</div></div>
+      <div class='tile text-center'><div class='text-3xl font-bold text-yellow-400' id='kActive'>-</div><div class='text-xs text-slate-400 uppercase'>Active</div></div>
+      <div class='tile text-center'><div class='text-3xl font-bold text-green-400' id='kAvail'>-</div><div class='text-xs text-slate-400 uppercase'>Units Available</div></div>
+      <div class='tile text-center'><div class='text-3xl font-bold text-blue-400' id='kSla'>-</div><div class='text-xs text-slate-400 uppercase'>SLA Met</div></div>
+    </div>
+
+    <div class='grid grid-cols-1 md:grid-cols-2 gap-4'>
+      <div class='card'>
+        <h2 class='font-semibold mb-2'>Calls by Discipline</h2>
+        <div id='disciplineChart' class='space-y-2'></div>
+      </div>
+      <div class='card'>
+        <h2 class='font-semibold mb-2'>Calls by Priority</h2>
+        <div id='priorityChart' class='space-y-2'></div>
+      </div>
+    </div>
+
+    <div class='card'>
+      <h2 class='font-semibold mb-2'>Unit Utilization</h2>
+      <div id='unitUtil' class='overflow-x-auto'></div>
+    </div>
+
+    <div class='card'>
+      <h2 class='font-semibold mb-2'>Status Breakdown</h2>
+      <div id='statusChart' class='space-y-2'></div>
+    </div>
+  </div>
+
+<script>
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+
+function showMsg(text, ok=true){
+  const el = document.getElementById('msg'); el.classList.remove('hidden');
+  el.className = ok ? 'px-4 py-2 rounded text-sm bg-green-900 text-green-100' : 'px-4 py-2 rounded text-sm bg-red-900 text-red-100';
+  el.textContent = text; setTimeout(()=>el.classList.add('hidden'), 4000);
+}
+
+function priorityTarget(p){ return {1:180,2:420,3:720,4:1200}[Math.min(Math.max(p||2,1),4)] || 420; }
+function fmtDur(s){ if(s==null) return '-'; const m=Math.floor(s/60); const sec=Math.floor(s%60); return `${m}m ${sec}s`; }
+
+async function init(){
+  try {
+    const [agencies, units, incidents] = await Promise.all([api('/agencies'), api('/units'), api('/incidents')]);
+    const agencyMap = {}; agencies.forEach(a=>agencyMap[a.id]=a);
+
+    const total = incidents.length;
+    const active = incidents.filter(i=>i.status!=='closed').length;
+    const available = units.filter(u=>u.current_status==='AQ').length;
+
+    let met=0, slaChecks=0;
+    incidents.forEach(i=>{
+      if(!i.created_at) return;
+      const end = i.status==='closed' ? new Date(i.updated_at||i.created_at) : Date.now();
+      const elapsed = (end - new Date(i.created_at))/1000;
+      const target = priorityTarget(i.priority);
+      slaChecks++;
+      if(elapsed <= target) met++;
+    });
+    const slaPct = slaChecks ? Math.round(met/slaChecks*100) : 0;
+
+    document.getElementById('kTotal').textContent = total;
+    document.getElementById('kActive').textContent = active;
+    document.getElementById('kAvail').textContent = available;
+    document.getElementById('kSla').textContent = slaPct + '%';
+
+    const byDisc = {}; incidents.forEach(i=>{ const d=agencyMap[i.agency_id]?.agency_type||'unknown'; byDisc[d]=(byDisc[d]||0)+1; });
+    renderBar('disciplineChart', byDisc, total);
+
+    const byPri = {}; incidents.forEach(i=>{ byPri[i.priority]=(byPri[i.priority]||0)+1; });
+    renderBar('priorityChart', byPri, total, {1:'P1',2:'P2',3:'P3',4:'P4'});
+
+    const byStatus = {}; incidents.forEach(i=>{ byStatus[i.status]=(byStatus[i.status]||0)+1; });
+    renderBar('statusChart', byStatus, total);
+
+    const rows = units.map(u=>{
+      const a = agencyMap[u.agency_id] || {};
+      const incCount = incidents.filter(i=>i.id===u.current_incident_id).length; // placeholder
+      return `<tr><td>${u.call_sign}</td><td>${a.agency_type||'-'}</td><td>${u.current_status}</td><td>${u.accumulated_call_seconds ? fmtDur(u.accumulated_call_seconds) : '-'}</td><td>${u.in_service_at ? 'Yes' : 'No'}</td></tr>`;
+    }).join('');
+    document.getElementById('unitUtil').innerHTML = rows ? `<table class='w-full text-sm text-left'><thead><tr class='text-slate-400'><th>Unit</th><th>Type</th><th>Status</th><th>Call Time</th><th>In Service</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="text-slate-500">No units</div>';
+  } catch(e){ showMsg(e.message, false); }
+}
+
+function renderBar(id, data, total, labels={}){
+  const el = document.getElementById(id);
+  const keys = Object.keys(data).sort();
+  el.innerHTML = keys.map(k=>{
+    const pct = total ? Math.round(data[k]/total*100) : 0;
+    const label = labels[k] || k;
+    return `<div class='flex items-center text-sm'><div class='w-24 text-slate-400'>${label}</div><div class='flex-1 bar'><div class='bar-fill' style='width:${pct}%'></div></div><div class='w-12 text-right'>${data[k]}</div></div>`;
+  }).join('') || '<div class="text-slate-500">No data</div>';
+}
+
+init();
+</script>
+</body>
+</html>
