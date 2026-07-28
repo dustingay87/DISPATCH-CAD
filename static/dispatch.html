@@ -94,7 +94,7 @@
     </div>
   </footer>
 <script>
-const CONFIG = { center:[39.9612,-82.9988], zoom:11 };
+const DEFAULT_CENTER = [39.9612,-82.9988];
 let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false, mapLayers:[], destinations:{} };
 const pathDisc = window.location.pathname.replace(/^\/|\/$/g,'');
 let DISCIPLINE = ['police','fire','ems'].includes(pathDisc) ? pathDisc : (new URLSearchParams(window.location.search).get('discipline') || 'all');
@@ -113,7 +113,7 @@ function matchesDiscipline(t){ return DISCIPLINE==='all' || t===DISCIPLINE; }
 function log(msg){ state.logs.unshift(`${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${msg}`); if(state.logs.length>100) state.logs.pop(); renderLog(); }
 
 function initMap(){
-  map = L.map('map').setView(CONFIG.center, CONFIG.zoom);
+  map = L.map('map');
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'&copy; OpenStreetMap' }).addTo(map);
   layers = { units:L.layerGroup().addTo(map), incidents:L.layerGroup().addTo(map), trails:L.layerGroup().addTo(map), critical:L.layerGroup().addTo(map) };
 }
@@ -346,6 +346,7 @@ async function loadTrails(unitId){
 function renderMap(){
   if(!map) initMap();
   layers.units.clearLayers(); layers.incidents.clearLayers(); layers.trails.clearLayers(); layers.critical.clearLayers();
+  let bounds=L.latLngBounds([]);
   const a=state.incidents.find(i=>i.id===state.selectedIncident);
   state.units.forEach(u=>{
     if(u.lat==null || u.lng==null) return;
@@ -353,16 +354,19 @@ function renderMap(){
     const m = L.circleMarker([u.lat,u.lng],{radius:6,color:col,fillColor:col,fillOpacity:0.9,weight:2}).addTo(layers.units);
     m.bindPopup(`<b>${u.call_sign}</b><br>${statusLabel(u.current_status)}<br>${state.agencyMap[u.agency_id]?.name||''}`);
     if(state.selectedUnit===u.id) m.openPopup();
+    bounds.extend([u.lat,u.lng]);
   });
   state.incidents.forEach(i=>{
     if(i.lat==null || i.lng==null) return;
     const col = i.status==='closed' ? '#64748b' : i.priority===1 ? '#ef4444' : i.priority===2 ? '#f97316' : '#eab308';
     const m = L.circleMarker([i.lat,i.lng],{radius:8,color:col,fillColor:col,fillOpacity:0.6,weight:2}).addTo(layers.incidents);
     m.bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${i.location_text||''}`);
+    bounds.extend([i.lat,i.lng]);
   });
   if(state.showTrails && state.selectedUnit && state.trails[state.selectedUnit] && state.trails[state.selectedUnit].length){
     const pts = state.trails[state.selectedUnit].map(p=>[p.lat,p.lng]);
     L.polyline(pts,{color:'#3b82f6', opacity:0.7, weight:2}).addTo(layers.trails);
+    pts.forEach(p=>bounds.extend(p));
     const last = pts[pts.length-1];
     L.circleMarker(last,{radius:4, color:'#3b82f6', fillColor:'#3b82f6', fillOpacity:1}).addTo(layers.trails);
   }
@@ -371,9 +375,19 @@ function renderMap(){
       const col = c.type==='hydrant' ? '#0ea5e9' : c.type==='hospital' ? '#ef4444' : '#22c55e';
       const m = L.circleMarker([c.lat,c.lng],{radius:4, color:col, fillColor:col, fillOpacity:0.8, weight:1}).addTo(layers.critical);
       m.bindPopup(`<b>${c.name}</b><br>${c.type}`);
+      bounds.extend([c.lat,c.lng]);
     });
   }
-  if(a && a.lat!=null && a.lng!=null){ map.setView([a.lat,a.lng], 14); layers.incidents.getLayers().forEach(m=>{ if(m.getPopup().getContent().includes(a.call_number||a.incident_number)) m.openPopup(); }); }
+  if(bounds.isValid()){
+    map.fitBounds(bounds,{padding:[20,20],maxZoom:16});
+  } else if(a && a.lat!=null && a.lng!=null){
+    map.setView([a.lat,a.lng], 14);
+  } else {
+    const am = state.agencies.find(ag=>ag.id===state.units[0]?.agency_id) || state.agencies[0];
+    if(am && am.lat!=null && am.lng!=null) map.setView([am.lat,am.lng], 11);
+    else map.setView(DEFAULT_CENTER, 11);
+  }
+  if(a && a.lat!=null && a.lng!=null){ layers.incidents.getLayers().forEach(m=>{ if(m.getPopup().getContent().includes(a.call_number||a.incident_number)) m.openPopup(); }); }
 }
 
 function renderMessages(){

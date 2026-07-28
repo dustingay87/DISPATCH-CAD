@@ -95,7 +95,7 @@ body { -webkit-tap-highlight-color:transparent; overscroll-behavior:none; }
 const url = new URL(window.location.href);
 let unitId = parseInt(url.searchParams.get('unit_id')) || null;
 let state = { me:null, personnel:null, unit:null, agencies:[], agencyMap:{}, incidents:[], activeIncidents:[], historyIncidents:[], messages:[], allUnits:[], personnelList:[], config:{statuses:[],dispositions:[],callTypes:[]}, map:null, selectedIncident:null, crossAgencies:[] };
-const CENTER = [39.9612,-82.9988];
+const DEFAULT_CENTER = [39.9612,-82.9988];
 
 const ROLE_BADGE = { ems:{label:'D2D EMS',color:'bg-emerald-700'}, fire:{label:'D2D Fire',color:'bg-red-700'}, law:{label:'D2D Law',color:'bg-blue-700'}, all:{label:'D2D Command',color:'bg-purple-700'} };
 
@@ -297,13 +297,13 @@ async function selectIncident(id){
 
 function initMap(){
   if(state.map) return;
-  const center = state.unit ? [state.unit.lat||CENTER[0], state.unit.lng||CENTER[1]] : CENTER;
-  state.map = L.map('map').setView(center, 11);
+  state.map = L.map('map');
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap'}).addTo(state.map);
 }
 function renderMap(){
   initMap();
   state.map.eachLayer(l=>{ if(l instanceof L.Marker || l instanceof L.CircleMarker) state.map.removeLayer(l); });
+  let bounds=L.latLngBounds([]);
   const showIds = [state.me.agency_id, ...state.crossAgencies];
   state.allUnits.forEach(u=>{
     if(!u.lat || !u.lng) return;
@@ -313,13 +313,22 @@ function renderMap(){
     const color = a.agency_type==='police'?'blue':a.agency_type==='fire'?'red':a.agency_type==='ems'?'green':'purple';
     const m = L.circleMarker([u.lat,u.lng],{radius:8,color:color,fillColor:color,fillOpacity:0.8}).addTo(state.map);
     m.bindPopup(`<b>${u.call_sign}</b><br>${u.name}<br>${statusLabel(u.current_status)}`);
+    bounds.extend([u.lat,u.lng]);
   });
   [...state.activeIncidents, ...state.historyIncidents].forEach(i=>{
     if(!i.lat || !i.lng) return;
     if(i.agency_id !== state.me.agency_id) return;
     const m = L.marker([i.lat,i.lng]).addTo(state.map);
     m.bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${i.location_text}`);
+    bounds.extend([i.lat,i.lng]);
   });
+  if(bounds.isValid()){
+    state.map.fitBounds(bounds,{padding:[20,20],maxZoom:15});
+  } else {
+    const u=state.unit, a=u ? state.agencyMap[u.agency_id] : null;
+    const center = (u && u.lat!=null && u.lng!=null) ? [u.lat,u.lng] : (a && a.lat!=null && a.lng!=null ? [a.lat,a.lng] : DEFAULT_CENTER);
+    state.map.setView(center, 11);
+  }
 }
 
 window.setStatus = async function(code){

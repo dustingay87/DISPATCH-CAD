@@ -60,6 +60,7 @@
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleString(); }
 let state = { agencies:[], selected:null, selectedIncident:null, unitTrails:[] }; let map;
+const DEFAULT_CENTER = [39.9612, -82.9988];
 
 async function search(){
   try {
@@ -144,7 +145,7 @@ async function loadDetail(id){
     (timeline.assignments||[]).forEach(a=>unitIds.add(a.unit_id));
     (timeline.events||[]).forEach(e=>{ if(e.unit_id) unitIds.add(e.unit_id); });
     const positions = await api('/taip/positions?limit=500');
-    initMap(i); renderTrails([...unitIds], positions);
+    initMap(); renderTrails([...unitIds], positions);
   } catch(e){ document.getElementById('detail').innerHTML = `<div class='p-4 text-red-400'>Error: ${e.message}</div>`; }
 }
 
@@ -170,16 +171,16 @@ function buildTimeline(t){
   return html;
 }
 
-function initMap(incident){
+function initMap(){
   if(map) map.remove();
-  const center = (incident.lat && incident.lng) ? [incident.lat, incident.lng] : [39.9612, -82.9988];
-  map = L.map('map').setView(center, 13);
+  map = L.map('map');
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
 }
 
 function renderTrails(unitIds, positions){
   if(!map) return;
   const trailLayer = L.layerGroup().addTo(map);
+  let bounds = L.latLngBounds([]);
   const filtered = (positions || []).filter(p => unitIds.includes(p.unit_id) && p.lat!=null && p.lng!=null);
   const grouped = {};
   filtered.forEach(p => { if(!grouped[p.unit_id]) grouped[p.unit_id]=[]; grouped[p.unit_id].push([p.lat, p.lng]); });
@@ -189,9 +190,18 @@ function renderTrails(unitIds, positions){
     L.polyline(pts, {color: colors[idx % colors.length], weight:2, opacity:0.8}).addTo(trailLayer);
     const last = pts[pts.length-1];
     L.circleMarker(last, {radius:5, color: colors[idx % colors.length], fillOpacity:1}).addTo(trailLayer).bindPopup(`Unit ${uid}`);
+    pts.forEach(p=>bounds.extend(p));
   });
   if(state.selectedIncident && state.selectedIncident.lat!=null){
     L.circleMarker([state.selectedIncident.lat, state.selectedIncident.lng], {radius:8, color:'#ef4444', fillOpacity:0.6}).addTo(trailLayer).bindPopup('Incident');
+    bounds.extend([state.selectedIncident.lat, state.selectedIncident.lng]);
+  }
+  if(bounds.isValid()){
+    map.fitBounds(bounds, {padding:[20,20], maxZoom:15});
+  } else {
+    const a = state.selectedIncident && state.agencies.length ? state.agencies.find(ag=>ag.id===state.selectedIncident.agency_id) : null;
+    const center = (state.selectedIncident && state.selectedIncident.lat!=null && state.selectedIncident.lng!=null) ? [state.selectedIncident.lat, state.selectedIncident.lng] : (a && a.lat!=null && a.lng!=null) ? [a.lat,a.lng] : DEFAULT_CENTER;
+    map.setView(center, 13);
   }
 }
 

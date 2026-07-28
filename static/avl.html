@@ -53,7 +53,7 @@
     </main>
   </div>
 <script>
-const CENTER = [39.9612, -82.9988];
+const DEFAULT_CENTER = [39.9612, -82.9988];
 let state = { agencies:[], units:[], positions:{}, selected:null, selectedTrail:null, trails:false };
 let map, layers={};
 
@@ -61,7 +61,7 @@ function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}
 function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 
 function initMap(){
-  map = L.map('map', { center: CENTER, zoom: 11 });
+  map = L.map('map');
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
   layers.units = L.layerGroup().addTo(map);
   layers.trails = L.layerGroup().addTo(map);
@@ -113,6 +113,7 @@ function renderUnitList(){
 
 function renderMap(){
   layers.units.clearLayers(); layers.trails.clearLayers();
+  let bounds=L.latLngBounds([]);
   const am=agencyMap();
   state.units.forEach(u=>{
     if(u.lat==null || u.lng==null) return;
@@ -121,9 +122,18 @@ function renderMap(){
     marker.on('click',()=>selectUnit(u.id));
     marker.bindPopup(`<b>${u.call_sign}</b><br>${u.current_status}<br>${am[u.agency_id]?.name||''}<br>Spd: ${u.speed??'-'} Hdg: ${u.heading??'-'}`);
     if(state.selected===u.id) marker.openPopup();
+    bounds.extend([u.lat,u.lng]);
   });
   if(document.getElementById('trailsToggle').checked) drawTrails();
   drawSelectedTrail();
+  if(bounds.isValid()){
+    if(state.selected){ map.fitBounds(bounds,{padding:[20,20],maxZoom:16}); }
+    else { map.fitBounds(bounds,{padding:[20,20],maxZoom:14}); }
+  } else {
+    const am = state.agencies.find(a=>a.id===state.units[0]?.agency_id) || state.agencies[0];
+    if(am && am.lat!=null && am.lng!=null) map.setView([am.lat,am.lng], 11);
+    else map.setView(DEFAULT_CENTER, 11);
+  }
 }
 
 function drawSelectedTrail(){
@@ -171,8 +181,8 @@ async function sendTaip(body){
 
 function generateTaipSentence(unitId, move){
   const u = state.units.find(x=>x.id===parseInt(unitId));
-  const lat = (u && u.lat!=null ? u.lat : CENTER[0]);
-  const lng = (u && u.lng!=null ? u.lng : CENTER[1]);
+  const lat = (u && u.lat!=null ? u.lat : DEFAULT_CENTER[0]);
+  const lng = (u && u.lng!=null ? u.lng : DEFAULT_CENTER[1]);
   const d = move ? (Math.random()*360) : 0;
   const newLat = lat + (move ? Math.cos(d*Math.PI/180)*0.001 : 0);
   const newLng = lng + (move ? Math.sin(d*Math.PI/180)*0.001 : 0);
