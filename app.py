@@ -247,6 +247,22 @@ class UserMe(BaseModel):
     email: Optional[str] = None
     agency_id: Optional[int] = None
 
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    role: str = 'responder'
+    agency_id: Optional[int] = None
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    role: str
+    is_active: bool
+    agency_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
 class CustomerConfigCreate(BaseModel):
     agency_id: Optional[int] = None
     category: str
@@ -1246,3 +1262,20 @@ def import_page():
 @app.get('/reports')
 def reports():
     return FileResponse('static/reporting.html')
+
+@app.get('/users', response_model=List[UserOut])
+def list_users(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return db.query(User).order_by(User.created_at.desc()).all()
+
+@app.post('/users', response_model=UserOut)
+def create_user(body: UserCreate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == body.email).first():
+        raise HTTPException(status_code=400, detail='Email already exists')
+    u = User(email=body.email, hashed_password=hash_password(body.password), role=body.role, agency_id=body.agency_id, is_active=True)
+    db.add(u); db.commit(); db.refresh(u)
+    _log_event(db, 'user_created', 'system', 0, user_id=current_user.get('user_id'), data={'new_user': u.id, 'role': u.role}, agency_id=body.agency_id)
+    return u
+
+@app.get('/users-page')
+def users_page():
+    return FileResponse('static/users.html')
