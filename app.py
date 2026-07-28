@@ -301,6 +301,34 @@ class ScheduledTransport(Base):
     unit = relationship('Unit')
     incident = relationship('Incident')
 
+class PostZone(Base):
+    __tablename__ = 'post_zones'
+    id = Column(Integer, primary_key=True, index=True)
+    agency_id = Column(Integer, ForeignKey('agencies.id'))
+    name = Column(String(100))
+    zone_type = Column(String(50), default='post')
+    color = Column(String(20), default='#3b82f6')
+    geojson = Column(JSON)
+    display_order = Column(Integer, default=0)
+    minimum_units = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    agency = relationship('Agency')
+    postings = relationship('UnitPosting', backref='post_zone')
+
+class UnitPosting(Base):
+    __tablename__ = 'unit_postings'
+    id = Column(Integer, primary_key=True, index=True)
+    unit_id = Column(Integer, ForeignKey('units.id'))
+    post_zone_id = Column(Integer, ForeignKey('post_zones.id'))
+    posted_at = Column(DateTime, default=datetime.utcnow)
+    removed_at = Column(DateTime)
+    is_current = Column(Boolean, default=True)
+    posted_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    unit = relationship('Unit')
+    posted_by = relationship('User')
+
 class CustomerConfig(Base):
     __tablename__ = 'customer_config'
     id = Column(Integer, primary_key=True, index=True)
@@ -526,6 +554,57 @@ class ScheduledTransportOut(BaseModel):
     destination: Optional[DestinationOut] = None
     unit: Optional[UnitOut] = None
     incident: Optional[IncidentOut] = None
+    class Config:
+        from_attributes = True
+
+class PostZoneCreate(BaseModel):
+    agency_id: int
+    name: str
+    zone_type: Optional[str] = 'post'
+    color: Optional[str] = '#3b82f6'
+    geojson: Optional[dict] = None
+    display_order: Optional[int] = 0
+    minimum_units: Optional[int] = 0
+    is_active: Optional[bool] = True
+
+class PostZoneUpdate(BaseModel):
+    name: Optional[str] = None
+    zone_type: Optional[str] = None
+    color: Optional[str] = None
+    geojson: Optional[dict] = None
+    display_order: Optional[int] = None
+    minimum_units: Optional[int] = None
+    is_active: Optional[bool] = None
+
+class PostZoneOut(BaseModel):
+    id: int
+    agency_id: int
+    name: str
+    zone_type: Optional[str] = 'post'
+    color: Optional[str] = '#3b82f6'
+    geojson: Optional[dict] = None
+    display_order: Optional[int] = 0
+    minimum_units: Optional[int] = 0
+    is_active: Optional[bool] = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+class UnitPostingCreate(BaseModel):
+    unit_id: int
+    post_zone_id: int
+
+class UnitPostingOut(BaseModel):
+    id: int
+    unit_id: int
+    post_zone_id: int
+    posted_at: Optional[datetime] = None
+    removed_at: Optional[datetime] = None
+    is_current: Optional[bool] = True
+    posted_by_user_id: Optional[int] = None
+    unit: Optional[UnitOut] = None
+    post_zone: Optional[PostZoneOut] = None
     class Config:
         from_attributes = True
 
@@ -1753,6 +1832,10 @@ def events_page():
 def scheduled_transports_page():
     return FileResponse('static/scheduled.html')
 
+@app.get('/coverage-page')
+def coverage_page():
+    return FileResponse('static/coverage.html')
+
 @app.get('/scheduled-transports', response_model=List[ScheduledTransportOut])
 def list_scheduled_transports(status: Optional[str] = None, agency_id: Optional[int] = None, date: Optional[date] = Query(None), current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     q = db.query(ScheduledTransport)
@@ -1838,3 +1921,73 @@ def dispatch_scheduled_transport(st_id: int, body: StatusUpdate, current_user: d
     db.commit(); db.refresh(st)
     _log_event(db, 'scheduled_transport_dispatched', 'scheduled_transport', st.id, user_id=current_user.get('user_id'), data={'incident_id': incident.id, 'unit_id': unit.id}, agency_id=st.agency_id)
     return st
+
+@app.get('/post-zones', response_model=List[PostZoneOut])
+def list_post_zones(agency_id: Optional[int] = None, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    q = db.query(PostZone)
+    if agency_id:
+        q = q.filter(PostZone.agency_id == agency_id)
+    return q.order_by(PostZone.display_order.asc(), PostZone.name.asc()).all()
+
+@app.post('/post-zones', response_model=PostZoneOut)
+def create_post_zone(body: PostZoneCreate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    pz = PostZone(**body.dict())
+    db.add(pz); db.commit(); db.refresh(pz)
+    _log_event(db, 'post_zone_created', 'post_zone', pz.id, user_id=current_user.get('user_id'), data=body.dict(), agency_id=pz.agency_id)
+    return pz
+
+@app.get('/post-zones/{pz_id}', response_model=PostZoneOut)
+def get_post_zone(pz_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    pz = db.query(PostZone).get(pz_id)
+    if not pz:
+        raise HTTPException(status_code=404, detail='Post zone not found')
+    return pz
+
+@app.put('/post-zones/{pz_id}', response_model=PostZoneOut)
+def update_post_zone(pz_id: int, body: PostZoneUpdate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    pz = db.query(PostZone).get(pz_id)
+    if not pz:
+        raise HTTPException(status_code=404, detail='Post zone not found')
+    for k, v in body.dict(exclude_unset=True).items():
+        setattr(pz, k, v)
+    db.commit(); db.refresh(pz)
+    _log_event(db, 'post_zone_updated', 'post_zone', pz.id, user_id=current_user.get('user_id'), data=body.dict(exclude_unset=True), agency_id=pz.agency_id)
+    return pz
+
+@app.delete('/post-zones/{pz_id}', response_model=PostZoneOut)
+def delete_post_zone(pz_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    pz = db.query(PostZone).get(pz_id)
+    if not pz:
+        raise HTTPException(status_code=404, detail='Post zone not found')
+    db.delete(pz); db.commit()
+    _log_event(db, 'post_zone_deleted', 'post_zone', pz.id, user_id=current_user.get('user_id'), data={}, agency_id=pz.agency_id)
+    return pz
+
+@app.get('/unit-postings', response_model=List[UnitPostingOut])
+def list_unit_postings(unit_id: Optional[int] = None, post_zone_id: Optional[int] = None, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    q = db.query(UnitPosting).filter(UnitPosting.is_current == True)
+    if unit_id:
+        q = q.filter(UnitPosting.unit_id == unit_id)
+    if post_zone_id:
+        q = q.filter(UnitPosting.post_zone_id == post_zone_id)
+    return q.order_by(UnitPosting.posted_at.desc()).all()
+
+@app.post('/unit-postings', response_model=UnitPostingOut)
+def create_unit_posting(body: UnitPostingCreate, request: Request, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    # close any current posting for this unit
+    db.query(UnitPosting).filter_by(unit_id=body.unit_id, is_current=True).update({'is_current': False, 'removed_at': datetime.utcnow()})
+    up = UnitPosting(unit_id=body.unit_id, post_zone_id=body.post_zone_id, posted_by_user_id=current_user.get('user_id'), is_current=True)
+    db.add(up); db.commit(); db.refresh(up)
+    _log_event(db, 'unit_posted', 'unit_posting', up.id, user_id=current_user.get('user_id'), data=body.dict(), agency_id=up.unit.agency_id)
+    return up
+
+@app.delete('/unit-postings/{up_id}', response_model=UnitPostingOut)
+def remove_unit_posting(up_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    up = db.query(UnitPosting).get(up_id)
+    if not up:
+        raise HTTPException(status_code=404, detail='Unit posting not found')
+    up.is_current = False
+    up.removed_at = datetime.utcnow()
+    db.commit(); db.refresh(up)
+    _log_event(db, 'unit_posting_removed', 'unit_posting', up.id, user_id=current_user.get('user_id'), data={}, agency_id=up.unit.agency_id)
+    return up

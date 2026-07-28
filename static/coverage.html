@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Coverage / Deployment</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  body { background:#0f172a; color:#e2e8f0; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  .panel { background:#1e293b; border:1px solid #334155; border-radius:.5rem; }
+  .btn { background:#3b82f6; padding:.4rem .75rem; border-radius:.375rem; font-weight:600; font-size:.85rem; }
+  .btn:hover { background:#2563eb; }
+  .btn-red { background:#ef4444; }
+  .btn-red:hover { background:#dc2626; }
+  .btn-green { background:#22c55e; color:#000; }
+  .btn-green:hover { background:#16a34a; }
+  .form-input { background:#0f172a; border:1px solid #475569; border-radius:.375rem; padding:.4rem; color:#fff; width:100%; font-size:.85rem; }
+  .form-input:focus { border-color:#3b82f6; outline:none; }
+  .tag { display:inline-block; padding:.1rem .4rem; border-radius:.25rem; font-size:.7rem; font-weight:600; background:#334155; }
+</style>
+</head>
+<body class='p-4'>
+<div class='max-w-7xl mx-auto'>
+  <div class='flex justify-between items-center mb-4'>
+    <h1 class='text-2xl font-bold'>Coverage / Deployment</h1>
+    <a href='/' class='text-sm text-blue-400 hover:underline'>Dashboard</a>
+  </div>
+
+  <div class='grid grid-cols-1 lg:grid-cols-3 gap-4'>
+    <div class='lg:col-span-1 panel p-3'>
+      <h2 class='font-bold mb-2'>Post Zones</h2>
+      <div id='zones' class='text-sm space-y-2'></div>
+      <div class='mt-3 border-t border-slate-700 pt-3'>
+        <h3 class='font-bold text-sm mb-2'>Add / Edit Zone</h3>
+        <form id='zoneForm' class='space-y-2' onsubmit='return false;'>
+          <input type='hidden' id='zoneId'>
+          <select id='zoneAgency' class='form-input'></select>
+          <input id='zoneName' class='form-input' placeholder='Zone name'>
+          <select id='zoneType' class='form-input'>
+            <option value='post'>Post</option>
+            <option value='zone'>Zone</option>
+            <option value='beat'>Beat</option>
+          </select>
+          <input id='zoneColor' class='form-input' type='color' value='#3b82f6'>
+          <input id='zoneMin' class='form-input' type='number' placeholder='Minimum units' value='0'>
+          <textarea id='zoneGeojson' class='form-input' rows='3' placeholder='GeoJSON polygon'></textarea>
+          <div class='flex space-x-2'>
+            <button class='btn flex-1' onclick='saveZone()'>Save</button>
+            <button class='btn-red flex-1' onclick='clearZoneForm()'>Clear</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class='lg:col-span-2 panel p-3'>
+      <h2 class='font-bold mb-2'>Unit Postings</h2>
+      <div class='flex gap-2 mb-3'>
+        <select id='postUnit' class='form-input w-40'></select>
+        <select id='postZone' class='form-input w-40'></select>
+        <button class='btn btn-green' onclick='postUnit()'>Post Unit</button>
+      </div>
+      <div id='postings' class='text-sm space-y-2'>Loading...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+let state={agencies:[], zones:[], units:[], postings:[]};
+
+async function init(){
+  [state.agencies, state.zones, state.units, state.postings] = await Promise.all([api('/agencies'), api('/post-zones'), api('/units'), api('/unit-postings')]);
+  const agencySel = document.getElementById('zoneAgency');
+  agencySel.innerHTML = state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
+  const postUnit = document.getElementById('postUnit');
+  postUnit.innerHTML = `<option value=''>Unit</option>` + state.units.filter(u=>u.current_status==='AQ'||u.current_status==='AFR'||u.current_status==='Available').map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
+  renderZones(); renderPostings();
+}
+
+function renderZones(){
+  const el = document.getElementById('zones');
+  el.innerHTML = state.zones.map(z=>`
+    <div class='bg-slate-800 rounded p-2 border border-slate-700 flex justify-between items-start'>
+      <div>
+        <div class='font-bold text-white flex items-center gap-2'><span class='w-3 h-3 rounded-full' style='background:${z.color}'></span>${z.name}</div>
+        <div class='text-xs text-slate-400'>${z.zone_type} • min ${z.minimum_units}</div>
+      </div>
+      <div class='flex gap-1'>
+        <button class='btn btn-sm' onclick='editZone(${z.id})'>Edit</button>
+        <button class='btn-red btn-sm' onclick='deleteZone(${z.id})'>Del</button>
+      </div>
+    </div>
+  `).join('') || '<div class="text-slate-500">No post zones.</div>';
+  const postZone = document.getElementById('postZone');
+  postZone.innerHTML = `<option value=''>Zone</option>` + state.zones.map(z=>`<option value='${z.id}'>${z.name}</option>`).join('');
+}
+
+function clearZoneForm(){
+  document.getElementById('zoneId').value='';
+  document.getElementById('zoneName').value='';
+  document.getElementById('zoneType').value='post';
+  document.getElementById('zoneColor').value='#3b82f6';
+  document.getElementById('zoneMin').value='0';
+  document.getElementById('zoneGeojson').value='';
+}
+
+async function saveZone(){
+  const id = document.getElementById('zoneId').value;
+  let geo = null;
+  const raw = document.getElementById('zoneGeojson').value.trim();
+  if(raw){ try { geo = JSON.parse(raw); } catch(e){ alert('Invalid GeoJSON: '+e.message); return; } }
+  const payload = {
+    agency_id: parseInt(document.getElementById('zoneAgency').value),
+    name: document.getElementById('zoneName').value,
+    zone_type: document.getElementById('zoneType').value,
+    color: document.getElementById('zoneColor').value,
+    minimum_units: parseInt(document.getElementById('zoneMin').value) || 0,
+    geojson: geo
+  };
+  if(!payload.name){ alert('Name required'); return; }
+  try {
+    if(id){ await api(`/post-zones/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); }
+    else { await api('/post-zones', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); }
+    clearZoneForm(); state.zones = await api('/post-zones'); renderZones();
+  } catch(e){ alert(e.message); }
+}
+
+function editZone(id){
+  const z = state.zones.find(x=>x.id===id); if(!z) return;
+  document.getElementById('zoneId').value = z.id;
+  document.getElementById('zoneAgency').value = z.agency_id;
+  document.getElementById('zoneName').value = z.name||'';
+  document.getElementById('zoneType').value = z.zone_type||'post';
+  document.getElementById('zoneColor').value = z.color||'#3b82f6';
+  document.getElementById('zoneMin').value = z.minimum_units||0;
+  document.getElementById('zoneGeojson').value = z.geojson ? JSON.stringify(z.geojson) : '';
+}
+
+async function deleteZone(id){
+  if(!confirm('Delete this zone?')) return;
+  try { await api(`/post-zones/${id}`, {method:'DELETE'}); state.zones = await api('/post-zones'); renderZones(); } catch(e){ alert(e.message); }
+}
+
+function renderPostings(){
+  const el = document.getElementById('postings');
+  if(!state.postings.length){ el.innerHTML = '<div class="text-slate-500">No current postings.</div>'; return; }
+  const zoneMap = {}; state.zones.forEach(z=>zoneMap[z.id]=z);
+  const unitMap = {}; state.units.forEach(u=>unitMap[u.id]=u);
+  el.innerHTML = state.postings.filter(p=>p.is_current).map(p=>`
+    <div class='bg-slate-800 rounded p-2 border border-slate-700 flex justify-between items-center'>
+      <div>
+        <div class='font-bold text-white'>${unitMap[p.unit_id]?.call_sign||'Unit '+p.unit_id} -> ${zoneMap[p.post_zone_id]?.name||'Zone '+p.post_zone_id}</div>
+        <div class='text-xs text-slate-400'>Posted ${new Date(p.posted_at).toLocaleString()}</div>
+      </div>
+      <button class='btn-red' onclick='removePost(${p.id})'>Remove</button>
+    </div>
+  `).join('');
+}
+
+async function postUnit(){
+  const unitId = document.getElementById('postUnit').value;
+  const zoneId = document.getElementById('postZone').value;
+  if(!unitId || !zoneId){ alert('Select unit and zone'); return; }
+  try {
+    await api('/unit-postings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({unit_id:parseInt(unitId), post_zone_id:parseInt(zoneId)})});
+    state.postings = await api('/unit-postings'); renderPostings();
+  } catch(e){ alert(e.message); }
+}
+
+async function removePost(id){
+  if(!confirm('Remove this posting?')) return;
+  try { await api(`/unit-postings/${id}`, {method:'DELETE'}); state.postings = await api('/unit-postings'); renderPostings(); } catch(e){ alert(e.message); }
+}
+
+init();
+</script>
+</body>
+</html>
