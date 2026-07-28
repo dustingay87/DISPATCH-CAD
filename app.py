@@ -359,6 +359,18 @@ def index():
 def console():
     return FileResponse('static/dispatch.html')
 
+@app.get('/police')
+def police_console():
+    return FileResponse('static/dispatch.html')
+
+@app.get('/fire')
+def fire_console():
+    return FileResponse('static/dispatch.html')
+
+@app.get('/ems')
+def ems_console():
+    return FileResponse('static/dispatch.html')
+
 @app.get('/units-screen')
 def units_screen():
     return FileResponse('static/screen.html')

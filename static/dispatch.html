@@ -36,7 +36,8 @@
 </head>
 <body class='bg-slate-900 text-slate-200 text-xs h-screen flex flex-col'>
   <header class='h-12 bg-slate-950 border-b border-slate-700 flex items-center px-2 gap-2 shrink-0'>
-    <div class='font-bold text-lg tracking-wide text-white'>VolCAD <span class='text-slate-500 font-normal text-xs'>Console</span></div>
+    <div class='font-bold text-lg tracking-wide text-white'>VolCAD <span class='text-slate-500 font-normal text-xs'><span id='consoleLabel'>Console</span></span></div>
+    <select id='disciplineSelect' class='bg-slate-800 border border-slate-600 rounded px-1 py-1 text-xs'><option value='all'>All Disciplines</option><option value='police'>Police</option><option value='fire'>Fire</option><option value='ems'>EMS</option></select>
     <input id='cmdInput' type='text' class='flex-1 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs' placeholder='Command (d <call> <unit>, c <call>, s <unit> <status>)'>
     <button id='cmdBtn' class='bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded'>Run</button>
     <div class='text-slate-400 font-mono' id='clock'>--:--:--</div>
@@ -88,6 +89,8 @@
 <script>
 const CONFIG = { center:[39.9612,-82.9988], zoom:11 };
 let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, selectedIncident:null, selectedUnit:null, logs:[] };
+const pathDisc = window.location.pathname.replace(/^\/|\/$/g,'');
+let DISCIPLINE = ['police','fire','ems'].includes(pathDisc) ? pathDisc : (new URLSearchParams(window.location.search).get('discipline') || 'all');
 let map, layers;
 
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
@@ -98,6 +101,7 @@ function elapsed(iso){ return (Date.now()-toMs(iso))/1000; }
 function priorityTarget(p){ return {1:180,2:420,3:720,4:1200}[Math.min(Math.max(p||2,1),4)] || 420; }
 function slaClass(sec,target){ return sec>target ? 'text-red-400 font-bold' : 'text-slate-400'; }
 function unitClass(st){ if(st==='OS') return 'unit-os'; if(st==='ER'||st==='TR'||st==='DEL') return 'unit-er'; if(st==='AQ') return 'unit-aq'; return 'unit-oth'; }
+function matchesDiscipline(t){ return DISCIPLINE==='all' || t===DISCIPLINE; }
 function log(msg){ state.logs.unshift(`${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${msg}`); if(state.logs.length>100) state.logs.pop(); renderLog(); }
 
 function initMap(){
@@ -109,7 +113,7 @@ function initMap(){
 function renderLog(){ const el=document.getElementById('eventLog'); el.innerHTML = state.logs.map(l=>`<div class='border-l-2 border-slate-600 pl-1'>${l}</div>`).join(''); el.scrollTop=0; }
 
 function renderCalls(){
-  const active = state.incidents.filter(i=>i.status!=='closed').sort((a,b)=> (a.priority||2)-(b.priority||2) || new Date(b.created_at)-new Date(a.created_at));
+  const active = state.incidents.filter(i=>i.status!=='closed' && matchesDiscipline((state.agencyMap[i.agency_id]||{}).agency_type)).sort((a,b)=> (a.priority||2)-(b.priority||2) || new Date(b.created_at)-new Date(a.created_at));
   document.getElementById('callCount').textContent = active.length;
   const html = active.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Status</th><th>Loc</th><th>Units</th><th>SLA</th></tr></thead><tbody>` + active.map(i=>{
     const a=state.agencyMap[i.agency_id]||{};
@@ -193,8 +197,9 @@ async function closeSelected(){
 }
 
 function renderUnits(){
-  document.getElementById('unitCount').textContent = state.units.length;
-  const rows = state.units.map(u=>{
+  const filtered = state.units.filter(u=>matchesDiscipline((state.agencyMap[u.agency_id]||{}).agency_type));
+  document.getElementById('unitCount').textContent = filtered.length;
+  const rows = filtered.map(u=>{
     const a=state.agencyMap[u.agency_id]||{};
     const inc = u.current_incident_id ? (state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id) : '-';
     const t = uTimers(u);
@@ -291,6 +296,8 @@ async function load(){
     const [agencies, units, incidents, messages] = await Promise.all([api('/agencies'), api('/units'), api('/incidents'), api('/messages')]);
     state.agencies = agencies; state.units = units; state.incidents = incidents; state.messages = messages;
     state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
+    const dsel = document.getElementById('disciplineSelect'); if(dsel) dsel.value = DISCIPLINE;
+    const lbl = document.getElementById('consoleLabel'); if(lbl) lbl.textContent = DISCIPLINE==='all' ? 'Console' : DISCIPLINE.toUpperCase()+' Console';
     const sel = document.getElementById('msgUnit');
     if(sel.options.length<=1){ state.units.forEach(u=>{ sel.innerHTML += `<option value='${u.id}'>${u.call_sign}</option>`; }); }
     renderCalls(); renderUnits(); renderMap(); renderMessages();
@@ -305,6 +312,7 @@ document.getElementById('cmdBtn').addEventListener('click', runCommand);
 document.getElementById('cmdInput').addEventListener('keydown', e=>{ if(e.key==='Enter') runCommand(); });
 document.getElementById('msgSend').addEventListener('click', sendMessage);
 document.getElementById('msgText').addEventListener('keydown', e=>{ if(e.key==='Enter') sendMessage(); });
+document.getElementById('disciplineSelect').addEventListener('change', e=>{ DISCIPLINE = e.target.value; renderCalls(); renderUnits(); renderMap(); });
 
 initMap();
 load();
