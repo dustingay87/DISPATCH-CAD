@@ -4,7 +4,6 @@ import re
 import subprocess
 import sys
 import sqlparse
-import psycopg2
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -56,6 +55,14 @@ if blocked and not args.force:
     print('Schema setup aborted because destructive statements were found. No changes applied.')
     sys.exit(1)
 
+if DB_URL.startswith('sqlite'):
+    print('Detected SQLite; using app.py schema management.')
+    import app
+    app.init_sqlite_db()
+    print('SQLite schema setup complete.')
+    sys.exit(0)
+
+import psycopg2
 conn = psycopg2.connect(DB_URL)
 cur = conn.cursor()
 for stmt in statements:

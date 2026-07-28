@@ -207,8 +207,23 @@ ALTER TABLE personnel ADD COLUMN IF NOT EXISTS email VARCHAR(255);
 ALTER TABLE personnel ADD COLUMN IF NOT EXISTS sms_phone VARCHAR(50);
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS call_number VARCHAR(50);
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS extra JSONB;
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS call_entry_started_at TIMESTAMPTZ;
 ALTER TABLE incident_units ADD COLUMN IF NOT EXISTS disposition VARCHAR(100);
 ALTER TABLE incident_units ADD COLUMN IF NOT EXISTS passenger_count INTEGER;
+
+CREATE TABLE IF NOT EXISTS incident_personnel (
+    id SERIAL PRIMARY KEY,
+    incident_id INTEGER NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+    personnel_id INTEGER NOT NULL REFERENCES personnel(id) ON DELETE CASCADE,
+    status VARCHAR(50) NOT NULL DEFAULT 'en_route',
+    en_route_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    arrived_at TIMESTAMPTZ,
+    cleared_at TIMESTAMPTZ,
+    responding_vehicle VARCHAR(100),
+    notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_incident_personnel_incident ON incident_personnel(incident_id, status);
 
 CREATE TABLE IF NOT EXISTS customer_config (
     id SERIAL PRIMARY KEY,

@@ -4,18 +4,11 @@ import sys
 import json
 import hashlib
 import subprocess
-import psycopg2
-from psycopg2.extras import execute_values
+from datetime import datetime
 from dotenv import load_dotenv
+import app
 
 load_dotenv()
-
-def get_db_url():
-    db_url = os.getenv('SUPABASE_DB_URL') or os.getenv('DATABASE_URL')
-    if not db_url:
-        print('Error: No database URL configured. Set SUPABASE_DB_URL or DATABASE_URL in .env')
-        sys.exit(1)
-    return db_url.replace('postgresql+psycopg2://', 'postgresql://')
 
 def run_schema():
     print('Ensuring schema is applied...')
@@ -33,15 +26,15 @@ def load_customer(path):
     with open(path, 'r') as f:
         return json.load(f)
 
-def insert_config(cur, agency_id, category, key, value):
-    cur.execute('''
-        INSERT INTO customer_config (agency_id, category, key, value)
-        VALUES (%s, %s, %s, %s)
-        ON CONFLICT (agency_id, category, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-    ''', (agency_id, category, key, json.dumps(value)))
-
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+def insert_config(session, agency_id, category, key, value):
+    cfg = session.query(app.CustomerConfig).filter_by(agency_id=agency_id, category=category, key=key).first()
+    if cfg:
+        cfg.value = value
+    else:
+        session.add(app.CustomerConfig(agency_id=agency_id, category=category, key=key, value=value))
 
 def main():
     parser = argparse.ArgumentParser(description='Seed or update a customer configuration without destroying existing data.')
@@ -57,9 +50,7 @@ def main():
         subprocess.run([sys.executable, 'backup.py'], check=True)
 
     run_schema()
-    db_url = get_db_url()
-    conn = psycopg2.connect(db_url)
-    cur = conn.cursor()
+    session = app.SessionLocal()
 
     try:
         # Global configuration (agency_id = NULL)
@@ -67,7 +58,7 @@ def main():
         for cat, items in config.items():
             if isinstance(items, dict):
                 for key, value in items.items():
-                    insert_config(cur, None, cat, key, value)
+                    insert_config(session, None, cat, key, value)
             elif isinstance(items, list):
                 for item in items:
                     if isinstance(item, dict):
@@ -76,30 +67,40 @@ def main():
                     else:
                         key = item
                         value = {'name': item}
-                    insert_config(cur, None, cat, key, value)
+                    insert_config(session, None, cat, key, value)
 
         # Insert agencies and keep id map
         agency_map = {}
         agencies = data.get('agencies', [])
         for agency in agencies:
-            cur.execute('''
-                INSERT INTO agencies (name, agency_type, domain, address, city, state, zip_code, lat, lng, approved, approved_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, NOW())
-                ON CONFLICT (domain) DO UPDATE SET name = EXCLUDED.name RETURNING id
-            ''', (agency.get('name'), agency.get('agency_type', 'fire'), agency.get('domain'), agency.get('address'), agency.get('city'), agency.get('state'), agency.get('zip_code'), agency.get('lat'), agency.get('lng')))
-            agency_id = cur.fetchone()[0]
-            agency_map[agency.get('name')] = agency_id
-            # agency-specific config
+            a = session.query(app.Agency).filter(app.Agency.domain == agency.get('domain')).first()
+            if not a:
+                a = app.Agency()
+                session.add(a)
+            a.name = agency.get('name')
+            a.agency_type = agency.get('agency_type', 'fire')
+            a.domain = agency.get('domain')
+            a.address = agency.get('address')
+            a.city = agency.get('city')
+            a.state = agency.get('state')
+            a.zip_code = agency.get('zip_code')
+            a.lat = agency.get('lat')
+            a.lng = agency.get('lng')
+            a.approved = True
+            a.approved_at = datetime.utcnow()
+            session.flush()
+            agency_map[agency.get('name')] = a.id
+
             a_config = agency.get('config', {})
             for cat, items in a_config.items():
                 if isinstance(items, dict):
                     for key, value in items.items():
-                        insert_config(cur, agency_id, cat, key, value)
+                        insert_config(session, a.id, cat, key, value)
                 elif isinstance(items, list):
                     for item in items:
                         key = item if isinstance(item, str) else item.get('name') or item.get('key')
                         value = item if not isinstance(item, str) else {'name': item}
-                        insert_config(cur, agency_id, cat, key, value)
+                        insert_config(session, a.id, cat, key, value)
 
         # Insert users and keep id map
         user_map = {}
@@ -107,13 +108,16 @@ def main():
         for user in users:
             agency_id = agency_map.get(user.get('agency')) if user.get('agency') else None
             pwd = user.get('password') or 'changeme'
-            cur.execute('''
-                INSERT INTO users (email, hashed_password, role, is_active, agency_id)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (email) DO UPDATE SET role = EXCLUDED.role, agency_id = EXCLUDED.agency_id, is_active = EXCLUDED.is_active RETURNING id
-            ''', (user.get('email'), hash_password(pwd), user.get('role', 'responder'), user.get('is_active', True), agency_id))
-            uid = cur.fetchone()[0]
-            user_map[user.get('email')] = uid
+            u = session.query(app.User).filter(app.User.email == user.get('email')).first()
+            if not u:
+                u = app.User(email=user.get('email'))
+                session.add(u)
+            u.hashed_password = hash_password(pwd)
+            u.role = user.get('role', 'responder')
+            u.is_active = user.get('is_active', True)
+            u.agency_id = agency_id
+            session.flush()
+            user_map[user.get('email')] = u.id
 
         # Insert units and keep id map
         unit_map = {}
@@ -123,13 +127,18 @@ def main():
             if not agency_id:
                 print(f'Skipping unit {unit.get("call_sign")}: agency not found')
                 continue
-            cur.execute('''
-                INSERT INTO units (agency_id, name, call_sign, unit_type, lat, lng, camera_url)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (call_sign) DO UPDATE SET agency_id = EXCLUDED.agency_id, name = EXCLUDED.name, unit_type = EXCLUDED.unit_type, lat = EXCLUDED.lat, lng = EXCLUDED.lng, camera_url = EXCLUDED.camera_url RETURNING id
-            ''', (agency_id, unit.get('name'), unit.get('call_sign'), unit.get('unit_type'), unit.get('lat'), unit.get('lng'), unit.get('camera_url')))
-            uid = cur.fetchone()[0]
-            unit_map[unit.get('call_sign')] = uid
+            u = session.query(app.Unit).filter(app.Unit.call_sign == unit.get('call_sign')).first()
+            if not u:
+                u = app.Unit(call_sign=unit.get('call_sign'))
+                session.add(u)
+            u.agency_id = agency_id
+            u.name = unit.get('name')
+            u.unit_type = unit.get('unit_type')
+            u.lat = unit.get('lat')
+            u.lng = unit.get('lng')
+            u.camera_url = unit.get('camera_url')
+            session.flush()
+            unit_map[unit.get('call_sign')] = u.id
 
         # Insert personnel
         personnel = data.get('personnel', [])
@@ -140,22 +149,34 @@ def main():
             if not agency_id:
                 print(f'Skipping personnel {p.get("first_name")}: agency not found')
                 continue
-            cur.execute('''
-                INSERT INTO personnel (user_id, agency_id, first_name, last_name, radio_id, phone, email, sms_phone, duty_status, current_unit_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT DO NOTHING
-            ''', (user_id, agency_id, p.get('first_name'), p.get('last_name'), p.get('radio_id'), p.get('phone'), p.get('email'), p.get('sms_phone'), p.get('duty_status', 'off_duty'), unit_id))
+            q = session.query(app.Personnel).filter_by(agency_id=agency_id)
+            if p.get('email'):
+                q = q.filter(app.Personnel.email == p.get('email'))
+            else:
+                q = q.filter(app.Personnel.first_name == p.get('first_name'), app.Personnel.last_name == p.get('last_name'))
+            pe = q.first()
+            if not pe:
+                pe = app.Personnel(agency_id=agency_id)
+                session.add(pe)
+            pe.user_id = user_id
+            pe.first_name = p.get('first_name')
+            pe.last_name = p.get('last_name')
+            pe.radio_id = p.get('radio_id')
+            pe.phone = p.get('phone')
+            pe.email = p.get('email')
+            pe.sms_phone = p.get('sms_phone')
+            pe.duty_status = p.get('duty_status', 'off_duty')
+            pe.current_unit_id = unit_id
 
-        conn.commit()
+        session.commit()
         print('Customer setup complete.')
         print(f'Agencies: {len(agencies)}, Users: {len(users)}, Units: {len(units)}, Personnel: {len(personnel)}')
     except Exception as e:
-        conn.rollback()
+        session.rollback()
         print(f'Error during setup: {e}')
         sys.exit(1)
     finally:
-        cur.close()
-        conn.close()
+        session.close()
 
 if __name__ == '__main__':
     main()

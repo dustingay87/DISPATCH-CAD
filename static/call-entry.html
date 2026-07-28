@@ -33,10 +33,10 @@
       <div class='flex items-center justify-between'>
         <div class='flex space-x-2' id='disciplineTabs'>
           <div class='tab active' data-d='police'>Police</div>
-          <div class='tab' data-d='fire'>Fire</div>
+          <div class='tab' data-d='fire'>Fire/Rescue</div>
           <div class='tab' data-d='ems'>EMS</div>
         </div>
-        <div class='text-xs text-slate-400' id='autoPriority'>Priority auto-selected</div>
+        <div class='text-xs font-mono' id='callTimer' title='Elapsed since call entry opened'>00:00:00</div>
       </div>
 
       <form id='callForm' class='grid grid-cols-1 md:grid-cols-2 gap-4'>
@@ -77,8 +77,8 @@
           <textarea id='narrative' rows='4' placeholder='Initial details...'></textarea>
         </div>
         <div class='md:col-span-2'>
-          <label class='text-xs text-slate-400 uppercase block mb-1'>Quick Timestamps</label>
-          <div id='quickStamps' class='flex flex-wrap gap-2'></div>
+          <label class='text-xs text-slate-400 uppercase block mb-1'>Response Goals</label>
+          <div id='responseGoals' class='text-xs text-slate-400'></div>
         </div>
         <div class='md:col-span-2 flex justify-end space-x-2'>
           <button type='submit' class='btn btn-primary'>Create Incident</button>
@@ -90,13 +90,25 @@
 <script>
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 
-let state = { agencies:[], agencyMap:{}, configs:{}, DISCIPLINE:'police', user:null };
-const QUICK_STAMPS = {
-  police: ['Shots Fired','Object Thrown','Taser Deployed','Suspect in Custody','Officer Needs Assistance','Code 4','Suspect Fleeing'],
-  fire: ['Entry Made','Smoke Showing','Fire Knocked Down','Primary Search Complete','Secondary Search Complete','Ventilation Complete','Water on Fire','All Clear'],
-  ems: ['Patient Violent','Law Enforcement Needed','CPR in Progress','AED Applied','Medic on Scene','Transporting','Arrived at Hospital']
+let state = { agencies:[], agencyMap:{}, configs:{}, DISCIPLINE:'fire', user:null, callEntryStarted: new Date().toISOString() };
+const DEFAULT_CALL_TYPES = {
+  police: [
+    {label:'Traffic Accident', priority:2},{label:'Theft', priority:3},{label:'Domestic', priority:2},{label:'Assault', priority:1},{label:'Welfare Check', priority:3},{label:'Suspicious Person', priority:3},{label:'Noise Complaint', priority:4},{label:'Burglary', priority:2}
+  ],
+  fire: [
+    {label:'Structure Fire', priority:1},{label:'Vehicle Fire', priority:2},{label:'Brush Fire', priority:2},{label:'Vehicle Accident', priority:1},{label:'Medical Assist', priority:2},{label:'Alarm', priority:3},{label:'Smoke Investigation', priority:2},{label:'Hazmat', priority:1},{label:'Water Rescue', priority:1},{label:'Downed Power Line', priority:2}
+  ],
+  ems: [
+    {label:'Cardiac Arrest', priority:1},{label:'Chest Pain', priority:1},{label:'Respiratory', priority:1},{label:'Fall', priority:2},{label:'Motor Vehicle Accident', priority:1},{label:'Overdose', priority:1},{label:'Seizure', priority:1},{label:'Unconscious', priority:1},{label:'Psychiatric', priority:3}
+  ]
+};
+const DEFAULT_PRIORITIES = {
+  police: [{priority:1,label:'Emergency',target_seconds:180},{priority:2,label:'Urgent',target_seconds:420},{priority:3,label:'Routine',target_seconds:720},{priority:4,label:'Low',target_seconds:1200}],
+  fire: [{priority:1,label:'Working Fire',target_seconds:180},{priority:2,label:'Urgent',target_seconds:420},{priority:3,label:'Routine',target_seconds:720},{priority:4,label:'Low',target_seconds:1200}],
+  ems: [{priority:1,label:'Priority 1',target_seconds:180},{priority:2,label:'Priority 2',target_seconds:420},{priority:3,label:'Priority 3',target_seconds:720},{priority:4,label:'Priority 4',target_seconds:1200}]
 };
 function moduleToDiscipline(m){ return {'law':'police','fire':'fire','ems':'ems'}[m] || m; }
+function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
 
 function showMsg(text, ok=true){
   const el = document.getElementById('msg'); el.classList.remove('hidden');
@@ -107,19 +119,24 @@ function showMsg(text, ok=true){
 function setDiscipline(d){
   state.DISCIPLINE = d;
   document.querySelectorAll('#disciplineTabs .tab').forEach(t=>{ if(!t.classList.contains('hidden')) t.classList.toggle('active', t.dataset.d===d); });
-  populateAgencies(); loadConfig(); renderQuickStamps();
+  populateAgencies(); loadConfig(); renderResponseGoals();
 }
 
-function renderQuickStamps(){
-  const labels = QUICK_STAMPS[state.DISCIPLINE] || [];
-  const el = document.getElementById('quickStamps');
-  el.innerHTML = labels.map(l=>`<button type='button' class='btn bg-slate-700 hover:bg-slate-600 text-white text-xs' onclick='addStamp(${JSON.stringify(l).replace(/'/g,"&#39;")})'>${l}</button>`).join('');
+function renderResponseGoals(){
+  const cfg = state.configs && state.configs[document.getElementById('agency').value] || {};
+  const goals = cfg.response_goals || {dispatch_seconds:60, en_route_seconds:120, on_scene_city_seconds:480, on_scene_county_seconds:1800};
+  const el = document.getElementById('responseGoals');
+  el.innerHTML = `Dispatch: <span class='text-yellow-400'>${fmtDur(goals.dispatch_seconds)}</span> · En Route: <span class='text-yellow-400'>${fmtDur(goals.en_route_seconds)}</span> · On Scene City: <span class='text-yellow-400'>${fmtDur(goals.on_scene_city_seconds)}</span> · On Scene County: <span class='text-yellow-400'>${fmtDur(goals.on_scene_county_seconds)}</span>`;
 }
 
-function addStamp(label){
-  const ta = document.getElementById('narrative');
-  const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  ta.value += (ta.value ? '\n' : '') + `[${now}] ${label}`;
+function startTimer(){
+  const el = document.getElementById('callTimer');
+  setInterval(()=>{
+    const sec = (Date.now() - new Date(state.callEntryStarted).getTime())/1000;
+    el.textContent = fmtDur(sec);
+    if(sec > 60) el.classList.add('text-red-400');
+    else el.classList.add('text-green-400');
+  }, 1000);
 }
 
 function populateAgencies(){
@@ -133,15 +150,17 @@ async function loadConfig(){
   const agencyId = document.getElementById('agency').value;
   if(!agencyId) return;
   try {
-    const [ctRes, prRes] = await Promise.all([api(`/config?agency_id=${agencyId}&category=call_types`), api(`/config?agency_id=${agencyId}&category=priorities`)]);
-    const callTypes = ctRes[0]?.value || [];
-    const priorities = prRes[0]?.value || [];
-    state.configs[agencyId] = { callTypes, priorities };
+    const [ctRes, prRes, goalRes] = await Promise.all([api(`/config?agency_id=${agencyId}&category=call_types`), api(`/config?agency_id=${agencyId}&category=priorities`), api(`/config?agency_id=${agencyId}&category=response_goals`)]);
+    const callTypes = (ctRes[0]?.value && ctRes[0].value.length) ? ctRes[0].value : DEFAULT_CALL_TYPES[state.DISCIPLINE];
+    const priorities = (prRes[0]?.value && prRes[0].value.length) ? prRes[0].value : DEFAULT_PRIORITIES[state.DISCIPLINE];
+    const response_goals = (goalRes[0]?.value) ? goalRes[0].value : {dispatch_seconds:60, en_route_seconds:120, on_scene_city_seconds:480, on_scene_county_seconds:1800};
+    state.configs[agencyId] = { callTypes, priorities, response_goals };
     const csel = document.getElementById('callType');
     csel.innerHTML = callTypes.map(c=>`<option value='${c.label}' data-priority='${c.priority}'>${c.label} (P${c.priority})</option>`).join('') || '<option value="">No call types</option>';
     const psel = document.getElementById('priority');
     psel.innerHTML = priorities.map(p=>`<option value='${p.priority}'>P${p.priority} - ${p.label}</option>`).join('') || '<option value="2">2</option>';
     updatePriority();
+    renderResponseGoals();
   } catch(e){ showMsg(e.message, false); }
 }
 
@@ -167,6 +186,7 @@ document.getElementById('callForm').addEventListener('submit', async e=>{
     narrative: document.getElementById('narrative').value,
     lat: document.getElementById('lat').value ? parseFloat(document.getElementById('lat').value) : null,
     lng: document.getElementById('lng').value ? parseFloat(document.getElementById('lng').value) : null,
+    call_entry_started_at: state.callEntryStarted,
     status: 'open'
   };
   try {
@@ -183,12 +203,15 @@ async function init(){
     const user = await api('/me'); state.user = user;
     state.agencies = await api('/agencies');
     state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
-    const selectedModule = user?.selected_module;
-    const allowedDiscipline = selectedModule && selectedModule !== 'all' ? moduleToDiscipline(selectedModule) : (d || 'police');
-    if(selectedModule && selectedModule !== 'all'){
-      document.querySelectorAll('#disciplineTabs .tab').forEach(t=>t.classList.toggle('hidden', t.dataset.d !== allowedDiscipline));
+    const modules = user?.modules && user.modules.length ? user.modules.map(moduleToDiscipline) : (d ? [d] : ['fire']);
+    const allowedDisciplines = modules.filter(m=>['police','fire','ems'].includes(m));
+    const defaultDiscipline = allowedDisciplines[0] || 'fire';
+    document.querySelectorAll('#disciplineTabs .tab').forEach(t=>t.classList.toggle('hidden', !allowedDisciplines.includes(t.dataset.d)));
+    if(allowedDisciplines.length <= 1){
+      document.getElementById('disciplineTabs').classList.add('hidden');
     }
-    setDiscipline(['police','fire','ems'].includes(allowedDiscipline) ? allowedDiscipline : 'police');
+    setDiscipline(defaultDiscipline);
+    startTimer();
   } catch(err){ showMsg(err.message, false); }
 }
 init();

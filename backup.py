@@ -10,7 +10,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_URL = os.getenv('SUPABASE_DB_URL') or os.getenv('DATABASE_URL', 'sqlite:///./volcad.db')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_URL = os.getenv('SUPABASE_DB_URL') or os.getenv('DATABASE_URL')
+if not DB_URL:
+    DB_URL = f'sqlite:///{os.path.join(BASE_DIR, "volcad.db").replace(os.sep, "/")}'
 BACKUP_DIR = 'backups'
 
 

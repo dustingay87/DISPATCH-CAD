@@ -45,8 +45,6 @@
   <header class='h-12 bg-slate-950 border-b border-slate-700 flex items-center px-2 gap-2 shrink-0'>
     <div class='font-bold text-lg tracking-wide text-white'>D2D <span class='text-slate-500 font-normal text-xs'><span id='consoleLabel'>Console</span></span></div>
     <select id='disciplineSelect' class='bg-slate-800 border border-slate-600 rounded px-1 py-1 text-xs'><option value='all'>All Disciplines</option><option value='police'>Police</option><option value='fire'>Fire</option><option value='ems'>EMS</option></select>
-    <input id='cmdInput' type='text' class='flex-1 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs' placeholder='Command (d <call> <unit>, c <call>, s <unit> <status>)'>
-    <button id='cmdBtn' class='bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded'>Run</button>
     <div class='text-slate-400 font-mono' id='clock'>--:--:--</div>
     <label class='flex items-center space-x-1'><input id='liveToggle' type='checkbox' checked class='accent-blue-500'> <span>Live</span></label>
     <label class='flex items-center space-x-1 text-slate-300'><input id='lockLayout' type='checkbox' class='accent-pink-500'> <span>Lock</span></label>
@@ -107,7 +105,21 @@
   </footer>
 <script>
 const DEFAULT_CENTER = [39.9612,-82.9988];
-let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false, mapLayers:[], destinations:{} };
+let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, configs:{}, postZones:[], selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false, mapLayers:[], destinations:{}, lastCallsHtml:null, lastUnitsHtml:null };
+const QUICK_STAMPS = {
+  police: ['Shots Fired','Object Thrown','Taser Deployed','Suspect in Custody','Officer Needs Assistance','Code 4','Suspect Fleeing'],
+  fire: ['Entry Made','Smoke Showing','Fire Knocked Down','Primary Search Complete','Secondary Search Complete','Ventilation Complete','Water on Fire','All Clear'],
+  ems: ['Patient Violent','Law Enforcement Needed','CPR in Progress','AED Applied','Medic on Scene','Transporting','Arrived at Hospital']
+};
+function getDisciplineFromAgency(agencyId){ return (state.agencyMap[agencyId]||{}).agency_type || 'fire'; }
+function getAgencyFeatures(agencyId){
+  const cfg = state.configs[agencyId] || {};
+  return Object.assign({transport:true, mileage:false, personnel:true, fire_report:true}, cfg.features || {});
+}
+function getResponseGoals(agencyId){
+  const cfg = state.configs[agencyId] || {};
+  return Object.assign({dispatch_seconds:60, en_route_seconds:120, on_scene_city_seconds:480, on_scene_county_seconds:1800}, cfg.response_goals || {});
+}
 const pathDisc = window.location.pathname.replace(/^\/|\/$/g,'');
 let DISCIPLINE = ['police','fire','ems'].includes(pathDisc) ? pathDisc : (new URLSearchParams(window.location.search).get('discipline') || 'all');
 let map, layers;
@@ -213,14 +225,15 @@ function elapsed(iso){ return (Date.now()-toMs(iso))/1000; }
 function priorityTarget(p){ return {1:180,2:420,3:720,4:1200}[Math.min(Math.max(p||2,1),4)] || 420; }
 function slaClass(sec,target){ return sec>target ? 'text-red-400 font-bold' : 'text-slate-400'; }
 function unitClass(st){ if(st==='OS') return 'unit-os'; if(st==='ER'||st==='TR'||st==='DEL') return 'unit-er'; if(st==='AQ') return 'unit-aq'; return 'unit-oth'; }
-function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul'}; return M[code]||code; }
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',ED:'En Route to Destination',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',cleared:'Cleared',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul'}; return M[code]||code; }
+function serviceAreaColor(type){ if(type==='primary') return '#22c55e'; if(type==='secondary') return '#3b82f6'; if(type==='mutual') return '#eab308'; return '#64748b'; }
 function matchesDiscipline(t){ return DISCIPLINE==='all' || t===DISCIPLINE; }
 function log(msg){ state.logs.unshift(`${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${msg}`); if(state.logs.length>100) state.logs.pop(); renderLog(); }
 
 function initMap(){
   map = L.map('map');
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'&copy; OpenStreetMap' }).addTo(map);
-  layers = { units:L.layerGroup().addTo(map), incidents:L.layerGroup().addTo(map), trails:L.layerGroup().addTo(map), critical:L.layerGroup().addTo(map) };
+  layers = { units:L.layerGroup().addTo(map), incidents:L.layerGroup().addTo(map), trails:L.layerGroup().addTo(map), critical:L.layerGroup().addTo(map), serviceAreas:L.layerGroup().addTo(map) };
   const legend = L.control({position:'bottomright'});
   legend.onAdd = function(){
     const d = L.DomUtil.create('div','legend');
@@ -235,7 +248,11 @@ function initMap(){
       <div class='mb-0.5'><span class='dot' style='background:#f97316'></span>P2 Urgent</div>
       <div class='mb-0.5'><span class='dot' style='background:#eab308'></span>P3</div>
       <div class='mb-0.5'><span class='dot' style='background:#22c55e'></span>P4 Low</div>
-      <div class='mb-0.5'><span class='dot' style='background:#64748b'></span>Closed</div>`;
+      <div class='mb-0.5'><span class='dot' style='background:#64748b'></span>Closed</div>
+      <div class='font-bold mb-1 border-t border-slate-600 pt-1 mt-1'>Coverage</div>
+      <div class='mb-0.5'><span class='dot' style='background:#22c55e'></span>Primary</div>
+      <div class='mb-0.5'><span class='dot' style='background:#3b82f6'></span>Secondary</div>
+      <div class='mb-0.5'><span class='dot' style='background:#eab308'></span>Mutual Aid</div>`;
     return d;
   };
   legend.addTo(map);
@@ -248,7 +265,6 @@ function renderCalls(){
   document.getElementById('callCount').textContent = active.length;
   const html = active.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Status</th><th>Loc</th><th>Units</th><th>SLA</th></tr></thead><tbody>` + active.map(i=>{
     const a=state.agencyMap[i.agency_id]||{};
-    const sec=elapsed(i.created_at);
     const target=priorityTarget(i.priority);
     const assigned=state.units.filter(u=>u.current_incident_id===i.id).map(u=>u.call_sign).join(', ')||'-'; 
     const cls = state.selectedIncident===i.id ? 'selected' : '';
@@ -259,11 +275,15 @@ function renderCalls(){
       <td>${statusLabel(i.status)}</td>
       <td>${i.location_text||'-'}</td>
       <td>${assigned}</td>
-      <td class='timer ${slaClass(sec,target)}'>${fmtDur(sec)}<br><span class='text-slate-500'>/${fmtDur(target)}</span></td>
+      <td class='timer' data-timer='sla' data-iso='${i.created_at}' data-target='${target}'>--:--:--</td>
     </tr>`;
   }).join('') + '</tbody></table>' : '<div class=\'p-2 text-slate-500\'>No active calls</div>';
-  document.getElementById('callList').innerHTML = html;
+  const el = document.getElementById('callList');
+  if(state.lastCallsHtml !== html){ state.lastCallsHtml = html; el.innerHTML = html; updateTimers(); }
 }
+
+function findFirstEvent(events, codes){ return (events||[]).filter(e=>codes.includes(e.status_code)).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at))[0]?.created_at || null; }
+function milestoneText(iso, target, start){ const sec = iso ? elapsed(iso) : elapsed(start); const cls = iso ? (sec>target?'text-red-400 font-bold':'text-green-400') : 'text-yellow-400'; return `<span class='${cls}'>${fmtDur(sec)}</span> / ${fmtDur(target)}`; }
 
 async function selectIncident(id){
   state.selectedIncident = id;
@@ -273,9 +293,24 @@ async function selectIncident(id){
   let timeline = {};
   try { timeline = await api(`/incidents/${id}/timeline`); } catch(e){ log('Timeline error: '+e.message); }
   const a = state.agencyMap[i.agency_id]||{};
+  const features = getAgencyFeatures(i.agency_id);
+  const goals = getResponseGoals(i.agency_id);
+  const discipline = getDisciplineFromAgency(i.agency_id);
   const assigned = state.units.filter(u=>u.current_incident_id===i.id);
   const availOpts = state.units.filter(u=>['AQ','Available'].includes(u.current_status)).map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
-  const sec=elapsed(i.created_at); const target=priorityTarget(i.priority);
+  await loadDestinations(i.agency_id);
+  const destOpts = getDestinationOptions(i.agency_id);
+  const start = i.call_entry_started_at || i.created_at;
+  const dispatchedAt = findFirstEvent(timeline.events, ['AK','dispatched']);
+  const enRouteAt = findFirstEvent(timeline.events, ['ER','en_route']);
+  const onSceneAt = findFirstEvent(timeline.events, ['OS','on_scene']);
+  const transportAt = findFirstEvent(timeline.events, ['TR','ED']);
+  const narrative = (i.narrative||'').replace(/\n/g,'<br>');
+  const quickStampLabels = QUICK_STAMPS[discipline] || QUICK_STAMPS.fire;
+  const quickStamps = quickStampLabels.map(l=>`<button type='button' class='px-2 py-0.5 bg-slate-700 hover:bg-slate-600 rounded text-xs' onclick='insertQuickStamp(${JSON.stringify(l).replace(/'/g,"&#39;")})'>${l}</button>`).join('');
+  const showPersonnel = features.personnel !== false;
+  const personnelOpts = state.personnel.filter(p=>p.agency_id===i.agency_id && !p.current_unit_id).map(p=>`<option value='${p.id}'>${p.first_name} ${p.last_name}</option>`).join('');
+  const fireReportBtn = a.agency_type==='fire' ? `<button class='px-2 py-1 bg-orange-700 hover:bg-orange-600 rounded text-xs' onclick='generateFireReport(${i.id})'>Fire Report</button>` : '';
   document.getElementById('incidentPanel').innerHTML = `
     <div class='card-head'>${i.call_number||i.incident_number} <span class='text-slate-400'>${i.call_type}</span></div>
     <div class='p-2 space-y-2'>
@@ -283,18 +318,52 @@ async function selectIncident(id){
         <span>Agency: <b class='text-white'>${a.name||'-'}</b></span>
         <span>Priority: <b class='text-white'>P${i.priority}</b></span>
         <span>Status: <b class='text-white'>${statusLabel(i.status)}</b></span>
-        <span class='${slaClass(sec,target)}'>Elapsed: ${fmtDur(sec)} / Target: ${fmtDur(target)}</span>
+        <span>Call Entry: <b class='text-white'>${fmtTime(start)}</b></span>
+      </div>
+      <div class='flex flex-wrap gap-4 text-xs text-slate-400'>
+        <span title='Time to first dispatch'>Dispatch: ${milestoneText(dispatchedAt, goals.dispatch_seconds, start)}</span>
+        <span title='Time to first en route'>En Route: ${milestoneText(enRouteAt, goals.en_route_seconds, start)}</span>
+        <span title='Time to first on scene city'>On Scene City: ${milestoneText(onSceneAt, goals.on_scene_city_seconds, start)}</span>
+        <span title='Time to first on scene county'>On Scene County: ${milestoneText(onSceneAt, goals.on_scene_county_seconds, start)}</span>
       </div>
       <div class='text-xs text-slate-400'>Location: <b class='text-white'>${i.location_text||'-'}</b></div>
       <div class='text-xs text-slate-400'>Caller: <b class='text-white'>${i.caller_name||'-'} ${i.callback||''}</b></div>
-      <div class='text-xs'>${i.narrative||'No narrative'}</div>
+      <div class='text-xs bg-slate-900 p-1 rounded max-h-24 overflow-auto' id='incNarrative'>${narrative || 'No narrative'}</div>
       <div class='flex gap-2'>
         <select id='dispUnit' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value=''>Unit</option>${availOpts}</select>
         <button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='dispatchSelected()'>Dispatch</button>
         <button class='bg-red-800 hover:bg-red-700 px-2 py-0.5 rounded text-xs' onclick='closeSelected()'>Close</button>
+        ${fireReportBtn}
       </div>
-      <div class='text-xs text-slate-300'>
-        <b>Assigned:</b> ${assigned.map(u=>`${u.call_sign} (${statusLabel(u.current_status)})`).join(', ') || 'none'}
+      <div class='border-t border-slate-700 pt-2'>
+        <div class='text-xs font-semibold text-slate-400 mb-1'>Assigned Units</div>
+        <div class='space-y-1'>
+          ${assigned.length ? assigned.map(u=>{
+            const mileageClass = features.mileage || (a.agency_type==='ems') ? '' : 'hidden';
+            return `<div class='flex flex-wrap gap-2 items-center text-xs'>
+              <span class='font-bold text-white'>${u.call_sign}</span>
+              <select id='incUStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onchange='incidentUnitStatusChanged(${i.id},${u.id})'>${unitStatusOptions(a.agency_type, i.agency_id)}</select>
+              <select id='incUDest_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden'>${destOpts}</select>
+              <input id='incUMile_${u.id}' type='number' step='0.1' class='${mileageClass} bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-20 hidden' placeholder='Miles'>
+              <button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='setIncidentUnitStatus(${i.id},${u.id})'>Set</button>
+            </div>`;
+          }).join('') : '<div class=\'text-slate-500\'>none</div>'}
+        </div>
+      </div>
+      <div class='border-t border-slate-700 pt-2'>
+        <div class='text-xs font-semibold text-slate-400 mb-1'>Quick Notes</div>
+        <div class='flex flex-wrap gap-1 mb-1'>${quickStamps}</div>
+        <textarea id='incNote' rows='2' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-full' placeholder='Add note with timestamp...'></textarea>
+        <button class='mt-1 bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='addIncidentNote(${i.id})'>Add Note</button>
+      </div>
+      <div class='border-t border-slate-700 pt-2 ${showPersonnel?"":"hidden"}' id='personnelPanel'>
+        <div class='text-xs font-semibold text-slate-400 mb-1'>Responding Personnel (${a.agency_type==='fire'?'fire':''})</div>
+        <div id='personnelList' class='space-y-1 text-xs'>Loading...</div>
+        <div class='flex gap-2 mt-1'>
+          <select id='addPersonnelSel' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value=''>Select</option>${personnelOpts}</select>
+          <input id='addPersonnelVehicle' type='text' value='Personal vehicle' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-28' placeholder='Vehicle'>
+          <button class='bg-green-700 hover:bg-green-600 px-2 py-0.5 rounded text-xs' onclick='addRespondingPersonnel(${i.id})'>Add</button>
+        </div>
       </div>
       <div class='border-t border-slate-700 pt-2'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Timeline</div>
@@ -304,24 +373,23 @@ async function selectIncident(id){
         <div class='text-xs font-semibold text-slate-400 mb-1'>Recommended Units</div>
         <div id='recs' class='space-y-1 text-xs text-slate-300'>Loading...</div>
       </div>
-      <div class='border-t border-slate-700 pt-2' id='destinationPanel'>
+      <div class='border-t border-slate-700 pt-2 ${features.transport?"":"hidden"}' id='destinationPanel'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Destination</div>
         <div class='text-xs text-slate-500'>Loading...</div>
-        <button class='mt-2 px-2 py-1 bg-green-700 hover:bg-green-600 rounded text-xs' onclick='exportEpcr()'>Generate ePCR Export</button>
       </div>
-      <div class='border-t border-slate-700 pt-2' id='transportLegsPanel'>
+      <div class='border-t border-slate-700 pt-2 ${features.transport?"":"hidden"}' id='transportLegsPanel'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Transport Legs</div>
         <div class='text-xs text-slate-500'>Loading...</div>
       </div>
-      <div class='border-t border-slate-700 pt-2' id='mileagePanel'>
+      <div class='border-t border-slate-700 pt-2 ${features.mileage?"":"hidden"}' id='mileagePanel'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Mileage</div>
         <div class='text-xs text-slate-500'>Loading...</div>
       </div>
     </div>`;
   await loadRecommendations(i.id);
-  await loadDestination(i.id);
-  await loadTransportLegs(i.id);
-  await loadMileage(i.id);
+  if(features.transport){ await loadDestination(i.id); await loadTransportLegs(i.id); }
+  if(features.mileage){ await loadMileage(i.id); }
+  if(showPersonnel){ await loadIncidentPersonnel(i.id); }
   renderMap();
 }
 
@@ -412,6 +480,106 @@ async function loadTransportLegs(id){
   } catch(e){ el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Transport Legs</div><div class='text-xs text-slate-500'>No transport legs</div>`; }
 }
 
+async function loadDestinations(agencyId){
+  if(!agencyId || (state.destinationsList && state.destinationsList[agencyId])) return;
+  try {
+    const list = await api(`/destinations?agency_id=${agencyId}`);
+    if(!state.destinationsList) state.destinationsList = {};
+    state.destinationsList[agencyId] = list;
+  } catch(e){}
+}
+function getDestinationOptions(agencyId){
+  const list = (state.destinationsList && state.destinationsList[agencyId]) || [];
+  return `<option value=''>Select destination...</option>` + list.map(d=>`<option value='${d.id}'>${d.name}${d.category ? ' ('+d.category+')' : ''}</option>`).join('');
+}
+
+function incidentUnitStatusChanged(incidentId, unitId){
+  const status = document.getElementById(`incUStat_${unitId}`).value;
+  const needsDest = status === 'TR' || status === 'ED' || status === 'DEL';
+  const dest = document.getElementById(`incUDest_${unitId}`);
+  const mile = document.getElementById(`incUMile_${unitId}`);
+  if(dest) dest.classList.toggle('hidden', !needsDest);
+  if(mile) mile.classList.toggle('hidden', !needsDest);
+}
+
+async function setIncidentUnitStatus(incidentId, unitId){
+  const s = document.getElementById(`incUStat_${unitId}`).value; if(!s) return;
+  const destEl = document.getElementById(`incUDest_${unitId}`);
+  const mileEl = document.getElementById(`incUMile_${unitId}`);
+  const needsDest = s === 'TR' || s === 'ED' || s === 'DEL';
+  const body = {status_code: s};
+  if(needsDest && destEl && destEl.value) body.destination_id = parseInt(destEl.value);
+  if(needsDest && mileEl && mileEl.value) body.mileage = parseFloat(mileEl.value);
+  if(needsDest && !body.destination_id){ alert('Select a destination for transport status'); return; }
+  try {
+    await api(`/incidents/${incidentId}/units/${unitId}/status`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    log(`Unit ${(state.units.find(u=>u.id===unitId)||{}).call_sign} set to ${statusLabel(s)}`);
+    await load();
+  } catch(e){ log('Status error: '+e.message); }
+}
+
+function insertQuickStamp(label){
+  const ta = document.getElementById('incNote'); if(!ta) return;
+  const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const line = `[${now}] ${label}`;
+  ta.value += (ta.value ? '\n' : '') + line;
+}
+
+async function addIncidentNote(incidentId){
+  const ta = document.getElementById('incNote'); if(!ta || !ta.value.trim()) return;
+  try {
+    await api(`/incidents/${incidentId}/notes`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({note: ta.value.trim()})});
+    log('Note added');
+    ta.value = '';
+    await load();
+    selectIncident(incidentId);
+  } catch(e){ log('Note error: '+e.message); }
+}
+
+async function loadIncidentPersonnel(incidentId){
+  const el = document.getElementById('personnelList'); if(!el) return;
+  try {
+    const list = await api(`/incidents/${incidentId}/personnel`);
+    if(!list.length){ el.innerHTML = '<div class="text-slate-500">No responding personnel</div>'; return; }
+    const rows = list.map(p=>{
+      const name = p.personnel ? `${p.personnel.first_name} ${p.personnel.last_name}` : 'Responder';
+      return `<div class='text-xs text-slate-300 flex gap-2 items-center'><b>${name}</b> ${p.responding_vehicle||''} <span class='text-slate-400'>${statusLabel(p.status)}</span>
+        <select id='ppStat_${p.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value='en_route'>En Route</option><option value='arrived'>Arrived</option><option value='cleared'>Cleared</option></select>
+        <button class='bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='updatePersonnelStatus(${incidentId},${p.id})'>Set</button>
+      </div>`;
+    }).join('');
+    el.innerHTML = rows;
+  } catch(e){ el.innerHTML = '<div class="text-slate-500">No responding personnel</div>'; }
+}
+
+async function addRespondingPersonnel(incidentId){
+  const pid = document.getElementById('addPersonnelSel').value;
+  const vehicle = document.getElementById('addPersonnelVehicle').value || 'Personal vehicle';
+  if(!pid){ log('Select a responder'); return; }
+  try {
+    await api(`/incidents/${incidentId}/personnel`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({personnel_id:parseInt(pid), responding_vehicle:vehicle})});
+    log('Responder added'); await load(); loadIncidentPersonnel(incidentId);
+  } catch(e){ log('Personnel add error: '+e.message); }
+}
+
+async function updatePersonnelStatus(incidentId, ipId){
+  const s = document.getElementById(`ppStat_${ipId}`).value;
+  try {
+    await api(`/incidents/${incidentId}/personnel/${ipId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:s})});
+    log('Responder status updated'); await load(); loadIncidentPersonnel(incidentId);
+  } catch(e){ log('Personnel status error: '+e.message); }
+}
+
+async function generateFireReport(incidentId){
+  try {
+    const r = await api(`/incidents/${incidentId}/fire-report`);
+    const blob = new Blob([JSON.stringify(r, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download = `fire-report-${incidentId}.json`; a.click(); URL.revokeObjectURL(url);
+    log('Fire report downloaded');
+  } catch(e){ log('Fire report error: '+e.message); }
+}
+
 async function dispatchSelected(){
   const uid = document.getElementById('dispUnit').value;
   if(!uid || !state.selectedIncident) return;
@@ -428,32 +596,77 @@ function renderUnits(){
   const rows = filtered.map(u=>{
     const a=state.agencyMap[u.agency_id]||{};
     const inc = u.current_incident_id ? (state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id) : '-';
-    const t = uTimers(u);
+    const onCall = ['OS','ER','TR','AK','dispatched','LUN','OOS','MAINT','DEL','NPF'].includes(u.current_status);
+    const availIso = u.current_status==='AQ' ? (u.last_assigned_at || u.in_service_at) : '';
+    const sceneIso = u.current_status==='OS' ? u.last_assigned_at : '';
+    const callAcc = u.accumulated_call_seconds || 0;
+    const callIso = onCall && u.last_assigned_at ? u.last_assigned_at : '';
+    const shiftIso = u.in_service_at || '';
     return `<tr class='${unitClass(u.current_status)} ${state.selectedUnit===u.id?'selected':''}' onclick='selectUnit(${u.id})'>
       <td class='font-bold'>${u.call_sign}</td>
       <td>${a.agency_type ? a.agency_type.toUpperCase() : '-'}</td>
       <td>${statusLabel(u.current_status)}</td>
       <td>${inc}</td>
-      <td class='timer'>${t.avail}</td>
-      <td class='timer'>${t.scene}</td>
-      <td class='timer'>${t.call}</td>
-      <td class='timer'>${t.shift}</td>
-      <td onclick='event.stopPropagation()'><select id='uStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onchange='event.stopPropagation()'>${unitStatusOptions(a.agency_type)}</select><button class='ml-1 bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();setUnitStatus(${u.id})'>Set</button></td>
+      <td class='timer' data-fallback='-' data-iso='${availIso||''}'>-</td>
+      <td class='timer' data-fallback='-' data-iso='${sceneIso||''}'>-</td>
+      <td class='timer' data-fallback='-' data-acc='${callAcc}' data-iso='${callIso||''}'>-</td>
+      <td class='timer' data-fallback='-' data-iso='${shiftIso||''}'>-</td>
+      <td onclick='event.stopPropagation()'><select id='uStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onclick='event.stopPropagation()' onchange='event.stopPropagation()'>${unitStatusOptions(a.agency_type, a.id)}</select><button class='ml-1 bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();setUnitStatus(${u.id})'>Set</button></td>
     </tr>`;
   }).join('');
-  document.getElementById('unitList').innerHTML = rows ? `<table class='tbl'><thead><tr><th>Unit</th><th>Type</th><th>Status</th><th>Call</th><th>Avail</th><th>Scene</th><th>Call T</th><th>Shift</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class=\'p-2 text-slate-500\'>No units</div>';
+  const html = rows ? `<table class='tbl'><thead><tr><th>Unit</th><th>Type</th><th>Status</th><th>Call</th><th>Avail</th><th>Scene</th><th>Call T</th><th>Shift</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class=\'p-2 text-slate-500\'>No units</div>';
+  const el = document.getElementById('unitList');
+  if(state.lastUnitsHtml !== html){ state.lastUnitsHtml = html; el.innerHTML = html; updateTimers(); }
 }
 
-function uTimers(u){
-  const onCall = ['OS','ER','TR','AK','dispatched','LUN','OOS','MAINT','DEL','NPF'].includes(u.current_status);
-  const last = elapsed(u.last_assigned_at);
-  const avail = u.current_status==='AQ' ? fmtDur(last) : '-';
-  const scene = u.current_status==='OS' ? fmtDur(last) : '-';
-  let acc = u.accumulated_call_seconds || 0; if(onCall && u.last_assigned_at) acc += last;
-  const shift = u.in_service_at ? fmtDur(elapsed(u.in_service_at)) : '-';
-  return { avail, scene, call: fmtDur(acc), shift };
+function updateTimers(){
+  // SLA / elapsed timers on active calls
+  document.querySelectorAll('[data-timer="sla"]').forEach(el=>{
+    const iso = el.dataset.iso; if(!iso) return;
+    const target = parseInt(el.dataset.target,10)||420;
+    const sec = elapsed(iso);
+    el.innerHTML = `${fmtDur(sec)}<br><span class='text-slate-500'>/${fmtDur(target)}</span>`;
+    el.className = `timer ${slaClass(sec,target)}`;
+  });
+  // Generic duration cells (unit board)
+  document.querySelectorAll('td[data-iso]').forEach(el=>{
+    if(el.dataset.timer === 'sla') return;
+    const iso = el.dataset.iso;
+    const acc = el.dataset.acc;
+    let sec = null;
+    if(acc !== undefined){
+      sec = parseFloat(acc||0) + (iso ? elapsed(iso) : 0);
+    } else if(iso){
+      sec = elapsed(iso);
+    }
+    el.textContent = sec !== null ? fmtDur(sec) : (el.dataset.fallback || '-');
+  });
 }
-function unitStatusOptions(type){ const codes={police:['AQ','OS','ER','TR','CAN','LUN','AFR'],fire:['AQ','OS','ER','CAN','OOS','AFR','MAINT'],ems:['AQ','ER','OS','TR','CAN','NPF','DEL','AFR']}[type]||['AQ','OS','ER','CAN']; return `<option value=''>Set...</option>` + codes.map(c=>`<option value='${c}'>${statusLabel(c)}</option>`).join(''); }
+
+function unitStatusOptions(type, agencyId){
+  // Build options from customer config if available, otherwise defaults.
+  const cfg = (state.configs && state.configs[agencyId]) || {};
+  const custom = cfg.statuses;
+  const features = getAgencyFeatures(agencyId);
+  const showTransport = features.transport !== false;
+  let codes;
+  if(custom && custom.length){
+    codes = custom.map(s=>s.code);
+  } else {
+    const police = ['AQ','OS','ER','TR','CAN','LUN','AFR'];
+    const fire = showTransport
+      ? ['AQ','OS','ER','WATER','EXT','OVER','TR','CAN','LUN','OOS','AFR','MAINT']
+      : ['AQ','OS','ER','WATER','EXT','OVER','CAN','LUN','OOS','AFR','MAINT'];
+    const ems = showTransport
+      ? ['AQ','ER','OS','TR','CAN','NPF','DEL','AFR']
+      : ['AQ','ER','OS','CAN','NPF','AFR'];
+    codes = {police,fire,ems}[type]||['AQ','OS','ER','CAN'];
+  }
+  if(!showTransport){
+    codes = codes.filter(c=>!['TR','ED','DEL'].includes(c));
+  }
+  return `<option value=''>Set...</option>` + codes.map(c=>`<option value='${c}'>${statusLabel(c)}</option>`).join('');
+}
 window.setUnitStatus = async function(unitId){ const s = document.getElementById('uStat_'+unitId).value; if(!s) return; const u=state.units.find(x=>x.id===unitId); const inc=state.incidents.find(i=>i.id===u.current_incident_id); const path=inc ? `/incidents/${inc.id}/units/${unitId}/status` : `/units/${unitId}/status`; try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status_code:s})}); log(`Unit ${u.call_sign} set to ${statusLabel(s)}`); await load(); } catch(e){ log('Status error: '+e.message); } };
 
 async function selectUnit(id){ state.selectedUnit=id; await loadTrails(id); renderUnits(); renderMap(); }
@@ -468,9 +681,19 @@ async function loadTrails(unitId){
 
 function renderMap(){
   if(!map) initMap();
-  layers.units.clearLayers(); layers.incidents.clearLayers(); layers.trails.clearLayers(); layers.critical.clearLayers();
+  layers.units.clearLayers(); layers.incidents.clearLayers(); layers.trails.clearLayers(); layers.critical.clearLayers(); layers.serviceAreas.clearLayers();
   let bounds=L.latLngBounds([]);
   const a=state.incidents.find(i=>i.id===state.selectedIncident);
+  // Service areas
+  (state.postZones || []).forEach(z=>{
+    if(!z.geojson) return;
+    try{
+      const c = z.color || serviceAreaColor(z.zone_type);
+      const gj = L.geoJSON(z.geojson, {style:{color:c, fillColor:c, fillOpacity:0.1, weight:2}}).addTo(layers.serviceAreas);
+      gj.bindPopup(`<b>${z.name}</b><br>${z.zone_type}`);
+      if(gj.getBounds && gj.getBounds().isValid()) bounds.extend(gj.getBounds());
+    }catch(e){}
+  });
   state.units.forEach(u=>{
     if(u.lat==null || u.lng==null) return;
     const col = u.current_status==='OS' ? '#ef4444' : u.current_status==='AQ' ? '#22c55e' : '#eab308';
@@ -506,9 +729,22 @@ function renderMap(){
   } else if(a && a.lat!=null && a.lng!=null){
     map.setView([a.lat,a.lng], 14);
   } else {
-    const am = state.agencies.find(ag=>ag.id===state.units[0]?.agency_id) || state.agencies[0];
-    if(am && am.lat!=null && am.lng!=null) map.setView([am.lat,am.lng], 11);
-    else map.setView(DEFAULT_CENTER, 11);
+    // Fall back to primary/secondary service area if defined
+    let zoneBounds = L.latLngBounds([]);
+    (state.postZones || []).forEach(z=>{
+      if(!z.geojson) return;
+      try{
+        const gl = L.geoJSON(z.geojson);
+        if(gl.getBounds && gl.getBounds().isValid()) zoneBounds.extend(gl.getBounds());
+      }catch(e){}
+    });
+    if(zoneBounds.isValid()){
+      map.fitBounds(zoneBounds,{padding:[20,20],maxZoom:14});
+    } else {
+      const am = state.agencies.find(ag=>ag.id===state.units[0]?.agency_id) || state.agencies[0];
+      if(am && am.lat!=null && am.lng!=null) map.setView([am.lat,am.lng], 11);
+      else map.setView(DEFAULT_CENTER, 11);
+    }
   }
   if(a && a.lat!=null && a.lng!=null){ layers.incidents.getLayers().forEach(m=>{ if(m.getPopup().getContent().includes(a.call_number||a.incident_number)) m.openPopup(); }); }
 }
@@ -532,33 +768,22 @@ async function sendMessage(){
   try { await api('/messages', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); inp.value=''; await load(); } catch(e){ log('Message error: '+e.message); }
 }
 
-async function runCommand(){
-  const cmd = document.getElementById('cmdInput').value.trim(); if(!cmd) return;
-  log('> '+cmd);
-  const parts = cmd.split(/\s+/);
+async function loadConfigs(){
   try {
-    if(parts[0]==='d' && parts.length>=3){
-      const inc = state.incidents.find(i=>(i.call_number||i.incident_number)===parts[1]);
-      const unit = state.units.find(u=>u.call_sign.toLowerCase()===parts[2].toLowerCase());
-      if(!inc || !unit){ log('Call or unit not found'); return; }
-      await api(`/incidents/${inc.id}/dispatch/${unit.id}`, {method:'POST'}); log('Dispatched '+unit.call_sign+' to '+inc.call_number); await load();
-    } else if(parts[0]==='c' && parts.length>=2){
-      const inc = state.incidents.find(i=>(i.call_number||i.incident_number)===parts[1]);
-      if(!inc){ log('Call not found'); return; }
-      await api(`/incidents/${inc.id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:'closed'})}); log('Closed '+inc.call_number); await load();
-    } else if(parts[0]==='s' && parts.length>=3){
-      const unit = state.units.find(u=>u.call_sign.toLowerCase()===parts[1].toLowerCase());
-      if(!unit){ log('Unit not found'); return; }
-      log('Status command not yet wired to backend');
-    } else { log('Unknown command'); }
-  } catch(e){ log('Command error: '+e.message); }
-  document.getElementById('cmdInput').value='';
+    const cfg = await api('/config');
+    const out = {};
+    cfg.forEach(c=>{
+      if(!out[c.agency_id]) out[c.agency_id] = {};
+      out[c.agency_id][c.category] = c.value;
+    });
+    return out;
+  } catch(e){ return {}; }
 }
 
 async function load(){
   try {
-    const [agencies, units, incidents, messages] = await Promise.all([api('/agencies'), api('/units'), api('/incidents'), api('/messages')]);
-    state.agencies = agencies; state.units = units; state.incidents = incidents; state.messages = messages;
+    const [agencies, units, incidents, messages, configs, postZones, personnel] = await Promise.all([api('/agencies'), api('/units'), api('/incidents'), api('/messages'), loadConfigs(), api('/post-zones'), api('/personnel')]);
+    state.agencies = agencies; state.units = units; state.incidents = incidents; state.messages = messages; state.configs = configs; state.postZones = postZones; state.personnel = personnel;
     state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
     const mapConfig = await api('/config?category=map_layers');
     const ml = mapConfig.find(c=>c.category==='map_layers' && c.key==='all')?.value || [];
@@ -575,8 +800,6 @@ async function load(){
 function updateClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 
 document.getElementById('refreshBtn').addEventListener('click', load);
-document.getElementById('cmdBtn').addEventListener('click', runCommand);
-document.getElementById('cmdInput').addEventListener('keydown', e=>{ if(e.key==='Enter') runCommand(); });
 document.getElementById('msgSend').addEventListener('click', sendMessage);
 document.getElementById('msgText').addEventListener('keydown', e=>{ if(e.key==='Enter') sendMessage(); });
 document.getElementById('disciplineSelect').addEventListener('change', e=>{ DISCIPLINE = e.target.value; renderCalls(); renderUnits(); renderMap(); });
@@ -600,8 +823,8 @@ load();
 startStream();
 updateClock(); setInterval(updateClock,1000);
 window.addEventListener('resize', ()=>{ if(map) map.invalidateSize(); });
-setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); },5000);
-setInterval(()=>{ renderUnits(); renderCalls(); },1000);
+setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); },10000);
+setInterval(updateTimers,1000);
 </script>
 </body>
 </html>

@@ -82,7 +82,7 @@ function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}
 let state={agencies:[], zones:[], units:[], postings:[]};
 let map, drawnItems, zonesLayer, drawControl;
 
-function defaultColor(type){ if(type==='primary') return '#22c55e'; if(type==='secondary') return '#eab308'; if(type==='mutual') return '#3b82f6'; return document.getElementById('zoneColor')?.value || '#3b82f6'; }
+function defaultColor(type){ if(type==='primary') return '#22c55e'; if(type==='secondary') return '#3b82f6'; if(type==='mutual') return '#eab308'; return document.getElementById('zoneColor')?.value || '#3b82f6'; }
 function styleLayer(layer, type){ const c=defaultColor(type); if(layer.setStyle) layer.setStyle({color:c, fillColor:c, fillOpacity:0.15, weight:2}); }
 
 function initMap(){

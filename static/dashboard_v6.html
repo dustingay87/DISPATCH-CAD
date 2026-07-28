@@ -33,12 +33,13 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
 </style>
 </head>
 <body class='bg-slate-900 text-slate-200 text-xs h-screen flex flex-col'>
-  <header class='h-14 bg-slate-950 border-b border-slate-700 flex items-center justify-between px-4 shrink-0'>
+  <header class='min-h-14 h-auto bg-slate-950 border-b border-slate-700 flex flex-wrap items-center justify-between px-4 py-1 shrink-0 gap-2'>
     <div class='flex items-center gap-2'>
       <div class='font-bold text-lg text-white' id='brandTitle'>D2D Unified Response</div>
       <select id='moduleSelect' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden'></select>
     </div>
-    <div class='flex items-center gap-2'>
+    <div class='flex flex-wrap items-center gap-2'>
+      <a href='/console' class='bg-blue-700 hover:bg-blue-600 px-2 py-1 rounded text-xs'>Console</a>
       <a href='/call-entry' class='bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-xs'>Call Entry</a>
       <a href='/scheduled-transports-page' class='bg-indigo-700 hover:bg-indigo-600 px-2 py-1 rounded text-xs'>Scheduled</a>
       <a href='/coverage-page' class='bg-teal-700 hover:bg-teal-600 px-2 py-1 rounded text-xs'>Coverage</a>
