@@ -416,7 +416,6 @@ def startup():
 def _log_event(db: Session, event_type: str, entity_type: str, entity_id: int, user_id: Optional[int] = None, data: Optional[dict] = None, agency_id: Optional[int] = None):
     db.add(Event(event_type=event_type, entity_type=entity_type, entity_id=entity_id, user_id=user_id, data=data, agency_id=agency_id))
 
-@app.middleware('http')
 def _security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
@@ -425,6 +424,7 @@ def _security_headers(response):
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     return response
 
+@app.middleware('http')
 async def auth_middleware(request: Request, call_next):
     if request.method in ('GET', 'OPTIONS', 'HEAD') or request.url.path.startswith('/static/'):
         return _security_headers(await call_next(request))
