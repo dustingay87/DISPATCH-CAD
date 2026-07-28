@@ -121,6 +121,8 @@ th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
           <select id='uUnitType' class='w-full' required><option value=''>Select unit type</option></select>
           <input id='uRadio' placeholder='Radio ID'>
           <input id='uTaip' placeholder='TAIP ID'>
+          <input id='uTaipUrl' placeholder='TAIP Destination URL'>
+          <input id='uTaipPort' placeholder='Port #' type='number'>
           <input id='uLat' placeholder='Lat' type='number' step='any'>
           <input id='uLng' placeholder='Lng' type='number' step='any'>
           <div class='flex gap-2'>
@@ -319,6 +321,8 @@ function editUnit(u){
   document.getElementById('uUnitType').value=u.unit_type;
   document.getElementById('uRadio').value=u.radio_id||'';
   document.getElementById('uTaip').value=u.taip_id||'';
+  document.getElementById('uTaipUrl').value=u.taip_destination_url||'';
+  document.getElementById('uTaipPort').value=u.taip_port||'';
   document.getElementById('uLat').value=u.lat||'';
   document.getElementById('uLng').value=u.lng||'';
   document.getElementById('unitFormTitle').textContent='Edit Unit';
@@ -340,6 +344,8 @@ document.getElementById('unitForm').addEventListener('submit', async e=>{
     unit_type: document.getElementById('uUnitType').value,
     radio_id: document.getElementById('uRadio').value,
     taip_id: document.getElementById('uTaip').value,
+    taip_destination_url: document.getElementById('uTaipUrl').value || null,
+    taip_port: document.getElementById('uTaipPort').value ? parseInt(document.getElementById('uTaipPort').value) : null,
     lat: parseFloat(document.getElementById('uLat').value) || null,
     lng: parseFloat(document.getElementById('uLng').value) || null
   };

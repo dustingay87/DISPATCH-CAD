@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS units (
     last_seen_at TIMESTAMPTZ,
     radio_id VARCHAR(50),
     taip_id VARCHAR(50),
+    taip_destination_url TEXT,
+    taip_port INTEGER,
     is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 

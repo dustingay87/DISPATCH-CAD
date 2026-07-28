@@ -109,6 +109,8 @@ class Unit(Base):
     last_seen_at = Column(DateTime)
     radio_id = Column(String(50), index=True)
     taip_id = Column(String(50), index=True)
+    taip_destination_url = Column(Text)
+    taip_port = Column(Integer)
     camera_url = Column(String(255))
     last_assigned_at = Column(DateTime)
     in_service_at = Column(DateTime)
@@ -1105,6 +1107,8 @@ class UnitCreate(BaseModel):
     taip_id: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
+    taip_destination_url: Optional[str] = None
+    taip_port: Optional[int] = None
 
 class UnitOut(BaseModel):
     id: int
@@ -1124,6 +1128,8 @@ class UnitOut(BaseModel):
     accumulated_call_seconds: Optional[float] = None
     capabilities: Optional[dict] = None
     taip_id: Optional[str] = None
+    taip_destination_url: Optional[str] = None
+    taip_port: Optional[int] = None
     class Config:
         from_attributes = True
 
@@ -1134,6 +1140,8 @@ class UnitUpdate(BaseModel):
     unit_type: Optional[str] = None
     radio_id: Optional[str] = None
     taip_id: Optional[str] = None
+    taip_destination_url: Optional[str] = None
+    taip_port: Optional[int] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
     capabilities: Optional[dict] = None
@@ -2196,7 +2204,7 @@ def import_csv(entity: str, file: UploadFile = File(...), current_user: dict = D
             if entity == 'agencies':
                 db.add(Agency(name=row['name'], agency_type=row.get('agency_type', 'fire'), city=row.get('city'), state=row.get('state'), domain=row.get('domain')))
             elif entity == 'units':
-                db.add(Unit(agency_id=int(row['agency_id']), name=row.get('name', row['call_sign']), call_sign=row['call_sign'], unit_type=row.get('unit_type', 'patrol'), lat=float(row['lat']) if row.get('lat') else None, lng=float(row['lng']) if row.get('lng') else None, taip_id=row.get('taip_id'), camera_url=row.get('camera_url'), current_status='AQ', in_service_at=datetime.utcnow(), accumulated_call_seconds=0))
+                db.add(Unit(agency_id=int(row['agency_id']), name=row.get('name', row['call_sign']), call_sign=row['call_sign'], unit_type=row.get('unit_type', 'patrol'), lat=float(row['lat']) if row.get('lat') else None, lng=float(row['lng']) if row.get('lng') else None, taip_id=row.get('taip_id'), taip_destination_url=row.get('taip_destination_url'), taip_port=int(row['taip_port']) if row.get('taip_port') else None, camera_url=row.get('camera_url'), current_status='AQ', in_service_at=datetime.utcnow(), accumulated_call_seconds=0))
             elif entity == 'personnel':
                 db.add(Personnel(agency_id=int(row['agency_id']), first_name=row['first_name'], last_name=row['last_name'], email=row.get('email'), phone=row.get('phone'), sms_phone=row.get('sms_phone'), current_unit_id=int(row['current_unit_id']) if row.get('current_unit_id') else None, duty_status=row.get('duty_status', 'off_duty')))
             elif entity == 'incidents':
