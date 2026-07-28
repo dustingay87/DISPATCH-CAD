@@ -1,13 +1,20 @@
 # VolCAD Prototype
 
-Lightweight CAD prototype for volunteer fire/EMS and no-budget public-safety agencies.
+Modern, browser-based Computer-Aided Dispatch (CAD) prototype for volunteer fire/EMS/EMS and small public-safety agencies.
 
-## Files
+## Features
 
-- `app.py` - FastAPI application, SQLAlchemy ORM models, TAIP parser, and dispatch endpoints (SQLite for prototyping).
-- `schema.sql` - Production-ready PostgreSQL/PostGIS DDL.
-- `seed.py` - Sample agency, units, personnel, and incident.
-- `requirements.txt` - Python dependencies.
+- **Per-discipline dispatcher consoles**: `/console`, `/police`, `/fire`, `/ems`
+- **Call intake**: `/call-entry` with agency-specific call types and priorities
+- **AVL / map**: unit markers, incident markers, unit breadcrumb trails, and critical-layer toggles
+- **MDT field screen**: `/mdt?unit_id=1` with status updates, active incident, and two-way messaging
+- **Unit recommendation engine**: response plan + distance based suggestions
+- **Call history & timeline**: `/history` with discipline/agency filters and full audit trail
+- **Roster management**: `/roster` for units and personnel
+- **CSV import**: `/import` for agencies, units, personnel, incidents
+- **Reporting dashboard**: `/reports` with KPIs, SLA compliance, status/priority breakdowns
+- **Admin config**: `/admin` with per-discipline seed templates
+- **Audit/event ledger**: `/events` captures all key actions
 
 ## Quick start (Windows)
 
@@ -16,33 +23,72 @@ cd C:\Users\Dustin\CascadeProjects\volcad-prototype
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python seed.py
+copy .env.example .env
 uvicorn app:app --reload
 ```
 
-Open `http://127.0.0.1:8000/docs` for interactive API documentation.
+Open `http://127.0.0.1:8000` and log in with the auto-created admin user.
 
-## Example flow
+## Default admin
 
-1. Seed creates `Dustinsburg Volunteer Fire & EMS` with `Engine 1` (taip_id `TAIP001`) and `Medic 1`.
-2. List units: `GET /units?agency_id=1`
-3. Create an incident: `POST /incidents` with an `IncidentCreate` body.
-4. Dispatch a unit: `POST /incidents/2/dispatch/1`
-5. Update unit status: `POST /incidents/2/units/1/status` with `{ "status_code": "ER" }`
-6. Ingest TAIP position: `POST /taip/ingest` with `{ "raw": "id=TAIP001;lat=39.8291;lon=-98.5785;spd=35;hdg=270" }`
+If the `users` table is empty on startup, an admin is created automatically:
 
-## Production migration path
+- Email: `dustin@dispatchtodiscipleship.net`
+- Password: `Warrior/202601!`
 
-1. Replace `sqlite:///./volcad.db` in `app.py` with `postgresql+psycopg2://...`.
-2. Run `schema.sql` against PostgreSQL with PostGIS enabled.
-3. Switch `Float` lat/lng columns to `Geometry(Point, 4326)` via GeoAlchemy2 or `func.ST_GeogFromText`.
+Change this in `app.py` `seed_default_admin` before going live.
 
-## Status codes used
+## Environment variables
 
-- `AQ` - available in quarters
-- `AK` - acknowledged / dispatched
-- `ER` - en route
-- `OS` - on scene
-- `TR` - transporting patient
-- `ED` - en route to destination
-- `CAN` - cancelled / clear
+See `.env.example`.
+
+- `DATABASE_URL` - defaults to SQLite `sqlite:///./volcad.db` for local development
+- `SECRET_KEY` - used for HMAC session tokens
+- `SUPABASE_DB_URL` or `DATABASE_URL` for PostgreSQL on Render/Supabase
+
+## Render deployment
+
+1. Push to GitHub.
+2. Create a Web Service on Render, point it at this repo.
+3. Set the build/start commands:
+   - Build: `pip install -r requirements.txt`
+   - Start: `uvicorn app:app --host 0.0.0.0 --port $PORT`
+4. Add environment variables (`DATABASE_URL`, `SECRET_KEY`).
+
+## Pilot workflow
+
+1. Log in at `/login`.
+2. Open `/admin` and click **Seed Full Pilot Dataset** to create sample police, fire, and EMS agencies.
+3. Open `/call-entry` to create a new call.
+4. Open `/console` to dispatch recommended units.
+5. Open `/mdt?unit_id=1` to simulate a unit updating status.
+6. Open `/history` to view past calls and timelines.
+7. Open `/reports` to view KPIs.
+
+## CSV import format
+
+### Agencies
+`name,agency_type,city,state,domain`
+
+### Units
+`agency_id,call_sign,name,unit_type,lat,lng,taip_id`
+
+### Personnel
+`agency_id,first_name,last_name,email,phone,sms_phone,current_unit_id,duty_status`
+
+### Incidents
+`agency_id,call_number,call_type,priority,location_text,lat,lng,status,caller_name,callback,narrative`
+
+## Production hardening checklist
+
+- [ ] Change `SECRET_KEY` and default admin credentials.
+- [ ] Switch `DATABASE_URL` to PostgreSQL and run `schema.sql`.
+- [ ] Enable HTTPS and set `SESSION_COOKIE_SECURE=True`.
+- [ ] Configure automated database backups.
+- [ ] Add rate limiting and request logging.
+- [ ] Move sensitive endpoints behind admin or agency roles.
+- [ ] Implement off-site log shipping and audit review.
+
+## License
+
+MIT - for prototype / pilot use.
