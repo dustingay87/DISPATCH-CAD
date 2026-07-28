@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Scheduled Transports</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'></script>
+<link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' />
+<style>
+  body { background:#0f172a; color:#e2e8f0; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  .panel { background:#1e293b; border:1px solid #334155; border-radius:.5rem; }
+  .btn { background:#3b82f6; padding:.4rem .75rem; border-radius:.375rem; font-weight:600; }
+  .btn:hover { background:#2563eb; }
+  .btn-red { background:#ef4444; }
+  .btn-red:hover { background:#dc2626; }
+  .btn-green { background:#22c55e; }
+  .btn-green:hover { background:#16a34a; }
+  .btn-sm { padding:.25rem .5rem; font-size:.75rem; }
+  .form-input { background:#0f172a; border:1px solid #475569; border-radius:.375rem; padding:.4rem; color:#fff; width:100%; }
+  .form-input:focus { border-color:#3b82f6; outline:none; }
+  .tag { display:inline-block; padding:.1rem .4rem; border-radius:.25rem; font-size:.7rem; font-weight:600; background:#334155; }
+  .status-scheduled { background:#3b82f6; }
+  .status-dispatched { background:#eab308; color:#000; }
+  .status-completed { background:#22c55e; }
+  .status-cancelled { background:#ef4444; }
+</style>
+</head>
+<body class='p-4'>
+<div class='max-w-7xl mx-auto'>
+  <div class='flex justify-between items-center mb-4'>
+    <h1 class='text-2xl font-bold'>Scheduled Transports</h1>
+    <div class='flex space-x-2'>
+      <a href='/' class='text-sm text-blue-400 hover:underline'>Dashboard</a>
+      <button class='btn btn-sm' onclick='openNew()'>New Transport</button>
+    </div>
+  </div>
+
+  <div class='grid grid-cols-1 lg:grid-cols-3 gap-4'>
+    <div class='lg:col-span-2 panel p-3'>
+      <div class='flex gap-2 mb-2 text-sm'>
+        <select id='statusFilter' class='form-input w-32' onchange='load()'>
+          <option value=''>All</option>
+          <option value='scheduled'>Scheduled</option>
+          <option value='dispatched'>Dispatched</option>
+          <option value='completed'>Completed</option>
+          <option value='cancelled'>Cancelled</option>
+        </select>
+        <input id='dateFilter' type='date' class='form-input w-40' onchange='load()'>
+        <button class='btn btn-sm' onclick='load()'>Refresh</button>
+      </div>
+      <div id='list' class='text-sm space-y-2'>Loading...</div>
+    </div>
+
+    <div class='panel p-3'>
+      <h2 class='font-bold mb-2'>Create / Edit</h2>
+      <form id='stForm' class='space-y-2' onsubmit='return false;'>
+        <input type='hidden' id='stId'>
+        <label class='text-xs text-slate-400'>Agency</label>
+        <select id='agency' class='form-input' onchange='agencyChanged()'></select>
+        <label class='text-xs text-slate-400'>Call Type</label>
+        <input id='callType' class='form-input' value='Routine Transport'>
+        <label class='text-xs text-slate-400'>Patient Name</label>
+        <input id='patientName' class='form-input'>
+        <label class='text-xs text-slate-400'>Pickup Address</label>
+        <input id='pickupAddress' class='form-input'>
+        <label class='text-xs text-slate-400'>Pickup Lat / Lng</label>
+        <div class='grid grid-cols-2 gap-2'><input id='pickupLat' class='form-input' placeholder='lat'><input id='pickupLng' class='form-input' placeholder='lng'></div>
+        <label class='text-xs text-slate-400'>Destination</label>
+        <select id='destination' class='form-input' onchange='destChanged()'><option value=''>Select destination</option></select>
+        <label class='text-xs text-slate-400'>Destination Name / Address</label>
+        <input id='destName' class='form-input' placeholder='Name'>
+        <input id='destAddress' class='form-input' placeholder='Address'>
+        <label class='text-xs text-slate-400'>Destination Lat / Lng</label>
+        <div class='grid grid-cols-2 gap-2'><input id='destLat' class='form-input' placeholder='lat'><input id='destLng' class='form-input' placeholder='lng'></div>
+        <label class='text-xs text-slate-400'>Scheduled Date/Time</label>
+        <input id='scheduledAt' type='datetime-local' class='form-input'>
+        <label class='text-xs text-slate-400'>Mobility</label>
+        <select id='mobility' class='form-input'>
+          <option value='Ambulatory'>Ambulatory</option>
+          <option value='Wheelchair'>Wheelchair</option>
+          <option value='Stretcher'>Stretcher</option>
+          <option value='Bariatric'>Bariatric</option>
+        </select>
+        <label class='text-xs text-slate-400'>Service Level</label>
+        <select id='serviceLevel' class='form-input'>
+          <option value='BLS'>BLS</option>
+          <option value='ALS'>ALS</option>
+          <option value='CCT'>CCT</option>
+        </select>
+        <div class='grid grid-cols-2 gap-2 text-xs'>
+          <label class='flex items-center space-x-1'><input id='oxygen' type='checkbox' class='accent-blue-500'> <span>Oxygen</span></label>
+          <label class='flex items-center space-x-1'><input id='isolation' type='checkbox' class='accent-blue-500'> <span>Isolation</span></label>
+          <label class='flex items-center space-x-1'><input id='stretcher' type='checkbox' class='accent-blue-500'> <span>Stretcher</span></label>
+          <label class='flex items-center space-x-1'><input id='wheelchair' type='checkbox' class='accent-blue-500'> <span>Wheelchair</span></label>
+        </div>
+        <label class='text-xs text-slate-400'>Notes</label>
+        <textarea id='notes' class='form-input' rows='2'></textarea>
+        <div class='flex space-x-2 pt-2'>
+          <button class='btn flex-1' onclick='save()'>Save</button>
+          <button class='btn btn-red flex-1' onclick='clearForm()'>Clear</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id='dispatchModal' class='fixed inset-0 bg-black/70 hidden items-center justify-center z-50'>
+  <div class='panel p-4 w-80'>
+    <h3 class='font-bold mb-2'>Dispatch Scheduled Transport</h3>
+    <select id='dispatchUnit' class='form-input mb-3'><option value=''>Select unit</option></select>
+    <div class='flex space-x-2'>
+      <button class='btn btn-green flex-1' onclick='confirmDispatch()'>Dispatch</button>
+      <button class='btn flex-1' onclick='closeDispatch()'>Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+let state={agencies:[],destinations:[],units:[],transports:[]};
+
+async function init(){
+  [state.agencies, state.destinations, state.units] = await Promise.all([api('/agencies'), api('/destinations'), api('/units')]);
+  const agencySel = document.getElementById('agency');
+  agencySel.innerHTML = state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
+  const destSel = document.getElementById('destination');
+  destSel.innerHTML = `<option value=''>Select destination</option>` + state.destinations.map(d=>`<option value='${d.id}'>${d.name} (${d.category||''})</option>`).join('');
+  const unitSel = document.getElementById('dispatchUnit');
+  unitSel.innerHTML = `<option value=''>Select unit</option>` + state.units.filter(u=>u.current_status==='AQ'||u.current_status==='AFR').map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
+  await load();
+}
+
+function agencyChanged(){
+  const agencyId = document.getElementById('agency').value;
+  const destSel = document.getElementById('destination');
+  const agencyDests = state.destinations.filter(d=>d.agency_id==parseInt(agencyId));
+  destSel.innerHTML = `<option value=''>Select destination</option>` + agencyDests.map(d=>`<option value='${d.id}'>${d.name} (${d.category||''})</option>`).join('');
+}
+
+function destChanged(){
+  const destId = parseInt(document.getElementById('destination').value);
+  const d = state.destinations.find(x=>x.id===destId);
+  if(d){
+    document.getElementById('destName').value = d.name||'';
+    document.getElementById('destAddress').value = d.address||'';
+    document.getElementById('destLat').value = d.lat||'';
+    document.getElementById('destLng').value = d.lng||'';
+  }
+}
+
+async function load(){
+  const status = document.getElementById('statusFilter').value;
+  const date = document.getElementById('dateFilter').value;
+  const q = new URLSearchParams();
+  if(status) q.set('status', status);
+  if(date) q.set('date', date);
+  try {
+    state.transports = await api(`/scheduled-transports?${q.toString()}`);
+    renderList();
+  } catch(e){ document.getElementById('list').innerHTML = `<div class='text-red-400'>Error: ${e.message}</div>`; }
+}
+
+function statusClass(s){ return `tag status-${s||'scheduled'}`; }
+
+function fmtDateTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}); }
+
+function renderList(){
+  const el = document.getElementById('list');
+  if(!state.transports.length){ el.innerHTML = '<div class="text-slate-400">No scheduled transports.</div>'; return; }
+  el.innerHTML = state.transports.map(t=>`
+    <div class='bg-slate-800 rounded p-3 border border-slate-700'>
+      <div class='flex justify-between items-start'>
+        <div>
+          <div class='font-bold text-white'>${t.patient_name||'Unknown patient'} <span class='${statusClass(t.status)}'>${t.status||'scheduled'}</span></div>
+          <div class='text-slate-400'>${t.call_type} • ${t.service_level||'-'} • ${t.mobility_level||'-'}</div>
+          <div class='text-slate-300 mt-1'><b>Pickup:</b> ${t.pickup_address||'-'}</div>
+          <div class='text-slate-300'><b>Destination:</b> ${t.destination_name||'-'}</div>
+          <div class='text-slate-500 text-xs mt-1'>Scheduled ${fmtDateTime(t.scheduled_at)}</div>
+          ${t.unit ? `<div class='text-slate-500 text-xs'>Unit ${t.unit.call_sign}</div>` : ''}
+        </div>
+        <div class='flex flex-col gap-1'>
+          <button class='btn btn-sm' onclick='editTransport(${t.id})'>Edit</button>
+          ${t.status==='scheduled' ? `<button class='btn btn-green btn-sm' onclick='openDispatch(${t.id})'>Dispatch</button>` : ''}
+          ${t.status==='scheduled' ? `<button class='btn btn-red btn-sm' onclick='cancelTransport(${t.id})'>Cancel</button>` : ''}
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openNew(){ clearForm(); }
+
+function clearForm(){
+  document.getElementById('stForm').reset();
+  document.getElementById('stId').value='';
+  document.getElementById('agency').value = state.agencies[0]?.id || '';
+  agencyChanged();
+}
+
+function editTransport(id){
+  const t = state.transports.find(x=>x.id===id); if(!t) return;
+  document.getElementById('stId').value = t.id;
+  document.getElementById('agency').value = t.agency_id;
+  agencyChanged();
+  document.getElementById('callType').value = t.call_type||'Routine Transport';
+  document.getElementById('patientName').value = t.patient_name||'';
+  document.getElementById('pickupAddress').value = t.pickup_address||'';
+  document.getElementById('pickupLat').value = t.pickup_lat||'';
+  document.getElementById('pickupLng').value = t.pickup_lng||'';
+  document.getElementById('destination').value = t.destination_id||'';
+  document.getElementById('destName').value = t.destination_name||'';
+  document.getElementById('destAddress').value = t.destination_address||'';
+  document.getElementById('destLat').value = t.destination_lat||'';
+  document.getElementById('destLng').value = t.destination_lng||'';
+  document.getElementById('scheduledAt').value = t.scheduled_at ? t.scheduled_at.slice(0,16) : '';
+  document.getElementById('mobility').value = t.mobility_level||'Ambulatory';
+  document.getElementById('serviceLevel').value = t.service_level||'BLS';
+  document.getElementById('oxygen').checked = t.oxygen;
+  document.getElementById('isolation').checked = t.isolation;
+  document.getElementById('stretcher').checked = t.stretcher;
+  document.getElementById('wheelchair').checked = t.wheelchair;
+  document.getElementById('notes').value = t.notes||'';
+}
+
+async function save(){
+  const id = document.getElementById('stId').value;
+  const payload = {
+    agency_id: parseInt(document.getElementById('agency').value),
+    call_type: document.getElementById('callType').value,
+    patient_name: document.getElementById('patientName').value,
+    pickup_address: document.getElementById('pickupAddress').value,
+    pickup_lat: parseFloat(document.getElementById('pickupLat').value) || null,
+    pickup_lng: parseFloat(document.getElementById('pickupLng').value) || null,
+    destination_id: parseInt(document.getElementById('destination').value) || null,
+    destination_name: document.getElementById('destName').value,
+    destination_address: document.getElementById('destAddress').value,
+    destination_lat: parseFloat(document.getElementById('destLat').value) || null,
+    destination_lng: parseFloat(document.getElementById('destLng').value) || null,
+    scheduled_at: document.getElementById('scheduledAt').value ? new Date(document.getElementById('scheduledAt').value).toISOString() : null,
+    mobility_level: document.getElementById('mobility').value,
+    service_level: document.getElementById('serviceLevel').value,
+    oxygen: document.getElementById('oxygen').checked,
+    isolation: document.getElementById('isolation').checked,
+    stretcher: document.getElementById('stretcher').checked,
+    wheelchair: document.getElementById('wheelchair').checked,
+    notes: document.getElementById('notes').value
+  };
+  try {
+    if(id){
+      await api(`/scheduled-transports/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    } else {
+      await api('/scheduled-transports', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    }
+    clearForm(); await load();
+  } catch(e){ alert(e.message); }
+}
+
+let dispatchId = null;
+function openDispatch(id){ dispatchId=id; document.getElementById('dispatchModal').classList.remove('hidden'); document.getElementById('dispatchModal').classList.add('flex'); }
+function closeDispatch(){ dispatchId=null; document.getElementById('dispatchModal').classList.add('hidden'); document.getElementById('dispatchModal').classList.remove('flex'); }
+
+async function confirmDispatch(){
+  if(!dispatchId) return;
+  const unitId = document.getElementById('dispatchUnit').value;
+  if(!unitId){ alert('Select a unit'); return; }
+  try {
+    await api(`/scheduled-transports/${dispatchId}/dispatch`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status_code:'AK', unit_id:parseInt(unitId)})});
+    closeDispatch(); await load();
+  } catch(e){ alert(e.message); }
+}
+
+async function cancelTransport(id){
+  if(!confirm('Cancel this scheduled transport?')) return;
+  try { await api(`/scheduled-transports/${id}/cancel`, {method:'POST'}); await load(); } catch(e){ alert(e.message); }
+}
+
+init();
+</script>
+</body>
+</html>

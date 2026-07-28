@@ -4,7 +4,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, or_, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship, backref, Session, sessionmaker
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, date, time
 from typing import List, Optional, Any
 import os
 import re
@@ -268,6 +268,39 @@ class TransportLeg(Base):
     unit = relationship('Unit')
     incident = relationship('Incident', backref='transport_legs')
 
+class ScheduledTransport(Base):
+    __tablename__ = 'scheduled_transports'
+    id = Column(Integer, primary_key=True, index=True)
+    agency_id = Column(Integer, ForeignKey('agencies.id'))
+    call_type = Column(String(100), default='Routine Transport')
+    patient_name = Column(String(255))
+    pickup_address = Column(Text)
+    pickup_lat = Column(Float)
+    pickup_lng = Column(Float)
+    destination_id = Column(Integer, ForeignKey('destinations.id'))
+    destination_name = Column(String(255))
+    destination_address = Column(Text)
+    destination_lat = Column(Float)
+    destination_lng = Column(Float)
+    scheduled_at = Column(DateTime)
+    mobility_level = Column(String(50))
+    service_level = Column(String(50), default='BLS')
+    oxygen = Column(Boolean, default=False)
+    isolation = Column(Boolean, default=False)
+    stretcher = Column(Boolean, default=False)
+    wheelchair = Column(Boolean, default=False)
+    special_equipment = Column(JSON)
+    notes = Column(Text)
+    status = Column(String(50), default='scheduled')
+    unit_id = Column(Integer, ForeignKey('units.id'))
+    incident_id = Column(Integer, ForeignKey('incidents.id'))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    agency = relationship('Agency')
+    destination = relationship('Destination')
+    unit = relationship('Unit')
+    incident = relationship('Incident')
+
 class CustomerConfig(Base):
     __tablename__ = 'customer_config'
     id = Column(Integer, primary_key=True, index=True)
@@ -413,6 +446,86 @@ class MileageReadingOut(BaseModel):
     status_code: str
     mileage: float
     recorded_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+class ScheduledTransportCreate(BaseModel):
+    agency_id: int
+    call_type: Optional[str] = 'Routine Transport'
+    patient_name: Optional[str] = None
+    pickup_address: Optional[str] = None
+    pickup_lat: Optional[float] = None
+    pickup_lng: Optional[float] = None
+    destination_id: Optional[int] = None
+    destination_name: Optional[str] = None
+    destination_address: Optional[str] = None
+    destination_lat: Optional[float] = None
+    destination_lng: Optional[float] = None
+    scheduled_at: Optional[datetime] = None
+    mobility_level: Optional[str] = None
+    service_level: Optional[str] = 'BLS'
+    oxygen: Optional[bool] = False
+    isolation: Optional[bool] = False
+    stretcher: Optional[bool] = False
+    wheelchair: Optional[bool] = False
+    special_equipment: Optional[dict] = None
+    notes: Optional[str] = None
+
+class ScheduledTransportUpdate(BaseModel):
+    call_type: Optional[str] = None
+    patient_name: Optional[str] = None
+    pickup_address: Optional[str] = None
+    pickup_lat: Optional[float] = None
+    pickup_lng: Optional[float] = None
+    destination_id: Optional[int] = None
+    destination_name: Optional[str] = None
+    destination_address: Optional[str] = None
+    destination_lat: Optional[float] = None
+    destination_lng: Optional[float] = None
+    scheduled_at: Optional[datetime] = None
+    mobility_level: Optional[str] = None
+    service_level: Optional[str] = None
+    oxygen: Optional[bool] = None
+    isolation: Optional[bool] = None
+    stretcher: Optional[bool] = None
+    wheelchair: Optional[bool] = None
+    special_equipment: Optional[dict] = None
+    notes: Optional[str] = None
+    status: Optional[str] = None
+    unit_id: Optional[int] = None
+    incident_id: Optional[int] = None
+
+class ScheduledTransportOut(BaseModel):
+    id: int
+    agency_id: int
+    call_type: Optional[str] = 'Routine Transport'
+    patient_name: Optional[str] = None
+    pickup_address: Optional[str] = None
+    pickup_lat: Optional[float] = None
+    pickup_lng: Optional[float] = None
+    destination_id: Optional[int] = None
+    destination_name: Optional[str] = None
+    destination_address: Optional[str] = None
+    destination_lat: Optional[float] = None
+    destination_lng: Optional[float] = None
+    scheduled_at: Optional[datetime] = None
+    mobility_level: Optional[str] = None
+    service_level: Optional[str] = 'BLS'
+    oxygen: Optional[bool] = False
+    isolation: Optional[bool] = False
+    stretcher: Optional[bool] = False
+    wheelchair: Optional[bool] = False
+    special_equipment: Optional[dict] = None
+    notes: Optional[str] = None
+    status: Optional[str] = 'scheduled'
+    unit_id: Optional[int] = None
+    incident_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    agency: Optional[AgencyOut] = None
+    destination: Optional[DestinationOut] = None
+    unit: Optional[UnitOut] = None
+    incident: Optional[IncidentOut] = None
     class Config:
         from_attributes = True
 
@@ -876,6 +989,7 @@ class StatusUpdate(BaseModel):
     passenger_count: Optional[int] = None
     destination_id: Optional[int] = None
     mileage: Optional[float] = None
+    unit_id: Optional[int] = None
 
 class UnitCamera(BaseModel):
     camera_url: str
@@ -1634,3 +1748,93 @@ def users_page():
 @app.get('/events-page')
 def events_page():
     return FileResponse('static/events.html')
+
+@app.get('/scheduled-transports-page')
+def scheduled_transports_page():
+    return FileResponse('static/scheduled.html')
+
+@app.get('/scheduled-transports', response_model=List[ScheduledTransportOut])
+def list_scheduled_transports(status: Optional[str] = None, agency_id: Optional[int] = None, date: Optional[date] = Query(None), current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    q = db.query(ScheduledTransport)
+    if agency_id:
+        q = q.filter(ScheduledTransport.agency_id == agency_id)
+    if status:
+        q = q.filter(ScheduledTransport.status == status)
+    if date:
+        start = datetime.combine(date, time.min)
+        end = datetime.combine(date, time.max)
+        q = q.filter(ScheduledTransport.scheduled_at >= start, ScheduledTransport.scheduled_at <= end)
+    return q.order_by(ScheduledTransport.scheduled_at.asc()).all()
+
+@app.post('/scheduled-transports', response_model=ScheduledTransportOut)
+def create_scheduled_transport(body: ScheduledTransportCreate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    st = ScheduledTransport(**body.dict())
+    db.add(st); db.commit(); db.refresh(st)
+    _log_event(db, 'scheduled_transport_created', 'scheduled_transport', st.id, user_id=current_user.get('user_id'), data=body.dict(), agency_id=st.agency_id)
+    return st
+
+@app.get('/scheduled-transports/{st_id}', response_model=ScheduledTransportOut)
+def get_scheduled_transport(st_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    st = db.query(ScheduledTransport).get(st_id)
+    if not st:
+        raise HTTPException(status_code=404, detail='Scheduled transport not found')
+    return st
+
+@app.put('/scheduled-transports/{st_id}', response_model=ScheduledTransportOut)
+def update_scheduled_transport(st_id: int, body: ScheduledTransportUpdate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    st = db.query(ScheduledTransport).get(st_id)
+    if not st:
+        raise HTTPException(status_code=404, detail='Scheduled transport not found')
+    for k, v in body.dict(exclude_unset=True).items():
+        setattr(st, k, v)
+    db.commit(); db.refresh(st)
+    _log_event(db, 'scheduled_transport_updated', 'scheduled_transport', st.id, user_id=current_user.get('user_id'), data=body.dict(exclude_unset=True), agency_id=st.agency_id)
+    return st
+
+@app.post('/scheduled-transports/{st_id}/cancel', response_model=ScheduledTransportOut)
+def cancel_scheduled_transport(st_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    st = db.query(ScheduledTransport).get(st_id)
+    if not st:
+        raise HTTPException(status_code=404, detail='Scheduled transport not found')
+    st.status = 'cancelled'
+    db.commit(); db.refresh(st)
+    _log_event(db, 'scheduled_transport_cancelled', 'scheduled_transport', st.id, user_id=current_user.get('user_id'), data={}, agency_id=st.agency_id)
+    return st
+
+@app.post('/scheduled-transports/{st_id}/dispatch', response_model=ScheduledTransportOut)
+def dispatch_scheduled_transport(st_id: int, body: StatusUpdate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    st = db.query(ScheduledTransport).get(st_id)
+    if not st:
+        raise HTTPException(status_code=404, detail='Scheduled transport not found')
+    if not body.unit_id:
+        raise HTTPException(status_code=400, detail='unit_id is required')
+    unit = db.query(Unit).get(body.unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    if not st.destination_id:
+        raise HTTPException(status_code=400, detail='Scheduled transport must have a destination_id to dispatch')
+    incident = Incident(
+        agency_id=st.agency_id,
+        call_number=f'SCH-{st.id:05d}',
+        incident_number=f'SCH-{st.id:05d}',
+        call_type=st.call_type or 'Routine Transport',
+        priority=3,
+        location_text=st.pickup_address,
+        lat=st.pickup_lat,
+        lng=st.pickup_lng,
+        status='open',
+        narrative=st.notes or f'Scheduled transport for {st.patient_name or "patient"} to {st.destination_name or "destination"}'
+    )
+    db.add(incident); db.flush()
+    iu = IncidentUnit(incident_id=incident.id, unit_id=unit.id)
+    db.add(iu)
+    unit.current_incident_id = incident.id
+    unit.current_status = 'AK'
+    unit.last_assigned_at = datetime.utcnow()
+    db.add(StatusEvent(unit_id=unit.id, incident_id=incident.id, status_code='AK', reason=f'Dispatched from scheduled transport {st.id}'))
+    st.status = 'dispatched'
+    st.unit_id = unit.id
+    st.incident_id = incident.id
+    db.commit(); db.refresh(st)
+    _log_event(db, 'scheduled_transport_dispatched', 'scheduled_transport', st.id, user_id=current_user.get('user_id'), data={'incident_id': incident.id, 'unit_id': unit.id}, agency_id=st.agency_id)
+    return st
