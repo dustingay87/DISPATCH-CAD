@@ -52,6 +52,12 @@
         <input type='file' id='fileIncidents' accept='.csv' class='text-sm text-slate-300 mb-2'>
         <button class='btn btn-primary w-full' data-entity='incidents'>Upload</button>
       </div>
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Import Map Layers</h2>
+        <p class='text-xs text-slate-400 mb-2'>CSV columns: agency_id, name, type, lat, lng, [geojson]</p>
+        <input type='file' id='fileMapLayers' accept='.csv' class='text-sm text-slate-300 mb-2'>
+        <button class='btn btn-primary w-full' data-entity='map-layers'>Upload</button>
+      </div>
     </div>
 
     <div id='result' class='card hidden'>

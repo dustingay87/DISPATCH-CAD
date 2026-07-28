@@ -1195,11 +1195,31 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
 @app.post('/import/{entity}', response_model=dict)
 def import_csv(entity: str, file: UploadFile = File(...), current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     import csv, io
-    if entity not in ('agencies', 'units', 'personnel', 'incidents'):
-        raise HTTPException(status_code=400, detail='Entity must be agencies, units, personnel, or incidents')
+    if entity not in ('agencies', 'units', 'personnel', 'incidents', 'map-layers'):
+        raise HTTPException(status_code=400, detail='Entity must be agencies, units, personnel, incidents, or map-layers')
     content = file.file.read().decode('utf-8')
     reader = csv.DictReader(io.StringIO(content))
     count = 0; errors = []
+    if entity == 'map-layers':
+        layers = []
+        for idx, row in enumerate(reader, start=1):
+            try:
+                geojson = None
+                if row.get('geojson'):
+                    try: geojson = json.loads(row['geojson'])
+                    except Exception: pass
+                layers.append({'name': row['name'], 'type': row.get('type', 'hydrant'), 'lat': float(row['lat']) if row.get('lat') else None, 'lng': float(row['lng']) if row.get('lng') else None, 'agency_id': int(row['agency_id']) if row.get('agency_id') else None, 'geojson': geojson})
+            except Exception as e:
+                errors.append(f'row {idx}: {e}')
+        if layers:
+            existing = db.query(CustomerConfig).filter_by(category='map_layers', key='all').first()
+            if existing:
+                existing.value = (existing.value or []) + layers
+            else:
+                db.add(CustomerConfig(category='map_layers', key='all', value=layers))
+            db.commit()
+            _log_event(db, 'csv_imported', 'system', 0, user_id=current_user.get('user_id'), data={'entity': 'map-layers', 'imported': len(layers), 'errors': len(errors)}, agency_id=None)
+        return {'imported': len(layers), 'errors': errors[:10]}
     for idx, row in enumerate(reader, start=1):
         try:
             if entity == 'agencies':

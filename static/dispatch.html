@@ -95,14 +95,7 @@
   </footer>
 <script>
 const CONFIG = { center:[39.9612,-82.9988], zoom:11 };
-const CRITICAL = [
-  {lat:39.962, lng:-82.998, type:'hospital', name:'Grant Hospital'},
-  {lat:39.965, lng:-82.995, type:'hydrant', name:'Hydrant 1'},
-  {lat:39.960, lng:-83.002, type:'hydrant', name:'Hydrant 2'},
-  {lat:39.958, lng:-82.993, type:'premise', name:'City Hall'},
-  {lat:39.968, lng:-83.005, type:'premise', name:'High School'}
-];
-let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false };
+let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false, mapLayers:[] };
 const pathDisc = window.location.pathname.replace(/^\/|\/$/g,'');
 let DISCIPLINE = ['police','fire','ems'].includes(pathDisc) ? pathDisc : (new URLSearchParams(window.location.search).get('discipline') || 'all');
 let map, layers;
@@ -275,7 +268,7 @@ function renderMap(){
     L.circleMarker(last,{radius:4, color:'#3b82f6', fillColor:'#3b82f6', fillOpacity:1}).addTo(layers.trails);
   }
   if(state.showCritical){
-    CRITICAL.forEach(c=>{
+    state.mapLayers.filter(c=>c.lat!=null && c.lng!=null).forEach(c=>{
       const col = c.type==='hydrant' ? '#0ea5e9' : c.type==='hospital' ? '#ef4444' : '#22c55e';
       const m = L.circleMarker([c.lat,c.lng],{radius:4, color:col, fillColor:col, fillOpacity:0.8, weight:1}).addTo(layers.critical);
       m.bindPopup(`<b>${c.name}</b><br>${c.type}`);
@@ -331,6 +324,9 @@ async function load(){
     const [agencies, units, incidents, messages] = await Promise.all([api('/agencies'), api('/units'), api('/incidents'), api('/messages')]);
     state.agencies = agencies; state.units = units; state.incidents = incidents; state.messages = messages;
     state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
+    const mapConfig = await api('/config?category=map_layers');
+    const ml = mapConfig.find(c=>c.category==='map_layers' && c.key==='all')?.value || [];
+    state.mapLayers = Array.isArray(ml) ? ml : [];
     const dsel = document.getElementById('disciplineSelect'); if(dsel) dsel.value = DISCIPLINE;
     const lbl = document.getElementById('consoleLabel'); if(lbl) lbl.textContent = DISCIPLINE==='all' ? 'Console' : DISCIPLINE.toUpperCase()+' Console';
     const sel = document.getElementById('msgUnit');
