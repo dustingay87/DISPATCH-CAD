@@ -210,6 +210,26 @@ app = FastAPI(title='VolCAD Prototype', version='0.1.0')
 
 app.mount('/static', StaticFiles(directory='static'), name='static')
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+class CustomerConfigCreate(BaseModel):
+    agency_id: Optional[int] = None
+    category: str
+    key: str
+    value: Optional[dict] = None
+
+class CustomerConfigOut(CustomerConfigCreate):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
 @app.get('/')
 def index():
     return FileResponse('static/dashboard_v5.html')
@@ -262,13 +282,6 @@ def create_config(body: CustomerConfigCreate, db: Session = Depends(get_db)):
 @app.get('/health')
 def health():
     return {'status': 'ok'}
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 # Pydantic schemas
 class AgencyCreate(BaseModel):
