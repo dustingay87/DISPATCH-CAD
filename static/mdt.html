@@ -186,11 +186,19 @@ function destinationHtml(dest){
   if(!dest) return `<div class='mt-4 p-3 bg-slate-800 rounded text-slate-400'>No destination set. Use Transport status to set one.</div>`;
   const d = dest.destination || {};
   const n = dest.notes || {};
-  const notes = Object.entries(n).map(([k,v])=>`<div class='text-sm'><span class='text-slate-400 capitalize'>${k}:</span> ${v}</div>`).join('');
+  const details = d.details || {};
+  const notes = Object.entries(n).map(([k,v])=> v ? `<div class='text-sm'><span class='text-slate-400 capitalize'>${k}:</span> ${v}</div>` : '').filter(Boolean).join('');
+  const detailRows = Object.entries(details).map(([k,v])=>{
+    if(!v || (Array.isArray(v) && !v.length)) return '';
+    const label = k.replace(/_/g,' ');
+    const value = Array.isArray(v) ? v.join(', ') : v;
+    return `<div class='text-sm'><span class='text-slate-400 capitalize'>${label}:</span> ${value}</div>`;
+  }).filter(Boolean).join('');
   return `<div class='mt-4 p-3 bg-slate-800 rounded border border-slate-600'>
     <div class='font-bold text-lg'>Destination: ${d.name||'-'}</div>
     <div class='text-slate-300'>${d.address||''} ${d.category ? `(${d.category})` : ''}</div>
     <div class='mt-2'>${notes || '<span class="text-slate-500">No notes</span>'}</div>
+    <div class='mt-2 pt-2 border-t border-slate-600'>${detailRows || '<span class="text-slate-500">No facility details</span>'}</div>
   </div>`;
 }
 

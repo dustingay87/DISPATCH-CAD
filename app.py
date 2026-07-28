@@ -235,6 +235,7 @@ class Destination(Base):
     lat = Column(Float)
     lng = Column(Float)
     notes = Column(JSON)
+    details = Column(JSON)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -307,6 +308,7 @@ class DestinationCreate(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     notes: Optional[dict] = None
+    details: Optional[dict] = None
     is_active: Optional[bool] = True
 
 class DestinationOut(DestinationCreate):
@@ -314,6 +316,17 @@ class DestinationOut(DestinationCreate):
     created_at: Optional[datetime] = None
     class Config:
         from_attributes = True
+
+class DestinationUpdate(BaseModel):
+    agency_id: Optional[int] = None
+    name: Optional[str] = None
+    address: Optional[str] = None
+    category: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    notes: Optional[dict] = None
+    details: Optional[dict] = None
+    is_active: Optional[bool] = None
 
 class IncidentDestinationCreate(BaseModel):
     destination_id: Optional[int] = None
@@ -955,6 +968,23 @@ def create_destination(body: DestinationCreate, db: Session = Depends(get_db)):
     db.add(d); db.commit(); db.refresh(d)
     return d
 
+@app.get('/destinations/{destination_id}', response_model=DestinationOut)
+def get_destination(destination_id: int, db: Session = Depends(get_db)):
+    d = db.query(Destination).get(destination_id)
+    if not d:
+        raise HTTPException(status_code=404, detail='Destination not found')
+    return d
+
+@app.put('/destinations/{destination_id}', response_model=DestinationOut)
+def update_destination(destination_id: int, body: DestinationUpdate, db: Session = Depends(get_db)):
+    d = db.query(Destination).get(destination_id)
+    if not d:
+        raise HTTPException(status_code=404, detail='Destination not found')
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(d, k, v)
+    db.commit(); db.refresh(d)
+    return d
+
 @app.get('/incidents/{incident_id}/destination', response_model=IncidentDestinationOut)
 def get_incident_destination(incident_id: int, db: Session = Depends(get_db)):
     result = db.query(IncidentDestination).filter(IncidentDestination.incident_id == incident_id).order_by(IncidentDestination.created_at.desc()).first()
@@ -1371,14 +1401,14 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
         db.add(IncidentUnit(incident_id=inc.id, unit_id=u3.id))
         u3.current_incident_id = inc.id; u3.current_status = 'AK'; u3.last_assigned_at = datetime.utcnow()
         db.add(StatusEvent(unit_id=u3.id, incident_id=inc.id, status_code='AK', reason='Dispatched to incident'))
-    def ensure_destination(name, agency_id, category, address, notes, lat, lng):
+    def ensure_destination(name, agency_id, category, address, notes, details, lat, lng):
         d = db.query(Destination).filter(Destination.agency_id == agency_id, Destination.name == name).first()
         if d: return d
-        d = Destination(agency_id=agency_id, name=name, address=address, category=category, lat=lat, lng=lng, notes=notes)
+        d = Destination(agency_id=agency_id, name=name, address=address, category=category, lat=lat, lng=lng, notes=notes, details=details)
         db.add(d); db.flush(); return d
-    ensure_destination('Grant Hospital', ems.id, 'hospital', '1100 Medical Center Dr', {'gate_code':'4721','door_code':'ER2','animals':'','people':''}, CENTER[0]+0.02, CENTER[1]+0.005)
-    ensure_destination('Riverside Medical', ems.id, 'hospital', '3300 Riverside Pkwy', {'gate_code':'','door_code':'','animals':'','people':'Security escort after 2200'}, CENTER[0]-0.015, CENTER[1]-0.005)
-    ensure_destination('County Jail', police.id, 'jail', '350 Justice Blvd', {'gate_code':'1092','people':'Violent offenders processed at intake 3','door_code':'Sallyport 1','animals':'K9 unit active M-F'}, CENTER[0]-0.02, CENTER[1]-0.01)
+    ensure_destination('Grant Hospital', ems.id, 'hospital', '1100 Medical Center Dr', {'gate_code':'4721','door_code':'ER2','animals':'','people':''}, {'entrance':'Main ER entrance','ambulance_loading':'Bay 3','access_instructions':'Ring bell at ambulance bay. Use ER2 door code after hours.','contact_numbers':['614-555-1000'],'receiving_capabilities':['ER','Trauma','Stroke','Cardiac'],'restrictions':'None','geofence':None,'photos':[]}, CENTER[0]+0.02, CENTER[1]+0.005)
+    ensure_destination('Riverside Medical', ems.id, 'hospital', '3300 Riverside Pkwy', {'gate_code':'','door_code':'','animals':'','people':'Security escort after 2200'}, {'entrance':'North ED entrance','ambulance_loading':'Covered ramp','access_instructions':'Security escort required after 2200. Check in at triage.','contact_numbers':['614-555-3300'],'receiving_capabilities':['ER','Birthing','Psychiatric'],'restrictions':'Psych patients must call ahead','geofence':None,'photos':[]}, CENTER[0]-0.015, CENTER[1]-0.005)
+    ensure_destination('County Jail', police.id, 'jail', '350 Justice Blvd', {'gate_code':'1092','people':'Violent offenders processed at intake 3','door_code':'Sallyport 1','animals':'K9 unit active M-F'}, {'entrance':'Sallyport 1','ambulance_loading':'Sallyport 1','access_instructions':'Use sallyport door code. K9 active M-F.','contact_numbers':['614-555-3500'],'receiving_capabilities':['Booking','Medical bay'],'restrictions':'Violent offenders processed at intake 3','geofence':None,'photos':[]}, CENTER[0]-0.02, CENTER[1]-0.01)
     db.commit()
     _log_event(db, 'pilot_seeded', 'system', 0, user_id=current_user.get('user_id'), data={'agencies':[police.id, fire.id, ems.id]}, agency_id=None)
     return {'status': 'seeded', 'agencies': [police.id, fire.id, ems.id], 'incident': inc.id}

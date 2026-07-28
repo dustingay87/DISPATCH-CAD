@@ -211,11 +211,19 @@ async function loadDestination(id){
     state.destinations[id] = dest;
     const d = dest.destination || {};
     const n = dest.notes || {};
-    const notes = Object.entries(n).map(([k,v])=>`<div class='text-xs text-slate-300'><span class='text-slate-400 capitalize'>${k}:</span> ${v}</div>`).join('');
+    const details = d.details || {};
+    const notes = Object.entries(n).map(([k,v])=> v ? `<div class='text-xs text-slate-300'><span class='text-slate-400 capitalize'>${k}:</span> ${v}</div>` : '').filter(Boolean).join('');
+    const detailRows = Object.entries(details).map(([k,v])=>{
+      if(!v || (Array.isArray(v) && !v.length)) return '';
+      const label = k.replace(/_/g,' ');
+      const value = Array.isArray(v) ? v.join(', ') : v;
+      return `<div class='text-xs text-slate-300'><span class='text-slate-400 capitalize'>${label}:</span> ${value}</div>`;
+    }).filter(Boolean).join('');
     el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Destination</div>
       <div class='text-sm font-bold text-white'>${d.name||'-'}</div>
       <div class='text-xs text-slate-300'>${d.address||''} ${d.category ? '('+d.category+')' : ''}</div>
       <div class='mt-1'>${notes || '<span class="text-slate-500">No notes</span>'}</div>
+      <div class='mt-1 pt-1 border-t border-slate-700'>${detailRows || '<span class="text-slate-500">No facility details</span>'}</div>
       <button class='mt-2 px-2 py-1 bg-blue-700 hover:bg-blue-600 rounded text-xs' onclick='relayDestination(${id})'>Relay to crew</button>`;
   } catch(e){ el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Destination</div><div class='text-xs text-slate-500'>No destination set</div>`; }
 }
