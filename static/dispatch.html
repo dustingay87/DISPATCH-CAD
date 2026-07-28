@@ -351,8 +351,20 @@ document.getElementById('disciplineSelect').addEventListener('change', e=>{ DISC
 document.getElementById('trailToggle').addEventListener('change', e=>{ state.showTrails = e.target.checked; renderMap(); });
 document.getElementById('critToggle').addEventListener('change', e=>{ state.showCritical = e.target.checked; renderMap(); });
 
+function startStream(){
+  if(!window.EventSource) return;
+  const es = new EventSource('/taip/stream', {withCredentials:true});
+  es.onmessage = e => {
+    const positions = JSON.parse(e.data);
+    positions.forEach(p => { const u=state.units.find(x=>x.id===p.id); if(u){ u.lat=p.lat; u.lng=p.lng; u.heading=p.heading; u.speed=p.speed; u.last_seen_at=p.last_seen_at; u.current_status=p.current_status; } });
+    renderMap(); renderUnits();
+  };
+  es.onerror = () => { es.close(); setTimeout(startStream, 5000); };
+}
+
 initMap();
 load();
+startStream();
 updateClock(); setInterval(updateClock,1000);
 setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); },5000);
 setInterval(()=>{ renderUnits(); renderCalls(); },1000);

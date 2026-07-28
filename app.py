@@ -9,6 +9,8 @@ from typing import List, Optional, Any
 import os
 import re
 import math
+import json
+import asyncio
 import time
 import hmac
 import hashlib
@@ -1042,6 +1044,20 @@ def list_taip_positions(unit_id: Optional[int] = Query(None), limit: int = 50, d
     if unit_id:
         q = q.filter(TaipPosition.unit_id == unit_id)
     return q.order_by(TaipPosition.received_at.desc()).limit(limit).all()
+
+@app.get('/taip/stream')
+async def taip_stream(db: Session = Depends(get_db)):
+    async def event_generator():
+        last_payload = None
+        while True:
+            units = db.query(Unit).all()
+            data = [{'id': u.id, 'call_sign': u.call_sign, 'lat': u.lat, 'lng': u.lng, 'heading': u.heading, 'speed': u.speed, 'last_seen_at': u.last_seen_at.isoformat() if u.last_seen_at else None, 'current_status': u.current_status} for u in units]
+            payload = json.dumps(data, default=str)
+            if payload != last_payload:
+                yield f'data: {payload}\n\n'
+                last_payload = payload
+            await asyncio.sleep(2)
+    return StreamingResponse(event_generator(), media_type='text/event-stream')
 
 @app.post('/units/{unit_id}/camera', response_model=UnitOut)
 def set_unit_camera(unit_id: int, body: UnitCamera, db: Session = Depends(get_db)):
