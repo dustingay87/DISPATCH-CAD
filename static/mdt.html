@@ -168,6 +168,7 @@ function render(){
           <button class='bg-blue-700 hover:bg-blue-600 text-white px-4 py-3 rounded text-lg' onclick='setStatus("AK")'>Acknowledge</button>
           <button class='bg-yellow-700 hover:bg-yellow-600 text-white px-4 py-3 rounded text-lg' onclick='setStatus("ER")'>En Route</button>
           <button class='bg-red-700 hover:bg-red-600 text-white px-4 py-3 rounded text-lg' onclick='setStatus("OS")'>On Scene</button>
+          <button class='bg-green-700 hover:bg-green-600 text-white px-4 py-3 rounded text-lg' onclick='exportEpcr()'>ePCR Export</button>
         </div>
         ${destinationHtml(state.destination)}
       </div>`;
@@ -237,6 +238,15 @@ window.toggleShift = async function(){
   try { const action = state.unit.in_service_at ? 'end' : 'start'; await api(`/units/${unitId}/shift`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})}); await load(); } catch(e){ alert(e.message); }
 };
 
+window.exportEpcr = async function(){
+  if(!state.unit || !state.unit.current_incident_id) return;
+  const dest = state.destination;
+  const destId = dest && dest.destination_id ? dest.destination_id : null;
+  try {
+    const res = await api(`/incidents/${state.unit.current_incident_id}/epcr`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({incident_id:state.unit.current_incident_id, destination_id:destId})});
+    alert(`ePCR export generated (ID ${res.id}).`);
+  } catch(e){ alert('ePCR export failed: '+e.message); }
+};
 window.sendMessage = async function(){
   const inp = document.getElementById('msgReply'); const text = inp.value.trim(); if(!text) return;
   try { await api('/messages', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({unit_id:unitId, channel:'mdt', message_text:text})}); inp.value=''; await load(); } catch(e){ alert(e.message); }

@@ -340,6 +340,21 @@ class CustomerConfig(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     __table_args__ = (UniqueConstraint('agency_id', 'category', 'key', name='uix_customer_config'),)
 
+class EpcrExport(Base):
+    __tablename__ = 'epcr_exports'
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey('incidents.id'))
+    exported_at = Column(DateTime, default=datetime.utcnow)
+    exported_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    epcr_payload = Column(JSON)
+    destination_id = Column(Integer, ForeignKey('destinations.id'), nullable=True)
+    status = Column(String(50), default='pending')
+    external_id = Column(String(255), nullable=True)
+    response_body = Column(Text, nullable=True)
+    incident = relationship('Incident')
+    destination = relationship('Destination')
+    exported_by = relationship('User')
+
 if DATABASE_URL.startswith('sqlite'):
     Base.metadata.create_all(bind=engine)
 
@@ -605,6 +620,25 @@ class UnitPostingOut(BaseModel):
     posted_by_user_id: Optional[int] = None
     unit: Optional[UnitOut] = None
     post_zone: Optional[PostZoneOut] = None
+    class Config:
+        from_attributes = True
+
+class EpcrExportCreate(BaseModel):
+    incident_id: int
+    destination_id: Optional[int] = None
+
+class EpcrExportOut(BaseModel):
+    id: int
+    incident_id: int
+    exported_at: Optional[datetime] = None
+    exported_by_user_id: Optional[int] = None
+    epcr_payload: Optional[dict] = None
+    destination_id: Optional[int] = None
+    status: Optional[str] = 'pending'
+    external_id: Optional[str] = None
+    response_body: Optional[str] = None
+    incident: Optional[IncidentOut] = None
+    destination: Optional[DestinationOut] = None
     class Config:
         from_attributes = True
 
@@ -1991,3 +2025,75 @@ def remove_unit_posting(up_id: int, current_user: dict = Depends(get_current_use
     db.commit(); db.refresh(up)
     _log_event(db, 'unit_posting_removed', 'unit_posting', up.id, user_id=current_user.get('user_id'), data={}, agency_id=up.unit.agency_id)
     return up
+
+@app.get('/incidents/{incident_id}/epcr', response_model=EpcrExportOut)
+def get_epcr_export(incident_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.query(EpcrExport).filter_by(incident_id=incident_id).order_by(EpcrExport.exported_at.desc()).first() or {}
+
+@app.post('/incidents/{incident_id}/epcr', response_model=EpcrExportOut)
+def create_epcr_export(incident_id: int, body: EpcrExportCreate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    dest = db.query(Destination).get(body.destination_id) if body.destination_id else None
+    assigned = db.query(Unit, IncidentUnit).join(IncidentUnit, Unit.id == IncidentUnit.unit_id).filter(IncidentUnit.incident_id == incident_id).all()
+    transport_legs = db.query(TransportLeg).filter_by(incident_id=incident_id).order_by(TransportLeg.created_at.asc()).all()
+    mileage_readings = db.query(MileageReading).filter_by(incident_id=incident_id).order_by(MileageReading.recorded_at.asc()).all()
+    payload = {
+        'call_number': incident.call_number or incident.incident_number,
+        'call_type': incident.call_type,
+        'priority': incident.priority,
+        'location': {'text': incident.location_text, 'lat': incident.lat, 'lng': incident.lng},
+        'dispatch_datetime': incident.created_at.isoformat() if incident.created_at else None,
+        'patient': {'name': incident.caller_name, 'callback': incident.callback},
+        'narrative': incident.narrative,
+        'assigned_units': [{
+            'call_sign': u.call_sign,
+            'unit_type': u.unit_type,
+            'capabilities': u.capabilities,
+            'service_level': (u.capabilities or {}).get('service_level') if u.capabilities else None,
+            'dispatched_at': iu.created_at.isoformat() if iu.created_at else None
+        } for u, iu in assigned],
+        'destination': {'id': dest.id, 'name': dest.name, 'address': dest.address} if dest else None,
+        'transport_legs': [{
+            'unit_id': leg.unit_id,
+            'en_route_at': leg.en_route_at.isoformat() if leg.en_route_at else None,
+            'arrived_at': leg.arrived_at.isoformat() if leg.arrived_at else None,
+            'cleared_at': leg.cleared_at.isoformat() if leg.cleared_at else None,
+            'pickup_mileage': leg.pickup_mileage,
+            'dropoff_mileage': leg.dropoff_mileage,
+            'status': leg.status
+        } for leg in transport_legs],
+        'mileage_readings': [{
+            'unit_id': m.unit_id,
+            'status_code': m.status_code,
+            'mileage': m.mileage,
+            'recorded_at': m.recorded_at.isoformat() if m.recorded_at else None
+        } for m in mileage_readings]
+    }
+    export = EpcrExport(
+        incident_id=incident_id,
+        destination_id=body.destination_id,
+        exported_by_user_id=current_user.get('user_id'),
+        epcr_payload=payload,
+        status='pending',
+        external_id=None,
+        response_body=None
+    )
+    db.add(export); db.commit(); db.refresh(export)
+    _log_event(db, 'epcr_export_created', 'incident', incident_id, user_id=current_user.get('user_id'), data={'epcr_export_id': export.id}, agency_id=incident.agency_id)
+    return export
+
+@app.put('/epcr-exports/{export_id}/status', response_model=EpcrExportOut)
+def update_epcr_export_status(export_id: int, status: str, external_id: Optional[str] = None, response_body: Optional[str] = None, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    export = db.query(EpcrExport).get(export_id)
+    if not export:
+        raise HTTPException(status_code=404, detail='ePCR export not found')
+    export.status = status
+    if external_id is not None:
+        export.external_id = external_id
+    if response_body is not None:
+        export.response_body = response_body
+    db.commit(); db.refresh(export)
+    _log_event(db, 'epcr_export_status', 'incident', export.incident_id, user_id=current_user.get('user_id'), data={'status': status, 'export_id': export.id}, agency_id=export.incident.agency_id)
+    return export
