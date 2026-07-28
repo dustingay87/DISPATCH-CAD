@@ -113,6 +113,7 @@ function fmtDur(s){const h=Math.floor(s/3600);const m=Math.floor((s%3600)/60);co
 function elapsed(iso){return iso?(Date.now()-new Date(iso).getTime())/1000:0;}
 function priorityClass(p){return `pri-${Math.min(Math.max(p||2,1),4)}`;}
 function statClass(c){if(c==='AQ')return 'stat-AQ';if(c==='OS')return 'stat-OS';if(['ER','TR','DEL'].includes(c))return 'stat-ER';return 'text-slate-400';}
+function isUserInteracting(){ const a=document.activeElement; if(!a||a===document.body) return false; return ['INPUT','SELECT','TEXTAREA','BUTTON'].includes(a.tagName) || a.closest('#openWork,#vehicleInfo,#tripSummary')!==null; }
 
 function applyModuleBadge(){
   const m=state.user?.selected_module||localStorage.getItem('ur_module')||'all';
@@ -451,7 +452,7 @@ window.loadDestinationStatusSummary=async function(incidentId){
   } catch(e){ el.innerHTML = `<b>Destination status:</b> <span class='text-slate-500'>unavailable</span>`; }
 }
 
-init();setInterval(load,5000);
+init();setInterval(()=>{ if(!isUserInteracting()) load(); },10000);
 </script>
 </body>
 </html>

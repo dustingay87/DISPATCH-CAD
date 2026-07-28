@@ -284,8 +284,29 @@ function renderCalls(){
 
 function findFirstEvent(events, codes){ return (events||[]).filter(e=>codes.includes(e.status_code)).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at))[0]?.created_at || null; }
 function milestoneText(iso, target, start){ const sec = iso ? elapsed(iso) : elapsed(start); const cls = iso ? (sec>target?'text-red-400 font-bold':'text-green-400') : 'text-yellow-400'; return `<span class='${cls}'>${fmtDur(sec)}</span> / ${fmtDur(target)}`; }
+function isUserInteracting(){ const a=document.activeElement; if(!a||a===document.body) return false; return ['INPUT','SELECT','TEXTAREA','BUTTON'].includes(a.tagName) || a.closest('#incidentPanel,#unitList,#callList')!==null; }
+function savePanelForm(panelId){
+  const panel=document.getElementById(panelId); if(!panel) return {};
+  const state={};
+  panel.querySelectorAll('input, select, textarea').forEach(el=>{
+    if(el.type==='checkbox'||el.type==='radio') state[el.id]=el.checked;
+    else if(el.tagName==='SELECT') state[el.id]=el.value;
+    else state[el.id]=el.value;
+  });
+  return state;
+}
+function restorePanelForm(panelId, formState){
+  const panel=document.getElementById(panelId); if(!panel) return;
+  Object.entries(formState).forEach(([id,val])=>{
+    const el=document.getElementById(id); if(!el) return;
+    if(el.type==='checkbox'||el.type==='radio') el.checked=!!val;
+    else if(el.tagName==='SELECT'){ el.value=val; if(!el.value&&Array.from(el.options).some(o=>o.value===val)) el.value=val; }
+    else el.value=val;
+  });
+}
 
 async function selectIncident(id){
+  const prevSelected = state.selectedIncident;
   state.selectedIncident = id;
   const i = state.incidents.find(x=>x.id===id);
   renderCalls();
@@ -311,6 +332,7 @@ async function selectIncident(id){
   const showPersonnel = features.personnel !== false;
   const personnelOpts = state.personnel.filter(p=>p.agency_id===i.agency_id && !p.current_unit_id).map(p=>`<option value='${p.id}'>${p.first_name} ${p.last_name}</option>`).join('');
   const fireReportBtn = a.agency_type==='fire' ? `<button class='px-2 py-1 bg-orange-700 hover:bg-orange-600 rounded text-xs' onclick='generateFireReport(${i.id})'>Fire Report</button>` : '';
+  const savedForm = (prevSelected === id) ? savePanelForm('incidentPanel') : {};
   document.getElementById('incidentPanel').innerHTML = `
     <div class='card-head'>${i.call_number||i.incident_number} <span class='text-slate-400'>${i.call_type}</span></div>
     <div class='p-2 space-y-2'>
@@ -386,6 +408,7 @@ async function selectIncident(id){
         <div class='text-xs text-slate-500'>Loading...</div>
       </div>
     </div>`;
+  restorePanelForm('incidentPanel', savedForm);
   await loadRecommendations(i.id);
   if(features.transport){ await loadDestination(i.id); await loadTransportLegs(i.id); }
   if(features.mileage){ await loadMileage(i.id); }
@@ -841,7 +864,7 @@ load();
 startStream();
 updateClock(); setInterval(updateClock,1000);
 window.addEventListener('resize', ()=>{ if(map) map.invalidateSize(); });
-setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); },10000);
+setInterval(()=>{ if(document.getElementById('liveToggle').checked && !isUserInteracting()) load(); },10000);
 setInterval(updateTimers,1000);
 </script>
 </body>
