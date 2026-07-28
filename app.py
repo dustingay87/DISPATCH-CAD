@@ -1847,11 +1847,13 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
     ems = ensure_agency('County EMS', 'ems', 'pilot.ems', CENTER[0]+0.005, CENTER[1]-0.015)
     db.commit()
     def ensure_config(agency, template):
-        existing = db.query(CustomerConfig).filter_by(agency_id=agency.id, category='__seeded__').first()
-        if existing: return
         for category, value in template.items():
-            db.add(CustomerConfig(agency_id=agency.id, category=category, key='defaults', value=value))
-        db.add(CustomerConfig(agency_id=agency.id, category='__seeded__', key='flag', value=True))
+            cfg = db.query(CustomerConfig).filter_by(agency_id=agency.id, category=category, key='defaults').first()
+            if not cfg:
+                db.add(CustomerConfig(agency_id=agency.id, category=category, key='defaults', value=value))
+        seeded = db.query(CustomerConfig).filter_by(agency_id=agency.id, category='__seeded__', key='flag').first()
+        if not seeded:
+            db.add(CustomerConfig(agency_id=agency.id, category='__seeded__', key='flag', value=True))
     templates = {
         'police': {
             'statuses': [{'code':'AQ','label':'Available'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TC','label':'Traffic Control'},{'code':'CT','label':'Citation'},{'code':'ARR','label':'Arrest'},{'code':'BK','label':'Booking'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
