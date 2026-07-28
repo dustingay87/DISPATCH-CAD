@@ -820,7 +820,13 @@ def startup():
     seed_default_admin()
 
 def _log_event(db: Session, event_type: str, entity_type: str, entity_id: int, user_id: Optional[int] = None, data: Optional[dict] = None, agency_id: Optional[int] = None):
-    db.add(Event(event_type=event_type, entity_type=entity_type, entity_id=entity_id, user_id=user_id, data=data, agency_id=agency_id))
+    safe_data = None
+    if data is not None:
+        try:
+            safe_data = json.loads(json.dumps(data, default=str))
+        except Exception:
+            safe_data = {'error': 'Could not serialize log data'}
+    db.add(Event(event_type=event_type, entity_type=entity_type, entity_id=entity_id, user_id=user_id, data=safe_data, agency_id=agency_id))
 
 def _security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
