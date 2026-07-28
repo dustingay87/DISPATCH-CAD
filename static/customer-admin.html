@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>Unified Response Customer Admin</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
+.card { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1rem; }
+.btn { padding:0.35rem 0.75rem; border-radius:0.375rem; font-size:0.875rem; }
+.btn-primary { background:#2563eb; }
+.btn-primary:hover { background:#1d4ed8; }
+.btn-danger { background:#dc2626; }
+.btn-danger:hover { background:#b91c1c; }
+input, select, textarea { background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:0.35rem 0.5rem; border-radius:0.25rem; font-size:0.875rem; }
+table { width:100%; border-collapse:collapse; font-size:0.8rem; }
+th, td { padding:0.5rem; border-bottom:1px solid #334155; text-align:left; }
+th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
+.tag { background:#334155; padding:0.15rem 0.4rem; border-radius:0.25rem; font-size:0.75rem; }
+</style>
+</head>
+<body class='p-4'>
+  <div class='max-w-6xl mx-auto space-y-4'>
+    <div class='flex justify-between items-center'>
+      <h1 class='text-2xl font-bold'>Unified Response <span class='text-slate-400 font-normal'>Customer Admin</span></h1>
+      <div class='space-x-2'>
+        <a href='/' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Dashboard</a>
+        <a href='/admin' class='btn bg-slate-700 hover:bg-slate-600 text-white'>System Admin</a>
+      </div>
+    </div>
+
+    <div class='card'>
+      <label class='block text-sm text-slate-400 mb-1'>Agency</label>
+      <select id='agencySelect' class='w-full'><option value=''>Select agency</option></select>
+    </div>
+
+    <div id='setup' class='hidden space-y-4'>
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Enabled Modules</h2>
+        <div class='flex gap-4 text-sm'>
+          <label class='flex items-center gap-1'><input type='checkbox' value='ems' class='module-check'> EMS</label>
+          <label class='flex items-center gap-1'><input type='checkbox' value='fire' class='module-check'> Fire</label>
+          <label class='flex items-center gap-1'><input type='checkbox' value='law' class='module-check'> Law</label>
+        </div>
+        <button id='saveModules' class='btn btn-primary text-white mt-2'>Save Modules</button>
+      </div>
+
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Call Types</h2>
+        <div id='callTypeList' class='mb-2'></div>
+        <form id='callTypeForm' class='grid grid-cols-1 sm:grid-cols-4 gap-2'>
+          <input id='ctLabel' placeholder='Label' required>
+          <input id='ctPriority' placeholder='Priority' type='number' value='2' required>
+          <input id='ctFields' placeholder='Fields (comma sep)'>
+          <button class='btn btn-primary text-white'>Add Call Type</button>
+        </form>
+      </div>
+
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Unit Types</h2>
+        <div id='unitTypeList' class='mb-2 flex flex-wrap gap-1'></div>
+        <form id='unitTypeForm' class='flex gap-2'>
+          <input id='utName' placeholder='Unit Type' class='flex-1' required>
+          <button class='btn btn-primary text-white'>Add Unit Type</button>
+        </form>
+      </div>
+
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Saved Locations</h2>
+        <div id='destList' class='mb-2 overflow-x-auto'></div>
+        <form id='destForm' class='grid grid-cols-1 sm:grid-cols-6 gap-2'>
+          <input id='dName' placeholder='Name' required>
+          <input id='dAddress' placeholder='Address'>
+          <input id='dLat' placeholder='Lat' type='number' step='any'>
+          <input id='dLng' placeholder='Lng' type='number' step='any'>
+          <input id='dCategory' placeholder='Category'>
+          <button class='btn btn-primary text-white'>Add Location</button>
+        </form>
+      </div>
+
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Crew Members</h2>
+        <div id='personnelList' class='mb-2 overflow-x-auto'></div>
+        <form id='personnelForm' class='grid grid-cols-1 sm:grid-cols-4 gap-2'>
+          <input id='pFirst' placeholder='First' required>
+          <input id='pLast' placeholder='Last' required>
+          <input id='pRadio' placeholder='Radio ID'>
+          <input id='pPhone' placeholder='Phone'>
+          <input id='pEmail' placeholder='Email'>
+          <select id='pDuty' class='w-full'><option value='off_duty'>Off Duty</option><option value='on_duty'>On Duty</option></select>
+          <select id='pUnit' class='w-full'><option value=''>No unit</option></select>
+          <button class='btn btn-primary text-white'>Add Crew</button>
+        </form>
+      </div>
+
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Units</h2>
+        <div id='unitList' class='mb-2 overflow-x-auto'></div>
+        <form id='unitForm' class='grid grid-cols-1 sm:grid-cols-4 gap-2'>
+          <input id='uName' placeholder='Name' required>
+          <input id='uCallSign' placeholder='Call Sign' required>
+          <select id='uUnitType' class='w-full' required><option value=''>Select unit type</option></select>
+          <input id='uRadio' placeholder='Radio ID'>
+          <input id='uTaip' placeholder='TAIP ID'>
+          <input id='uLat' placeholder='Lat' type='number' step='any'>
+          <input id='uLng' placeholder='Lng' type='number' step='any'>
+          <button class='btn btn-primary text-white'>Add Unit</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+<script>
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+
+let state = {agencies:[], agency_id:null, call_types:[], unit_types:[], units:[], personnel:[]};
+
+async function loadAgencies(){
+  state.agencies = await api('/agencies');
+  document.getElementById('agencySelect').innerHTML = '<option value="">Select agency</option>' + state.agencies.map(a=>`<option value='${a.id}'>${a.name} (${a.agency_type})</option>`).join('');
+}
+
+document.getElementById('agencySelect').addEventListener('change', async e=>{
+  state.agency_id = parseInt(e.target.value) || null;
+  if(!state.agency_id){ document.getElementById('setup').classList.add('hidden'); return; }
+  document.getElementById('setup').classList.remove('hidden');
+  await loadModules();
+  await loadCallTypes();
+  await loadUnitTypes();
+  await loadDestinations();
+  await loadUnits();
+  await loadPersonnel();
+});
+
+async function getConfigValue(category){
+  const cfg = await api(`/config?agency_id=${state.agency_id}&category=${category}`);
+  return (cfg && cfg.length) ? cfg[0].value : null;
+}
+
+async function setConfigValue(category, value){
+  await api('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:state.agency_id,category,value,key:'defaults'})});
+}
+
+async function loadModules(){
+  const v = await getConfigValue('modules') || [];
+  document.querySelectorAll('.module-check').forEach(cb=>cb.checked = v.includes(cb.value));
+}
+
+document.getElementById('saveModules').addEventListener('click', async ()=>{
+  const modules = [...document.querySelectorAll('.module-check:checked')].map(cb=>cb.value);
+  await setConfigValue('modules', modules);
+  alert('Modules saved');
+});
+
+async function loadCallTypes(){
+  state.call_types = await getConfigValue('call_types') || [];
+  const el = document.getElementById('callTypeList');
+  el.innerHTML = state.call_types.length ? `<table><thead><tr><th>Label</th><th>Priority</th><th>Fields</th></tr></thead><tbody>${state.call_types.map(c=>`<tr><td>${c.label}</td><td>${c.priority}</td><td>${(c.fields||[]).join(', ')}</td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No call types.</div>';
+}
+
+document.getElementById('callTypeForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const fields = document.getElementById('ctFields').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const item = {label: document.getElementById('ctLabel').value, priority: parseInt(document.getElementById('ctPriority').value), fields};
+  state.call_types.push(item);
+  await setConfigValue('call_types', state.call_types);
+  document.getElementById('callTypeForm').reset();
+  await loadCallTypes();
+});
+
+async function loadUnitTypes(){
+  state.unit_types = await getConfigValue('unit_types') || [];
+  document.getElementById('unitTypeList').innerHTML = state.unit_types.map(u=>`<span class='tag'>${u}</span>`).join('');
+  const opts = state.unit_types.map(u=>`<option value='${u}'>${u}</option>`).join('');
+  document.getElementById('uUnitType').innerHTML = '<option value="">Select unit type</option>' + opts;
+}
+
+document.getElementById('unitTypeForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  state.unit_types.push(document.getElementById('utName').value);
+  await setConfigValue('unit_types', state.unit_types);
+  document.getElementById('unitTypeForm').reset();
+  await loadUnitTypes();
+});
+
+async function loadDestinations(){
+  const list = await api(`/destinations?agency_id=${state.agency_id}`);
+  document.getElementById('destList').innerHTML = list.length ? `<table><thead><tr><th>Name</th><th>Address</th><th>Category</th></tr></thead><tbody>${list.map(d=>`<tr><td>${d.name}</td><td>${d.address||'-'}</td><td>${d.category||'-'}</td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No saved locations.</div>';
+}
+
+document.getElementById('destForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const body = {
+    agency_id: state.agency_id,
+    name: document.getElementById('dName').value,
+    address: document.getElementById('dAddress').value,
+    lat: parseFloat(document.getElementById('dLat').value) || null,
+    lng: parseFloat(document.getElementById('dLng').value) || null,
+    category: document.getElementById('dCategory').value
+  };
+  await api('/destinations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  document.getElementById('destForm').reset();
+  await loadDestinations();
+});
+
+async function loadUnits(){
+  state.units = await api(`/units?agency_id=${state.agency_id}`);
+  document.getElementById('unitList').innerHTML = state.units.length ? `<table><thead><tr><th>Call Sign</th><th>Name</th><th>Type</th><th>Status</th></tr></thead><tbody>${state.units.map(u=>`<tr><td>${u.call_sign}</td><td>${u.name}</td><td>${u.unit_type}</td><td>${u.current_status}</td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No units.</div>';
+  const opts = state.units.map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
+  document.getElementById('pUnit').innerHTML = '<option value="">No unit</option>' + opts;
+}
+
+document.getElementById('unitForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const body = {
+    agency_id: state.agency_id,
+    name: document.getElementById('uName').value,
+    call_sign: document.getElementById('uCallSign').value,
+    unit_type: document.getElementById('uUnitType').value,
+    radio_id: document.getElementById('uRadio').value,
+    taip_id: document.getElementById('uTaip').value,
+    lat: parseFloat(document.getElementById('uLat').value) || null,
+    lng: parseFloat(document.getElementById('uLng').value) || null
+  };
+  await api('/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  document.getElementById('unitForm').reset();
+  await loadUnits();
+});
+
+async function loadPersonnel(){
+  state.personnel = await api(`/personnel?agency_id=${state.agency_id}`);
+  document.getElementById('personnelList').innerHTML = state.personnel.length ? `<table><thead><tr><th>Name</th><th>Radio</th><th>Phone</th><th>Duty</th><th>Unit</th></tr></thead><tbody>${state.personnel.map(p=>`<tr><td>${p.first_name} ${p.last_name}</td><td>${p.radio_id||'-'}</td><td>${p.phone||'-'}</td><td>${p.duty_status}</td><td>${(state.units.find(u=>u.id==p.current_unit_id)||{}).call_sign||'-'}</td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No crew members.</div>';
+}
+
+document.getElementById('personnelForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const body = {
+    agency_id: state.agency_id,
+    first_name: document.getElementById('pFirst').value,
+    last_name: document.getElementById('pLast').value,
+    radio_id: document.getElementById('pRadio').value,
+    phone: document.getElementById('pPhone').value,
+    email: document.getElementById('pEmail').value,
+    duty_status: document.getElementById('pDuty').value,
+    current_unit_id: parseInt(document.getElementById('pUnit').value) || null
+  };
+  await api('/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  document.getElementById('personnelForm').reset();
+  await loadPersonnel();
+});
+
+loadAgencies();
+</script>
+</body>
+</html>

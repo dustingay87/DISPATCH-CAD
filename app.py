@@ -807,7 +807,7 @@ def me(request: Request, db: Session = Depends(get_db)):
     selected = None
     if u:
         if u.agency_id:
-            cfg = db.query(CustomerConfig).filter_by(agency_id=u.agency_id, category='modules', key='enabled').first()
+            cfg = db.query(CustomerConfig).filter_by(agency_id=u.agency_id, category='modules', key='defaults').first()
             if cfg and cfg.value:
                 modules = cfg.value if isinstance(cfg.value, list) else []
         sel = db.query(CustomerConfig).filter_by(category='user_module', key=str(u.id)).first()
@@ -823,11 +823,13 @@ def set_user_module(body: UserModuleUpdate, request: Request, db: Session = Depe
         raise HTTPException(status_code=404, detail='User not found')
     if u.agency_id:
         agency_modules = []
-        cfg = db.query(CustomerConfig).filter_by(agency_id=u.agency_id, category='modules', key='enabled').first()
+        cfg = db.query(CustomerConfig).filter_by(agency_id=u.agency_id, category='modules', key='defaults').first()
         if cfg and cfg.value:
             agency_modules = cfg.value if isinstance(cfg.value, list) else []
         if agency_modules and body.module not in agency_modules and body.module != 'all':
             raise HTTPException(status_code=400, detail='Module not enabled for agency')
+        if not agency_modules:
+            body.module = 'all'
     sel = db.query(CustomerConfig).filter_by(category='user_module', key=str(u.id)).first()
     if not sel:
         sel = CustomerConfig(category='user_module', key=str(u.id), value=body.module)
@@ -896,6 +898,10 @@ def history():
 @app.get('/admin')
 def admin():
     return FileResponse('static/admin.html')
+
+@app.get('/customer-admin')
+def customer_admin():
+    return FileResponse('static/customer-admin.html')
 
 @app.get('/roster')
 def roster():
