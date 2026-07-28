@@ -246,6 +246,43 @@ class CustomerConfigOut(CustomerConfigCreate):
     class Config:
         from_attributes = True
 
+def hash_password(password):
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+def make_session(user):
+    exp = int(time.time()) + 86400
+    msg = f'{user.id}:{user.role}:{exp}'
+    sig = hmac.new(SECRET_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
+    return f'{msg}:{sig}'
+
+def verify_session(token):
+    if not token:
+        return None
+    parts = token.split(':')
+    if len(parts) != 4:
+        return None
+    uid, role, exp, sig = parts
+    expected = hmac.new(SECRET_KEY.encode(), f'{uid}:{role}:{exp}'.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return None
+    if time.time() > int(exp):
+        return None
+    return {'user_id': int(uid), 'role': role, 'exp': int(exp)}
+
+def get_current_user(request: Request):
+    if INSECURE_DEV:
+        return {'user_id': 0, 'role': 'admin', 'email': 'dev@example.com', 'agency_id': None}
+    payload = verify_session(request.cookies.get('session'))
+    if not payload:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+    return payload
+
+def require_admin(request: Request):
+    user = get_current_user(request)
+    if user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail='Admin required')
+    return user
+
 @app.middleware('http')
 async def auth_middleware(request: Request, call_next):
     if request.method in ('GET', 'OPTIONS', 'HEAD') or request.url.path.startswith('/static/'):
@@ -334,43 +371,6 @@ def create_config(body: CustomerConfigCreate, current_user: dict = Depends(requi
 @app.get('/health')
 def health():
     return {'status': 'ok'}
-
-def hash_password(password):
-    return hashlib.sha256(password.encode('utf-8')).hexdigest()
-
-def make_session(user):
-    exp = int(time.time()) + 86400
-    msg = f'{user.id}:{user.role}:{exp}'
-    sig = hmac.new(SECRET_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
-    return f'{msg}:{sig}'
-
-def verify_session(token):
-    if not token:
-        return None
-    parts = token.split(':')
-    if len(parts) != 4:
-        return None
-    uid, role, exp, sig = parts
-    expected = hmac.new(SECRET_KEY.encode(), f'{uid}:{role}:{exp}'.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(sig, expected):
-        return None
-    if time.time() > int(exp):
-        return None
-    return {'user_id': int(uid), 'role': role, 'exp': int(exp)}
-
-def get_current_user(request: Request):
-    if INSECURE_DEV:
-        return {'user_id': 0, 'role': 'admin', 'email': 'dev@example.com', 'agency_id': None}
-    payload = verify_session(request.cookies.get('session'))
-    if not payload:
-        raise HTTPException(status_code=401, detail='Not authenticated')
-    return payload
-
-def require_admin(request: Request):
-    user = get_current_user(request)
-    if user.get('role') != 'admin':
-        raise HTTPException(status_code=403, detail='Admin required')
-    return user
 
 # Pydantic schemas
 class AgencyCreate(BaseModel):
