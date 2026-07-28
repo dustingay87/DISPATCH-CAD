@@ -171,7 +171,9 @@ function render(){
           <button class='bg-green-700 hover:bg-green-600 text-white px-4 py-3 rounded text-lg' onclick='exportEpcr()'>ePCR Export</button>
         </div>
         ${destinationHtml(state.destination)}
+        <div id='mdtMileageSummary' class='mt-4 p-3 bg-slate-800 rounded border border-slate-600 text-sm text-slate-300'>Mileage: loading...</div>
       </div>`;
+    loadMileageSummaryMDT(u.current_incident_id);
   } else {
     document.getElementById('callPanel').innerHTML = `<div class='flex-1 flex items-center justify-center text-2xl text-slate-500'>No active call assigned</div>`;
   }
@@ -247,6 +249,16 @@ window.exportEpcr = async function(){
     alert(`ePCR export generated (ID ${res.id}).`);
   } catch(e){ alert('ePCR export failed: '+e.message); }
 };
+
+async function loadMileageSummaryMDT(incidentId){
+  const el = document.getElementById('mdtMileageSummary'); if(!el) return;
+  try {
+    const data = await api(`/incidents/${incidentId}/mileage-summary`);
+    const total = data.total_trip_miles != null ? `Trip: ${data.total_trip_miles} mi` : 'Trip mileage unavailable';
+    const rows = (data.legs||[]).map(l=>`<div><b>${l.call_sign||'Unit'}</b> -> ${l.destination||'?'}: ${l.trip_miles!=null?l.trip_miles+' mi':'?'} ${l.turnaround_seconds!=null?'(turn '+fmtDur(l.turnaround_seconds)+')':''}</div>`).join('');
+    el.innerHTML = `<div class='font-bold mb-1'>Mileage</div><div>${total}</div>${rows}`;
+  } catch(e){ el.innerHTML = `<div class='font-bold mb-1'>Mileage</div><div class='text-slate-400'>Unavailable</div>`; }
+}
 window.sendMessage = async function(){
   const inp = document.getElementById('msgReply'); const text = inp.value.trim(); if(!text) return;
   try { await api('/messages', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({unit_id:unitId, channel:'mdt', message_text:text})}); inp.value=''; await load(); } catch(e){ alert(e.message); }

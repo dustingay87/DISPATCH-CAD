@@ -153,10 +153,11 @@ function renderTripSummary(){
       <div><span class='text-slate-400'>Status:</span> ${statusLabel(i.status)}</div>
       <div><span class='text-slate-400'>Elapsed:</span> ${fmtDur(elapsed(i.created_at))}</div>
       <div><span class='text-slate-400'>Units:</span> ${assigned}</div>
+      <div id='mileageSummary' class='text-xs text-slate-400 mt-1'>Mileage: loading...</div>
       <div class='flex gap-1 mt-2'><select id='addUnit' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value=''>Add unit</option>${opts}</select><button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='addUnitToTrip(${i.id})'>Add</button></div>
       <div class='mt-2'><div class='text-xs font-semibold text-slate-400'>Recommendations</div><div id='recs'>Loading...</div></div>
     </div>`;
-    loadRecommendations(i.id);
+    loadRecommendations(i.id); loadMileageSummary(i.id);
   }else if(state.selectedVehicle){
     const u=state.units.find(x=>x.id===state.selectedVehicle);if(!u)return;
     const inc=u.current_incident_id?(state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id):'-';
@@ -176,6 +177,15 @@ window.selectVehicle=function(id){state.selectedVehicle=id;state.selectedTrip=nu
 window.addUnitToTrip=async function(incidentId){const uid=document.getElementById('addUnit').value;if(!uid)return;try{await api(`/incidents/${incidentId}/dispatch/${uid}`,{method:'POST'});await load();}catch(e){alert(e.message);}}
 window.loadRecommendations=async function(incidentId){const el=document.getElementById('recs');if(!el)return;try{const recs=await api(`/incidents/${incidentId}/recommend`);el.innerHTML=recs.length?recs.map(r=>`<div class='flex justify-between items-center py-0.5 border-b border-slate-700'><div><b>${r.call_sign}</b> <span class='text-slate-400'>${r.service_level||''}</span> <span class='text-slate-500'>${r.distance_miles!=null?r.distance_miles.toFixed(1)+' mi':''}</span></div><div class='text-right'><div class='text-slate-400'>${r.reason}</div><button class='bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='addRecUnit(${incidentId},${r.unit_id})'>Add</button></div></div>`).join(''):'<span class="text-slate-500">No recommendations</span>';}catch(e){el.innerHTML='<span class="text-red-400">Error loading recommendations</span>';}}
 window.addRecUnit=async function(incidentId,unitId){try{await api(`/incidents/${incidentId}/dispatch/${unitId}`,{method:'POST'});await load();}catch(e){alert(e.message);}}
+window.loadMileageSummary=async function(incidentId){
+  const el=document.getElementById('mileageSummary'); if(!el) return;
+  try {
+    const data=await api(`/incidents/${incidentId}/mileage-summary`);
+    const total=data.total_trip_miles!=null?`Trip: ${data.total_trip_miles} mi`:'';
+    const legs=(data.legs||[]).map(l=>`${l.call_sign||'Unit'} -> ${l.destination||'?'}: ${l.trip_miles!=null?l.trip_miles+' mi':'?'}${l.turnaround_seconds!=null? ', turn '+fmtDur(l.turnaround_seconds):''}`).join('<br>');
+    el.innerHTML = `<div class='text-xs text-slate-400'><b>Mileage</b> ${total}</div>${legs?`<div class='text-xs text-slate-500'>${legs}</div>`:''}`;
+  } catch(e){ el.innerHTML = `<div class='text-xs text-slate-500'>Mileage: unavailable</div>`; }
+}
 
 load();setInterval(load,5000);
 </script>

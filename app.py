@@ -2097,3 +2097,57 @@ def update_epcr_export_status(export_id: int, status: str, external_id: Optional
     db.commit(); db.refresh(export)
     _log_event(db, 'epcr_export_status', 'incident', export.incident_id, user_id=current_user.get('user_id'), data={'status': status, 'export_id': export.id}, agency_id=export.incident.agency_id)
     return export
+
+@app.get('/incidents/{incident_id}/mileage-summary')
+def incident_mileage_summary(incident_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    legs = db.query(TransportLeg).filter_by(incident_id=incident_id).order_by(TransportLeg.created_at.asc()).all()
+    readings = db.query(MileageReading).filter_by(incident_id=incident_id).order_by(MileageReading.recorded_at.asc()).all()
+    unit_map = {u.id: u.call_sign for u in db.query(Unit).filter(Unit.id.in_([l.unit_id for l in legs]+[r.unit_id for r in readings])).all()}
+    total_miles = 0.0
+    leg_summaries = []
+    for leg in legs:
+        pickup = leg.pickup_mileage or 0
+        dropoff = leg.dropoff_mileage or 0
+        miles = max(0, dropoff - pickup)
+        if pickup and dropoff:
+            total_miles += miles
+        leg_summaries.append({
+            'id': leg.id,
+            'unit_id': leg.unit_id,
+            'call_sign': unit_map.get(leg.unit_id),
+            'destination': leg.destination.name if leg.destination else None,
+            'status': leg.status,
+            'pickup_mileage': leg.pickup_mileage,
+            'dropoff_mileage': leg.dropoff_mileage,
+            'trip_miles': round(miles, 1),
+            'en_route_at': leg.en_route_at.isoformat() if leg.en_route_at else None,
+            'arrived_at': leg.arrived_at.isoformat() if leg.arrived_at else None,
+            'cleared_at': leg.cleared_at.isoformat() if leg.cleared_at else None,
+            'turnaround_seconds': int((leg.cleared_at - leg.arrived_at).total_seconds()) if leg.cleared_at and leg.arrived_at else None
+        })
+    readings_summary = [{'unit_id': r.unit_id, 'call_sign': unit_map.get(r.unit_id), 'status_code': r.status_code, 'mileage': r.mileage, 'recorded_at': r.recorded_at.isoformat() if r.recorded_at else None} for r in readings]
+    return {'incident_id': incident_id, 'total_trip_miles': round(total_miles, 1), 'legs': leg_summaries, 'readings': readings_summary}
+
+@app.get('/transport-legs/summary')
+def transport_legs_summary(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    # aggregate recent completed leg stats
+    since = datetime.utcnow() - timedelta(days=7)
+    legs = db.query(TransportLeg).filter(TransportLeg.created_at >= since).order_by(TransportLeg.created_at.desc()).all()
+    unit_map = {u.id: u.call_sign for u in db.query(Unit).all()}
+    dest_map = {d.id: d.name for d in db.query(Destination).all()}
+    rows = []
+    for leg in legs:
+        pickup = leg.pickup_mileage or 0
+        dropoff = leg.dropoff_mileage or 0
+        miles = max(0, dropoff - pickup) if dropoff and pickup else None
+        rows.append({
+            'id': leg.id,
+            'incident_id': leg.incident_id,
+            'unit_id': leg.unit_id,
+            'call_sign': unit_map.get(leg.unit_id),
+            'destination': dest_map.get(leg.destination_id),
+            'trip_miles': round(miles,1) if miles is not None else None,
+            'turnaround_seconds': int((leg.cleared_at - leg.arrived_at).total_seconds()) if leg.cleared_at and leg.arrived_at else None,
+            'cleared_at': leg.cleared_at.isoformat() if leg.cleared_at else None
+        })
+    return rows
