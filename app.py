@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, D
 from sqlalchemy.orm import declarative_base, relationship, Session, sessionmaker
 from pydantic import BaseModel
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Any
 import os
 import re
 import math
@@ -249,7 +249,7 @@ class CustomerConfigCreate(BaseModel):
     agency_id: Optional[int] = None
     category: str
     key: str
-    value: Optional[dict] = None
+    value: Optional[Any] = None
 
 class CustomerConfigOut(CustomerConfigCreate):
     id: int
@@ -394,6 +394,10 @@ def history():
 @app.get('/admin')
 def admin():
     return FileResponse('static/admin.html')
+
+@app.get('/call-entry')
+def call_entry():
+    return FileResponse('static/call-entry.html')
 
 @app.get('/config', response_model=List[CustomerConfigOut])
 def list_config(agency_id: Optional[int] = Query(None), category: Optional[str] = Query(None), db: Session = Depends(get_db)):
