@@ -106,6 +106,8 @@ async function load(){
     }
     if(unit.current_incident_id){ state.incident = await api(`/incidents/${unit.current_incident_id}`); state.messages = await api(`/units/${unitId}/messages`); try { state.destination = await api(`/incidents/${unit.current_incident_id}/destination`); } catch(e){ state.destination = null; } }
     else { state.incident=null; state.destination=null; state.messages = await api(`/units/${unitId}/messages`); }
+    state.destinationStatus = null;
+    if(state.destination && state.destination.destination && state.destination.destination.id){ try { state.destinationStatus = await api(`/destinations/${state.destination.destination.id}/status?limit=1`); } catch(e){} }
     render();
   } catch(e){ document.getElementById('callPanel').innerHTML = `<div class='text-red-400 p-4 text-xl'>Error: ${e.message}</div>`; }
 }
@@ -197,12 +199,19 @@ function destinationHtml(dest){
     const value = Array.isArray(v) ? v.join(', ') : v;
     return `<div class='text-sm'><span class='text-slate-400 capitalize'>${label}:</span> ${value}</div>`;
   }).filter(Boolean).join('');
+  const st = state.destinationStatus && state.destinationStatus.length ? state.destinationStatus[0] : null;
+  const statusBadge = st ? `<span class='ml-2 px-1.5 py-0.5 rounded text-xs ${statusColor(st.status)}'>${st.status.toUpperCase()}${st.reason ? ': '+st.reason : ''}</span>` : '';
   return `<div class='mt-4 p-3 bg-slate-800 rounded border border-slate-600'>
-    <div class='font-bold text-lg'>Destination: ${d.name||'-'}</div>
+    <div class='font-bold text-lg'>Destination: ${d.name||'-'}${statusBadge}</div>
     <div class='text-slate-300'>${d.address||''} ${d.category ? `(${d.category})` : ''}</div>
     <div class='mt-2'>${notes || '<span class="text-slate-500">No notes</span>'}</div>
     <div class='mt-2 pt-2 border-t border-slate-600'>${detailRows || '<span class="text-slate-500">No facility details</span>'}</div>
   </div>`;
+}
+
+function statusColor(status){
+  const col = {open:'bg-green-700', divert:'bg-red-700', on_hold:'bg-yellow-700', full:'bg-orange-700', closed:'bg-slate-700'}[status] || 'bg-slate-700';
+  return col;
 }
 
 async function promptDestination(incidentId){

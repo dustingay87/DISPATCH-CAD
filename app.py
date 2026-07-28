@@ -239,6 +239,18 @@ class Destination(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class DestinationStatus(Base):
+    __tablename__ = 'destination_statuses'
+    id = Column(Integer, primary_key=True, index=True)
+    destination_id = Column(Integer, ForeignKey('destinations.id'), nullable=False)
+    status = Column(String(50), default='open')  # open, divert, on_hold, full, closed
+    reason = Column(String(255))
+    notes = Column(Text)
+    updated_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    destination = relationship('Destination')
+
 class IncidentDestination(Base):
     __tablename__ = 'incident_destinations'
     id = Column(Integer, primary_key=True, index=True)
@@ -435,6 +447,30 @@ class IncidentDestinationOut(BaseModel):
     notes: Optional[dict] = None
     created_at: Optional[datetime] = None
     destination: DestinationOut
+    class Config:
+        from_attributes = True
+
+class DestinationStatusCreate(BaseModel):
+    destination_id: int
+    status: str
+    reason: Optional[str] = None
+    notes: Optional[str] = None
+
+class DestinationStatusUpdate(BaseModel):
+    status: Optional[str] = None
+    reason: Optional[str] = None
+    notes: Optional[str] = None
+
+class DestinationStatusOut(BaseModel):
+    id: int
+    destination_id: int
+    status: str
+    reason: Optional[str] = None
+    notes: Optional[str] = None
+    updated_by: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    destination: Optional[DestinationOut] = None
     class Config:
         from_attributes = True
 
@@ -1272,6 +1308,24 @@ def update_destination(destination_id: int, body: DestinationUpdate, db: Session
         setattr(d, k, v)
     db.commit(); db.refresh(d)
     return d
+
+@app.get('/destinations/{destination_id}/status', response_model=List[DestinationStatusOut])
+def get_destination_status(destination_id: int, limit: int = 1, db: Session = Depends(get_db)):
+    q = db.query(DestinationStatus).filter(DestinationStatus.destination_id == destination_id).order_by(DestinationStatus.updated_at.desc()).limit(max(1, min(limit, 50)))
+    return q.all()
+
+@app.post('/destinations/{destination_id}/status', response_model=DestinationStatusOut)
+def create_destination_status(destination_id: int, body: DestinationStatusCreate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    d = db.query(Destination).get(destination_id)
+    if not d:
+        raise HTTPException(status_code=404, detail='Destination not found')
+    s = DestinationStatus(destination_id=destination_id, status=body.status, reason=body.reason, notes=body.notes, updated_by=current_user.get('id'))
+    db.add(s); db.commit(); db.refresh(s)
+    return s
+
+@app.get('/destination-statuses', response_model=List[DestinationStatusOut])
+def list_destination_statuses(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.query(DestinationStatus).order_by(DestinationStatus.updated_at.desc()).limit(100).all()
 
 @app.get('/incidents/{incident_id}/destination', response_model=IncidentDestinationOut)
 def get_incident_destination(incident_id: int, db: Session = Depends(get_db)):

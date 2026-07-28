@@ -225,13 +225,25 @@ async function loadDestination(id){
       const value = Array.isArray(v) ? v.join(', ') : v;
       return `<div class='text-xs text-slate-300'><span class='text-slate-400 capitalize'>${label}:</span> ${value}</div>`;
     }).filter(Boolean).join('');
+    const status = await getDestinationStatus(d.id);
+    const statusBadge = status ? `<span class='ml-2 px-1.5 py-0.5 rounded text-xs ${statusColor(status.status)}'>${status.status.toUpperCase()}${status.reason ? ': '+status.reason : ''}</span>` : '';
     el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Destination</div>
-      <div class='text-sm font-bold text-white'>${d.name||'-'}</div>
+      <div class='flex items-center gap-1'><span class='text-sm font-bold text-white'>${d.name||'-'}</span>${statusBadge}</div>
       <div class='text-xs text-slate-300'>${d.address||''} ${d.category ? '('+d.category+')' : ''}</div>
       <div class='mt-1'>${notes || '<span class="text-slate-500">No notes</span>'}</div>
       <div class='mt-1 pt-1 border-t border-slate-700'>${detailRows || '<span class="text-slate-500">No facility details</span>'}</div>
       <button class='mt-2 px-2 py-1 bg-blue-700 hover:bg-blue-600 rounded text-xs' onclick='relayDestination(${id})'>Relay to crew</button>`;
   } catch(e){ el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Destination</div><div class='text-xs text-slate-500'>No destination set</div>`; }
+}
+
+async function getDestinationStatus(destId){
+  if(!destId) return null;
+  try { const s = await api(`/destinations/${destId}/status?limit=1`); return s && s.length ? s[0] : null; } catch(e){ return null; }
+}
+
+function statusColor(status){
+  const col = {open:'bg-green-700', divert:'bg-red-700', on_hold:'bg-yellow-700', full:'bg-orange-700', closed:'bg-slate-700'}[status] || 'bg-slate-700';
+  return col;
 }
 
 async function relayDestination(id){

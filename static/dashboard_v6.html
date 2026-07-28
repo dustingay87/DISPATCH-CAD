@@ -154,11 +154,12 @@ function renderTripSummary(){
       <div><span class='text-slate-400'>Status:</span> ${statusLabel(i.status)}</div>
       <div><span class='text-slate-400'>Elapsed:</span> ${fmtDur(elapsed(i.created_at))}</div>
       <div><span class='text-slate-400'>Units:</span> ${assigned}</div>
+      <div id='destinationStatusSummary' class='text-xs text-slate-400 mt-1'>Destination status: loading...</div>
       <div id='mileageSummary' class='text-xs text-slate-400 mt-1'>Mileage: loading...</div>
       <div class='flex gap-1 mt-2'><select id='addUnit' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value=''>Add unit</option>${opts}</select><button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='addUnitToTrip(${i.id})'>Add</button></div>
       <div class='mt-2'><div class='text-xs font-semibold text-slate-400'>Recommendations</div><div id='recs'>Loading...</div></div>
     </div>`;
-    loadRecommendations(i.id); loadMileageSummary(i.id);
+    loadRecommendations(i.id); loadMileageSummary(i.id); loadDestinationStatusSummary(i.id);
   }else if(state.selectedVehicle){
     const u=state.units.find(x=>x.id===state.selectedVehicle);if(!u)return;
     const inc=u.current_incident_id?(state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id):'-';
@@ -186,6 +187,20 @@ window.loadMileageSummary=async function(incidentId){
     const legs=(data.legs||[]).map(l=>`${l.call_sign||'Unit'} -> ${l.destination||'?'}: ${l.trip_miles!=null?l.trip_miles+' mi':'?'}${l.turnaround_seconds!=null? ', turn '+fmtDur(l.turnaround_seconds):''}`).join('<br>');
     el.innerHTML = `<div class='text-xs text-slate-400'><b>Mileage</b> ${total}</div>${legs?`<div class='text-xs text-slate-500'>${legs}</div>`:''}`;
   } catch(e){ el.innerHTML = `<div class='text-xs text-slate-500'>Mileage: unavailable</div>`; }
+}
+window.loadDestinationStatusSummary=async function(incidentId){
+  const el=document.getElementById('destinationStatusSummary'); if(!el) return;
+  try {
+    const dest=await api(`/incidents/${incidentId}/destination`);
+    const d=dest.destination||{};
+    if(!d.id){ el.innerHTML=''; return; }
+    const s=await api(`/destinations/${d.id}/status?limit=1`);
+    if(s && s.length){
+      const st=s[0];
+      const col={open:'text-green-400',divert:'text-red-400',on_hold:'text-yellow-400',full:'text-orange-400',closed:'text-slate-400'}[st.status]||'text-slate-400';
+      el.innerHTML = `<b>Destination status:</b> <span class='${col} font-bold'>${st.status.toUpperCase()}${st.reason ? ' - '+st.reason : ''}</span>`;
+    } else { el.innerHTML = `<b>Destination status:</b> <span class='text-slate-500'>open</span>`; }
+  } catch(e){ el.innerHTML = `<b>Destination status:</b> <span class='text-slate-500'>unavailable</span>`; }
 }
 
 load();setInterval(load,5000);
