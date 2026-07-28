@@ -41,11 +41,11 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
     <div class='flex flex-wrap items-center gap-2'>
       <a href='/console' class='bg-blue-700 hover:bg-blue-600 px-2 py-1 rounded text-xs'>Console</a>
       <a href='/call-entry' class='bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-xs'>Call Entry</a>
-      <a href='/scheduled-transports-page' class='bg-indigo-700 hover:bg-indigo-600 px-2 py-1 rounded text-xs'>Scheduled</a>
+      <a id='scheduledLink' href='/scheduled-transports-page' class='bg-indigo-700 hover:bg-indigo-600 px-2 py-1 rounded text-xs'>Scheduled</a>
       <a href='/coverage-page' class='bg-teal-700 hover:bg-teal-600 px-2 py-1 rounded text-xs'>Coverage</a>
       <a href='/reports-page' class='bg-orange-700 hover:bg-orange-600 px-2 py-1 rounded text-xs'>Reports</a>
-      <a href='/mdt?unit_id=1' class='bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-xs'>MDT</a>
-      <a href='/mobile-mdt?unit_id=1' class='bg-purple-800 hover:bg-purple-700 px-2 py-1 rounded text-xs'>Mobile MDT</a>
+      <a href='/mdt' class='bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-xs'>MDT</a>
+      <a href='/mobile-mdt' class='bg-purple-800 hover:bg-purple-700 px-2 py-1 rounded text-xs'>Mobile MDT</a>
       <a href='/avl' class='bg-cyan-700 hover:bg-cyan-600 px-2 py-1 rounded text-xs'>AVL</a>
       <button id='layoutBtn' class='bg-pink-700 hover:bg-pink-600 px-2 py-1 rounded text-xs' onclick='openLayoutEditor()'>Edit Layout</button>
       <a href='/admin' id='adminLink' class='hidden bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs'>Admin</a>
@@ -85,7 +85,7 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
       <div class='space-y-2 text-sm'>
         <label class='flex items-center gap-2'><input type='checkbox' id='showActiveCalls' checked class='accent-blue-500'> Active Calls</label>
         <label class='flex items-center gap-2'><input type='checkbox' id='showMap' checked class='accent-blue-500'> Map</label>
-        <label class='flex items-center gap-2'><input type='checkbox' id='showScheduled' checked class='accent-blue-500'> Scheduled Transports</label>
+        <div id='showScheduledRow'><label class='flex items-center gap-2'><input type='checkbox' id='showScheduled' checked class='accent-blue-500'> Scheduled Transports</label></div>
         <label class='flex items-center gap-2'><input type='checkbox' id='showUnits' checked class='accent-blue-500'> On Duty Units</label>
         <label class='flex items-center gap-2'><input type='checkbox' id='showSummary' checked class='accent-blue-500'> Trip / Vehicle Summary</label>
         <label class='flex items-center gap-2 mt-2 pt-2 border-t border-slate-700'><input type='checkbox' id='lockLayout' class='accent-pink-500'> Lock layout</label>
@@ -121,13 +121,28 @@ function applyModuleBadge(){
   const sel=document.getElementById('moduleSelect');
   if(sel){ sel.value=m; }
 }
+function presentModules(){
+  const types = [...new Set(state.agencies.map(a=>a.agency_type).filter(Boolean))];
+  const map = {'police':'law','fire':'fire','ems':'ems'};
+  const present = types.length ? types.map(t=>map[t]||t).filter(t=>['law','fire','ems'].includes(t)) : (state.user?.modules||[]);
+  return present.length ? present : ['all'];
+}
+
 function populateModuleSelect(){
-  const mods=state.user?.modules||[];
+  const present = presentModules();
   const sel=document.getElementById('moduleSelect');
-  if(!mods.length){ sel.classList.add('hidden'); return; }
-  const options=[...mods.map(m=>`<option value='${m}'>${MODULE_LABELS[m]||m}</option>`),`<option value='all'>${MODULE_LABELS.all}</option>`];
+  if(present.length<=1){ sel.classList.add('hidden'); }
+  else { sel.classList.remove('hidden'); }
+  const options=[...present.map(m=>`<option value='${m}'>${MODULE_LABELS[m]||m}</option>`),`<option value='all'>${MODULE_LABELS.all}</option>`];
   sel.innerHTML=options.join('');
-  sel.classList.remove('hidden');
+  // Default to the only available module for fire-only customers
+  if(present.length===1 && state.user && state.user.selected_module==='all'){
+    state.user.selected_module=present[0];
+    localStorage.setItem('ur_module',present[0]);
+    sel.value=present[0];
+  } else {
+    sel.value=state.user?.selected_module||'all';
+  }
   sel.onchange=async (e)=>{
     const m=e.target.value;
     try{
@@ -135,12 +150,14 @@ function populateModuleSelect(){
       if(state.user) state.user.selected_module=m;
       localStorage.setItem('ur_module',m);
       applyModuleBadge();
+      applyDashboardLayout();
       load();
     }catch(err){console.error(err);}
   };
 }
 function defaultDashboardLayout(){
-  return {activeCalls:true, map:true, scheduled:true, onDutyUnits:true, summary:true, locked:false};
+  const m=state.user?.selected_module||localStorage.getItem('ur_module')||'all';
+  return {activeCalls:true, map:true, scheduled:(m!=='fire'), onDutyUnits:true, summary:true, locked:false};
 }
 function loadDashboardLayout(){
   try{ const raw=localStorage.getItem(LAYOUT_STORAGE); if(raw) return JSON.parse(raw); }catch(e){}
@@ -148,6 +165,9 @@ function loadDashboardLayout(){
 }
 function applyDashboardLayout(){
   const layout=loadDashboardLayout();
+  const isFire = (state.user?.selected_module||localStorage.getItem('ur_module')||'all')==='fire';
+  if(isFire) layout.scheduled=false;
+  document.getElementById('scheduledLink')?.classList.toggle('hidden', isFire);
   document.getElementById('activeCallsPanel').classList.toggle('hidden', !layout.activeCalls);
   document.getElementById('mapPanel').classList.toggle('hidden', !layout.map);
   document.getElementById('scheduledPanel').classList.toggle('hidden', !layout.scheduled);
@@ -171,6 +191,9 @@ function openLayoutEditor(){
     localStorage.setItem(LAYOUT_STORAGE, JSON.stringify(layout));
     applyDashboardLayout();
   }
+  const isFire = (state.user?.selected_module||localStorage.getItem('ur_module')||'all')==='fire';
+  if(isFire){ layout.scheduled=false; }
+  document.getElementById('showScheduledRow')?.classList.toggle('hidden', isFire);
   document.getElementById('showActiveCalls').checked = layout.activeCalls;
   document.getElementById('showMap').checked = layout.map;
   document.getElementById('showScheduled').checked = layout.scheduled;
@@ -185,10 +208,11 @@ function closeLayoutEditor(){
   document.getElementById('layoutModal').classList.remove('flex');
 }
 function saveDashboardLayout(){
+  const isFire = (state.user?.selected_module||localStorage.getItem('ur_module')||'all')==='fire';
   const layout={
     activeCalls: document.getElementById('showActiveCalls').checked,
     map: document.getElementById('showMap').checked,
-    scheduled: document.getElementById('showScheduled').checked,
+    scheduled: isFire ? false : document.getElementById('showScheduled').checked,
     onDutyUnits: document.getElementById('showUnits').checked,
     summary: document.getElementById('showSummary').checked,
     locked: document.getElementById('lockLayout').checked
@@ -212,7 +236,9 @@ async function logout(){
 
 async function init(){
   try{
-    state.user=await api('/me');
+    const [me, agencies] = await Promise.all([api('/me'), api('/agencies')]);
+    state.user=me;
+    state.agencies=agencies; state.agencyMap={}; agencies.forEach(a=>state.agencyMap[a.id]=a);
     state.crossAgencies=state.user.cross_discipline_agencies||[];
     localStorage.setItem('ur_module',state.user.selected_module||'all');
     if(state.user && (state.user.role==='admin'||state.user.role==='super_admin')){
@@ -224,9 +250,12 @@ async function init(){
 }
 async function load(){
   const aid=state.user?.agency_id;
-  const promises=[api('/agencies'),api('/units'),api('/incidents'),api('/post-zones'),api('/unit-postings'),api('/scheduled-transports?status=scheduled')];
+  const isFire = (state.user?.selected_module||localStorage.getItem('ur_module')||'all')==='fire';
+  const promises=[api('/agencies'),api('/units'),api('/incidents'),api('/post-zones'),api('/unit-postings')];
+  if(!isFire) promises.push(api('/scheduled-transports?status=scheduled'));
   if(aid) promises.push(api(`/personnel?agency_id=${aid}`));
-  const [agencies,units,incidents,postZones,unitPostings,scheduled,...rest]=await Promise.all(promises);
+  const [agencies,units,incidents,postZones,unitPostings,...rest]=await Promise.all(promises);
+  const scheduled = isFire ? [] : (rest.shift()||[]);
   state.personnel=aid?rest[0]:[];
   state.agencies=agencies;state.incidents=incidents;state.scheduled=scheduled||[];state.agencyMap={};state.agencies.forEach(a=>state.agencyMap[a.id]=a);
   if(state.user && state.user.selected_module && state.user.selected_module!=='all'){
@@ -375,6 +404,8 @@ window.removeCrew=async function(personnelId){if(!confirm('Remove crew from unit
 window.loadRecommendations=async function(incidentId){const el=document.getElementById('recs');if(!el)return;try{const recs=await api(`/incidents/${incidentId}/recommend`);el.innerHTML=recs.length?recs.map(r=>`<div class='flex justify-between items-center py-0.5 border-b border-slate-700'><div><b>${r.call_sign}</b> <span class='text-slate-400'>${r.service_level||''}</span> <span class='text-slate-500'>${r.distance_miles!=null?r.distance_miles.toFixed(1)+' mi':''}</span></div><div class='text-right'><div class='text-slate-400'>${r.reason}</div><button class='bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='addRecUnit(${incidentId},${r.unit_id})'>Add</button></div></div>`).join(''):'<span class="text-slate-500">No recommendations</span>';}catch(e){el.innerHTML='<span class="text-red-400">Error loading recommendations</span>';}}
 window.addRecUnit=async function(incidentId,unitId){try{await api(`/incidents/${incidentId}/dispatch/${unitId}`,{method:'POST'});await load();}catch(e){alert(e.message);}}
 function renderScheduled(){
+  const isFire = (state.user?.selected_module||localStorage.getItem('ur_module')||'all')==='fire';
+  if(isFire){ document.getElementById('scheduledCount').textContent='0'; document.getElementById('scheduledList').innerHTML=''; return; }
   const list=state.scheduled.slice().sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
   document.getElementById('scheduledCount').textContent=list.length;
   const html=list.length?`<table class='tbl'><thead><tr><th>Due</th><th>Patient</th><th>Pickup</th><th>Destination</th><th>Agency</th><th>Status</th></tr></thead><tbody>`+list.map(st=>{
