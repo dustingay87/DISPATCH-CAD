@@ -421,11 +421,12 @@ def init_sqlite_db():
     ensure_sqlite_columns()
 
 print(f'VolCAD using database: {DATABASE_URL}')
+Base.metadata.create_all(bind=engine)
 if DATABASE_URL.startswith('sqlite'):
     db_path = DATABASE_URL.replace('sqlite:///', '').lstrip('./')
     print(f'SQLite file: {os.path.abspath(db_path)}')
     print('WARNING: SQLite data is stored in a local file. Container redeploys will clear it unless the file is on a persistent volume.')
-    init_sqlite_db()
+    ensure_sqlite_columns()
 
 app = FastAPI(title='VolCAD Prototype', version='0.1.0')
 
