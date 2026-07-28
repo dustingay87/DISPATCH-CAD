@@ -263,9 +263,10 @@ function renderUnits(){
       <td class='timer'>${t.scene}</td>
       <td class='timer'>${t.call}</td>
       <td class='timer'>${t.shift}</td>
+      <td onclick='event.stopPropagation()'><select id='uStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onchange='event.stopPropagation()'>${unitStatusOptions(a.agency_type)}</select><button class='ml-1 bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();setUnitStatus(${u.id})'>Set</button></td>
     </tr>`;
   }).join('');
-  document.getElementById('unitList').innerHTML = rows ? `<table class='tbl'><thead><tr><th>Unit</th><th>Type</th><th>Status</th><th>Call</th><th>Avail</th><th>Scene</th><th>Call T</th><th>Shift</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class=\'p-2 text-slate-500\'>No units</div>';
+  document.getElementById('unitList').innerHTML = rows ? `<table class='tbl'><thead><tr><th>Unit</th><th>Type</th><th>Status</th><th>Call</th><th>Avail</th><th>Scene</th><th>Call T</th><th>Shift</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class=\'p-2 text-slate-500\'>No units</div>';
 }
 
 function uTimers(u){
@@ -277,6 +278,8 @@ function uTimers(u){
   const shift = u.in_service_at ? fmtDur(elapsed(u.in_service_at)) : '-';
   return { avail, scene, call: fmtDur(acc), shift };
 }
+function unitStatusOptions(type){ const codes={police:['AQ','OS','ER','TR','CAN','LUN','AFR'],fire:['AQ','OS','ER','CAN','OOS','AFR','MAINT'],ems:['AQ','ER','OS','TR','CAN','NPF','DEL','AFR']}[type]||['AQ','OS','ER','CAN']; return `<option value=''>Set...</option>` + codes.map(c=>`<option value='${c}'>${statusLabel(c)}</option>`).join(''); }
+window.setUnitStatus = async function(unitId){ const s = document.getElementById('uStat_'+unitId).value; if(!s) return; const u=state.units.find(x=>x.id===unitId); const inc=state.incidents.find(i=>i.id===u.current_incident_id); const path=inc ? `/incidents/${inc.id}/units/${unitId}/status` : `/units/${unitId}/status`; try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status_code:s})}); log(`Unit ${u.call_sign} set to ${statusLabel(s)}`); await load(); } catch(e){ log('Status error: '+e.message); } };
 
 async function selectUnit(id){ state.selectedUnit=id; await loadTrails(id); renderUnits(); renderMap(); }
 

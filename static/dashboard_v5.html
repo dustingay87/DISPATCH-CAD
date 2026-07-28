@@ -266,7 +266,7 @@ function renderCallEntry(){
       <select id='ceType' class='bg-slate-800 border border-slate-600 rounded p-2 w-full'><option value=''>Call Type</option></select>
       <div class='grid grid-cols-2 gap-2'>
         <input id='ceCallNum' placeholder='Call #' class='bg-slate-800 border border-slate-600 rounded p-2'>
-        <input id='cePriority' type='number' placeholder='Priority' class='bg-slate-800 border border-slate-600 rounded p-2'>
+        <input id='cePriority' type='number' placeholder='Priority' class='bg-slate-800 border border-slate-600 rounded p-2' readonly>
       </div>
       <input id='ceLoc' placeholder='Location' class='bg-slate-800 border border-slate-600 rounded p-2 w-full'>
       <div class='grid grid-cols-2 gap-2'>
@@ -323,7 +323,7 @@ async function createCall(){
   if(!cat || idx==='' || !agencyId){ addLog('Call entry: select service, call type, and agency'); return; }
   const type=CONFIG[cat].callTypes[idx];
   const extra={}; document.querySelectorAll('.ce-field').forEach(el=>{ if(el.value) extra[el.dataset.key]=el.value; });
-  const body={ agency_id: agencyId, call_number: document.getElementById('ceCallNum').value || undefined, call_type: type.label, priority: parseInt(document.getElementById('cePriority').value) || type.priority, location_text: document.getElementById('ceLoc').value, caller_name: document.getElementById('ceCaller').value, callback: document.getElementById('ceCallback').value, lat: CENTER[0]+(Math.random()-.5)*.04, lng: CENTER[1]+(Math.random()-.5)*.04, extra };
+  const body={ agency_id: agencyId, call_number: document.getElementById('ceCallNum').value || undefined, call_type: type.label, priority: type.priority, location_text: document.getElementById('ceLoc').value, caller_name: document.getElementById('ceCaller').value, callback: document.getElementById('ceCallback').value, lat: CENTER[0]+(Math.random()-.5)*.04, lng: CENTER[1]+(Math.random()-.5)*.04, extra };
   try { const i = await api('/incidents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); addLog(`Created call ${i.call_number||i.incident_number} ${i.call_type}`); await load(); } catch(e){ addLog('Create call error: '+e.message); }
 }
 
@@ -419,11 +419,14 @@ window.alertUnit = async function(id){ const msg=prompt('Alert message'); if(msg
 window.setUnitStatus = async function(unitId, code){
   const u = state.units.find(x=>x.id===unitId); const a=state.agencyMap[u.agency_id]; const cfg=CONFIG[a.agency_type];
   const incident = state.incidents.find(i=>i.id===u.current_incident_id);
-  if(!incident){ addLog('Unit is not assigned to an active call'); return; }
   let extra={status_code:code};
   if(code==='TR' || code==='CAN'){ const pc=prompt('Passenger / Patient count?'); if(pc) extra.passenger_count=parseInt(pc); }
   if(a.agency_type==='ems' && (code==='CAN' || code==='TR' || code==='NPF')){ const d=prompt('Disposition?\n' + (cfg.dispositions||[]).join('\n')); if(d) extra.disposition=d; }
-  try { await api(`/incidents/${incident.id}/units/${unitId}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); addLog(`${u.call_sign} -> ${code}`); await load(); } catch(e){ addLog('Status error: '+e.message); }
+  try {
+    if(incident){ await api(`/incidents/${incident.id}/units/${unitId}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); addLog(`${u.call_sign} -> ${statusLabel(code)}`); }
+    else { await api(`/units/${unitId}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); addLog(`${u.call_sign} -> ${statusLabel(code)}`); }
+    await load();
+  } catch(e){ addLog('Status error: '+e.message); }
 };
 
 function renderLog(){
