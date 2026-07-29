@@ -3659,6 +3659,43 @@ def scheduled_transports_page():
 def coverage_page():
     return FileResponse('static/coverage.html', headers={'Cache-Control':'no-cache, no-store, must-revalidate'})
 
+def _check_transport_conflicts(db, st, window_minutes=60, exclude_id=None):
+    if not st.scheduled_at:
+        return []
+    window = timedelta(minutes=window_minutes)
+    start = st.scheduled_at - window
+    end = st.scheduled_at + window
+    q = db.query(ScheduledTransport).filter(
+        ScheduledTransport.id != st.id,
+        ScheduledTransport.id != (exclude_id or -1),
+        ScheduledTransport.status != 'cancelled',
+        ScheduledTransport.scheduled_at >= start,
+        ScheduledTransport.scheduled_at <= end
+    )
+    if st.agency_id:
+        q = q.filter(ScheduledTransport.agency_id == st.agency_id)
+    conflicts = []
+    for other in q.all():
+        if (st.unit_id and other.unit_id == st.unit_id) or (st.patient_name and other.patient_name and st.patient_name.lower() == other.patient_name.lower()):
+            conflicts.append({'id': other.id, 'scheduled_at': other.scheduled_at, 'patient_name': other.patient_name, 'unit_id': other.unit_id, 'reason': 'time + resource overlap'})
+    return conflicts
+
+def _transport_warnings(db, agency_id=None):
+    now = datetime.utcnow()
+    soon = now + timedelta(minutes=30)
+    q = db.query(ScheduledTransport).filter(ScheduledTransport.status.in_(['scheduled','assigned']))
+    if agency_id:
+        q = q.filter(ScheduledTransport.agency_id == agency_id)
+    warnings = []
+    for st in q.all():
+        if not st.scheduled_at:
+            continue
+        if st.scheduled_at < now:
+            warnings.append({'id': st.id, 'scheduled_at': st.scheduled_at, 'patient_name': st.patient_name, 'unit_id': st.unit_id, 'type': 'late', 'reason': 'scheduled time has passed'})
+        elif st.scheduled_at <= soon:
+            warnings.append({'id': st.id, 'scheduled_at': st.scheduled_at, 'patient_name': st.patient_name, 'unit_id': st.unit_id, 'type': 'soon', 'reason': 'scheduled within 30 minutes'})
+    return warnings
+
 @app.get('/scheduled-transports', response_model=List[ScheduledTransportOut])
 def list_scheduled_transports(status: Optional[str] = None, agency_id: Optional[int] = None, date: Optional[date] = Query(None), current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     q = db.query(ScheduledTransport)
@@ -3685,6 +3722,17 @@ def get_scheduled_transport(st_id: int, current_user: dict = Depends(get_current
     if not st:
         raise HTTPException(status_code=404, detail='Scheduled transport not found')
     return st
+
+@app.get('/scheduled-transports/{st_id}/conflicts')
+def get_scheduled_transport_conflicts(st_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    st = db.query(ScheduledTransport).get(st_id)
+    if not st:
+        raise HTTPException(status_code=404, detail='Scheduled transport not found')
+    return _check_transport_conflicts(db, st)
+
+@app.get('/scheduled-transports/warnings')
+def get_scheduled_transport_warnings(agency_id: Optional[int] = Query(None), current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _transport_warnings(db, agency_id)
 
 @app.put('/scheduled-transports/{st_id}', response_model=ScheduledTransportOut)
 def update_scheduled_transport(st_id: int, body: ScheduledTransportUpdate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):

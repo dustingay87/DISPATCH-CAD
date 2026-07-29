@@ -36,6 +36,11 @@
     </div>
   </div>
 
+  <div id='warningPanel' class='hidden panel p-3 mb-4 border-red-600'>
+    <h2 class='font-bold text-red-400 mb-2'>Warnings</h2>
+    <div id='warningList' class='text-sm space-y-1'></div>
+  </div>
+
   <div class='grid grid-cols-1 lg:grid-cols-3 gap-4'>
     <div class='lg:col-span-2 panel p-3'>
       <div class='flex gap-2 mb-2 text-sm'>
@@ -96,6 +101,7 @@
         </div>
         <label class='text-xs text-slate-400'>Notes</label>
         <textarea id='notes' class='form-input' rows='2'></textarea>
+        <div id='conflictList' class='text-xs text-slate-300'></div>
         <div class='flex space-x-2 pt-2'>
           <button class='btn flex-1' onclick='save()'>Save</button>
           <button class='btn btn-red flex-1' onclick='clearForm()'>Clear</button>
@@ -158,7 +164,31 @@ async function load(){
   try {
     state.transports = await api(`/scheduled-transports?${q.toString()}`);
     renderList();
+    await loadWarnings();
   } catch(e){ document.getElementById('list').innerHTML = `<div class='text-red-400'>Error: ${e.message}</div>`; }
+}
+
+async function loadWarnings(){
+  const panel = document.getElementById('warningPanel');
+  const el = document.getElementById('warningList');
+  if(!panel || !el) return;
+  try {
+    const warnings = await api('/scheduled-transports/warnings');
+    if(warnings.length){
+      panel.classList.remove('hidden');
+      el.innerHTML = warnings.map(w=>`<div class='text-yellow-300'>${w.type.toUpperCase()} <b>${w.patient_name||'Unknown'}</b> at ${fmtDateTime(w.scheduled_at)} — ${w.reason}</div>`).join('');
+    } else {
+      panel.classList.add('hidden');
+    }
+  } catch(e){ panel.classList.add('hidden'); }
+}
+
+async function checkConflicts(id){
+  const el = document.getElementById('conflictList'); if(!el) return;
+  try {
+    const conflicts = await api(`/scheduled-transports/${id}/conflicts`);
+    el.innerHTML = conflicts.length ? conflicts.map(c=>`<div class='text-red-400 text-xs'>${c.reason}: ${c.patient_name||'Unknown'} at ${fmtDateTime(c.scheduled_at)}</div>`).join('') : '<div class="text-green-400 text-xs">No conflicts</div>';
+  } catch(e){ el.innerHTML = '<div class="text-slate-500 text-xs">Conflict check unavailable</div>'; }
 }
 
 function statusClass(s){ return `tag status-${s||'scheduled'}`; }
@@ -200,6 +230,7 @@ function clearForm(){
 
 function editTransport(id){
   const t = state.transports.find(x=>x.id===id); if(!t) return;
+  checkConflicts(id);
   document.getElementById('stId').value = t.id;
   document.getElementById('agency').value = t.agency_id;
   agencyChanged();
