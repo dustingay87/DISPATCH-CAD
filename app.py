@@ -2718,6 +2718,21 @@ def validate_incident_location_endpoint(incident_id: int, db: Session = Depends(
     loc = db.query(IncidentLocation).filter_by(incident_id=incident_id).first()
     return get_incident_location(incident_id, db)
 
+def _dispatch_one_unit(db, incident, unit, user, notes=None):
+    existing = db.query(IncidentUnit).filter_by(incident_id=incident.id, unit_id=unit.id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail='Unit already dispatched to incident')
+    iu = IncidentUnit(incident_id=incident.id, unit_id=unit.id, notes=notes)
+    unit.current_incident_id = incident.id
+    unit.last_assigned_at = datetime.utcnow()
+    unit.current_status = 'AK'
+    db.add(iu)
+    db.flush()
+    refresh_incident_status(db, incident)
+    _log_event(db, 'unit_dispatched', 'incident', incident.id, user_id=user.get('user_id'), data={'unit_id': unit.id, 'notes': notes}, agency_id=incident.agency_id)
+    db.add(StatusEvent(unit_id=unit.id, incident_id=incident.id, status_code='AK', reason='Dispatched to incident'))
+    return iu
+
 @app.post('/incidents/{incident_id}/dispatch/{unit_id}')
 def dispatch_unit(request: Request, incident_id: int, unit_id: int, notes: Optional[str] = None, db: Session = Depends(get_db)):
     check_role(request, DISPATCHER_ROLES)
@@ -2725,19 +2740,8 @@ def dispatch_unit(request: Request, incident_id: int, unit_id: int, notes: Optio
     unit = db.query(Unit).get(unit_id)
     if not incident or not unit:
         raise HTTPException(status_code=404, detail='Incident or unit not found')
-    existing = db.query(IncidentUnit).filter_by(incident_id=incident_id, unit_id=unit_id).first()
-    if existing:
-        raise HTTPException(status_code=400, detail='Unit already dispatched to incident')
     user = get_current_user(request)
-    iu = IncidentUnit(incident_id=incident_id, unit_id=unit_id, notes=notes)
-    unit.current_incident_id = incident_id
-    unit.last_assigned_at = datetime.utcnow()
-    unit.current_status = 'AK'
-    db.add(iu)
-    db.flush()
-    refresh_incident_status(db, incident)
-    _log_event(db, 'unit_dispatched', 'incident', incident_id, user_id=user.get('user_id'), data={'unit_id': unit_id, 'notes': notes}, agency_id=incident.agency_id)
-    db.add(StatusEvent(unit_id=unit_id, incident_id=incident_id, status_code='AK', reason='Dispatched to incident'))
+    iu = _dispatch_one_unit(db, incident, unit, user, notes)
     db.commit()
     db.refresh(iu)
     return {
@@ -2746,6 +2750,53 @@ def dispatch_unit(request: Request, incident_id: int, unit_id: int, notes: Optio
         'assigned_at': iu.assigned_at,
         'assignment_status': iu.assignment_status
     }
+
+@app.post('/incidents/{incident_id}/dispatch-recommended')
+def dispatch_recommended(request: Request, incident_id: int, db: Session = Depends(get_db)):
+    check_role(request, DISPATCHER_ROLES)
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    user = get_current_user(request)
+    profile = _get_response_profile(db, incident)
+    slots = _profile_slots(profile)
+    max_units = profile.get('max_units') if profile and not slots else None
+    recs = recommend_units(incident_id=incident_id, limit=25, db=db)
+    slot_remaining = {}
+    total_needed = 0
+    if slots:
+        assigned_by_type = {}
+        for _, unit in db.query(IncidentUnit, Unit).join(Unit, IncidentUnit.unit_id == Unit.id).filter(IncidentUnit.incident_id == incident_id, IncidentUnit.assignment_status != 'cleared').all():
+            assigned_by_type[unit.unit_type] = assigned_by_type.get(unit.unit_type, 0) + 1
+        for s in slots:
+            t = s.get('unit_type'); c = s.get('count', 1)
+            slot_remaining[t] = max(0, c - assigned_by_type.get(t, 0))
+        total_needed = sum(slot_remaining.values())
+    elif max_units:
+        total_assigned = db.query(IncidentUnit).filter_by(incident_id=incident_id).filter(IncidentUnit.assignment_status != 'cleared').count()
+        total_needed = max(0, max_units - total_assigned)
+    else:
+        total_needed = 1
+    dispatched = []
+    for r in recs:
+        if not r.get('eligible') or total_needed <= 0:
+            continue
+        unit = db.query(Unit).get(r['unit_id'])
+        if not unit or unit.current_incident_id:
+            continue
+        if slots and slot_remaining.get(unit.unit_type, 0) <= 0:
+            continue
+        iu = _dispatch_one_unit(db, incident, unit, user)
+        dispatched.append({'unit_id': unit.id, 'call_sign': unit.call_sign})
+        total_needed -= 1
+        if slots:
+            slot_remaining[unit.unit_type] = slot_remaining.get(unit.unit_type, 0) - 1
+    if not dispatched:
+        raise HTTPException(status_code=400, detail='No eligible recommended units available')
+    db.commit()
+    _log_event(db, 'incident_bulk_dispatched', 'incident', incident_id, user_id=user.get('user_id'), data={'unit_ids': [d['unit_id'] for d in dispatched]}, agency_id=incident.agency_id)
+    db.commit()
+    return {'dispatched': dispatched, 'resource_status': _incident_resource_status(db, incident)}
 
 @app.get('/incidents/{incident_id}/packet/{unit_id}')
 def get_dispatch_packet(incident_id: int, unit_id: int, db: Session = Depends(get_db)):

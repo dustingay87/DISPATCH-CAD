@@ -394,9 +394,10 @@ async function selectIncident(id){
       </div>
       <div class='text-xs text-slate-400'>Caller: <b class='text-white'>${i.caller_name||'-'} ${i.callback||''}</b></div>
       <div class='text-xs bg-slate-900 p-1 rounded max-h-24 overflow-auto' id='incNarrative'>${narrative || 'No narrative'}</div>
-      <div class='flex gap-2'>
+      <div class='flex gap-2 flex-wrap'>
         <select id='dispUnit' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value=''>Unit</option>${availOpts}</select>
         <button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='dispatchSelected()'>Dispatch</button>
+        <button class='bg-green-700 hover:bg-green-600 px-2 py-0.5 rounded text-xs' onclick='dispatchRecommendedAll(${i.id})'>Dispatch All Needed</button>
         <button class='bg-red-800 hover:bg-red-700 px-2 py-0.5 rounded text-xs' onclick='closeSelected()'>Close</button>
         ${fireReportBtn}
       </div>
@@ -718,6 +719,10 @@ async function dispatchSelected(){
 window.dispatchRecommended = async function(unitId){
   if(!unitId || !state.selectedIncident) return;
   try { await api(`/incidents/${state.selectedIncident}/dispatch/${unitId}`, {method:'POST'}); log(`Dispatched unit ${unitId} to ${state.selectedIncident}`); await load(); } catch(e){ log('Dispatch error: '+e.message); }
+}
+window.dispatchRecommendedAll = async function(incidentId){
+  if(!incidentId) return;
+  try { const res = await api(`/incidents/${incidentId}/dispatch-recommended`, {method:'POST'}); log(`Dispatched ${res.dispatched.length} units`); await load(); } catch(e){ log('Bulk dispatch error: '+e.message); }
 }
 async function closeSelected(){
   if(!state.selectedIncident) return;
