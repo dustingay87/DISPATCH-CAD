@@ -260,8 +260,8 @@ async function init(){
     const user = await api('/me'); state.user = user;
     state.agencies = await api('/agencies');
     state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
-    const modules = user?.modules && user.modules.length ? user.modules.map(moduleToDiscipline) : (d ? [d] : ['fire']);
-    const allowedDisciplines = modules.filter(m=>['police','fire','ems'].includes(m));
+    const userAgency = user?.agency_id ? state.agencyMap[user.agency_id] : null;
+    const allowedDisciplines = (user?.role === 'admin') ? ['police','fire','ems'] : (userAgency ? [userAgency.agency_type] : (d ? [d] : ['fire']));
     const defaultDiscipline = allowedDisciplines[0] || 'fire';
     document.querySelectorAll('#disciplineTabs .tab').forEach(t=>t.classList.toggle('hidden', !allowedDisciplines.includes(t.dataset.d)));
     if(allowedDisciplines.length <= 1){
