@@ -16,12 +16,15 @@ import hmac
 import hashlib
 import urllib.request
 import urllib.parse
+import socket
+import threading
 from dotenv import load_dotenv
 
 load_dotenv()
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-change-me')
 INSECURE_DEV = os.getenv('INSECURE_DEV', 'false').lower() == 'true'
+TAIP_UDP_PORT = int(os.getenv('TAIP_UDP_PORT', '5005'))
 
 login_attempts = {}
 
@@ -450,6 +453,7 @@ if DATABASE_URL.startswith('sqlite'):
     ensure_sqlite_columns()
 
 geocode_missing_agencies()
+start_taip_udp_listener()
 
 app = FastAPI(title='VolCAD Prototype', version='0.1.0')
 
@@ -2232,16 +2236,15 @@ def update_incident_personnel(request: Request, incident_id: int, ip_id: int, bo
     db.commit(); db.refresh(ip)
     return ip
 
-@app.post('/taip/ingest')
-def ingest_taip(body: TaipIngest, db: Session = Depends(get_db)):
-    data = parse_taip(body.raw)
-    taip_id = body.taip_id or data.get('taip_id')
+def _record_taip_sentence(db, raw: str, taip_id: Optional[str] = None) -> TaipPosition:
+    data = parse_taip(raw)
+    taip_id = taip_id or data.get('taip_id')
     if not taip_id:
-        raise HTTPException(status_code=400, detail='taip_id not found in sentence or request')
+        raise ValueError('taip_id not found in sentence')
     unit = db.query(Unit).filter(Unit.taip_id == taip_id).first()
     pos = TaipPosition(
         taip_id=taip_id,
-        raw_sentence=body.raw,
+        raw_sentence=raw,
         lat=data.get('lat'),
         lng=data.get('lng'),
         speed=data.get('speed'),
@@ -2264,7 +2267,50 @@ def ingest_taip(body: TaipIngest, db: Session = Depends(get_db)):
     db.add(pos)
     db.commit()
     db.refresh(pos)
-    return {'taip_id': taip_id, 'parsed': data, 'unit_id': pos.unit_id}
+    return pos
+
+@app.post('/taip/ingest')
+def ingest_taip(body: TaipIngest, db: Session = Depends(get_db)):
+    pos = _record_taip_sentence(db, body.raw, body.taip_id)
+    return {'taip_id': pos.taip_id, 'parsed': parse_taip(body.raw), 'unit_id': pos.unit_id}
+
+def _taip_udp_listener():
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(('0.0.0.0', TAIP_UDP_PORT))
+        print(f'TAIP UDP listener started on 0.0.0.0:{TAIP_UDP_PORT}')
+        while True:
+            try:
+                data, addr = sock.recvfrom(2048)
+                text = data.decode('utf-8', errors='ignore')
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        db = SessionLocal()
+                        _record_taip_sentence(db, line)
+                    except Exception as e:
+                        print(f'TAIP UDP record error from {addr}: {e}')
+                    finally:
+                        db.close()
+            except Exception as e:
+                print(f'TAIP UDP receive error: {e}')
+    except OSError as e:
+        print(f'TAIP UDP listener could not bind to port {TAIP_UDP_PORT}: {e}')
+    except Exception as e:
+        print(f'TAIP UDP listener error: {e}')
+
+def start_taip_udp_listener():
+    if TAIP_UDP_PORT <= 0:
+        return
+    t = threading.Thread(target=_taip_udp_listener, daemon=True)
+    t.start()
+
+@app.get('/taip/udp-info')
+def taip_udp_info():
+    return {'port': TAIP_UDP_PORT, 'bind_host': '0.0.0.0', 'note': 'Configure your remote TAIP feed to send UDP to the public IP of this server on the listed port. The unit taip_id in the sentence must match a Unit.taip_id in VolCAD.'}
 
 @app.get('/taip/positions', response_model=List[TaipPositionOut])
 def list_taip_positions(unit_id: Optional[int] = Query(None), limit: int = 50, db: Session = Depends(get_db)):
