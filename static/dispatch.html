@@ -58,6 +58,7 @@
     <aside class='flex flex-col gap-1 min-h-0'>
       <div class='card flex-1 min-h-0'>
         <div class='card-head flex justify-between'><span>Active Calls</span><span id='callCount' class='text-slate-400'>0</span></div>
+        <div id='callFilters' class='p-1 flex flex-wrap gap-1 border-b border-slate-700 text-[10px]'></div>
         <div id='callList' class='card-body'></div>
       </div>
     </aside>
@@ -260,23 +261,57 @@ function initMap(){
 
 function renderLog(){ const el=document.getElementById('eventLog'); el.innerHTML = state.logs.map(l=>`<div class='border-l-2 border-slate-600 pl-1'>${l}</div>`).join(''); el.scrollTop=0; }
 
+function renderCallFilters(){
+  const el = document.getElementById('callFilters'); if(!el) return;
+  const zones = [...new Set(state.postZones.map(z=>z.name).filter(Boolean))].sort();
+  const html = `<select id='cfPriority' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All Pri</option><option value='1'>P1</option><option value='2'>P2</option><option value='3'>P3</option><option value='4'>P4</option></select>
+    <select id='cfStatus' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All Status</option><option value='open'>Open</option><option value='dispatched'>Dispatched</option><option value='en_route'>En Route</option><option value='on_scene'>On Scene</option><option value='cleared'>Cleared</option></select>
+    <select id='cfAssigned' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All</option><option value='assigned'>Assigned</option><option value='unassigned'>Unassigned</option></select>
+    ${zones.length ? `<select id='cfZone' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All Zones</option>${zones.map(z=>`<option value='${z}'>${z}</option>`).join('')}</select>` : ''}
+    <input id='cfSearch' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px] flex-1 min-w-[4rem]' oninput='applyCallFilters()' placeholder='Search'>`;
+  if(state.lastCallFiltersHtml !== html){ state.lastCallFiltersHtml = html; el.innerHTML = html; }
+}
+function applyCallFilters(){ renderCalls(); }
 function renderCalls(){
-  const active = state.incidents.filter(i=>i.status!=='closed' && matchesDiscipline((state.agencyMap[i.agency_id]||{}).agency_type)).sort((a,b)=> (a.priority||2)-(b.priority||2) || new Date(b.created_at)-new Date(a.created_at));
+  const priority = document.getElementById('cfPriority')?.value || 'all';
+  const status = document.getElementById('cfStatus')?.value || 'all';
+  const assigned = document.getElementById('cfAssigned')?.value || 'all';
+  const zone = document.getElementById('cfZone')?.value || 'all';
+  const search = (document.getElementById('cfSearch')?.value || '').toLowerCase();
+  const active = state.incidents.filter(i=>{
+    if(i.status==='closed') return false;
+    if(!matchesDiscipline((state.agencyMap[i.agency_id]||{}).agency_type)) return false;
+    if(priority!=='all' && String(i.priority||2)!==priority) return false;
+    if(status!=='all' && i.status!==status) return false;
+    if(assigned==='assigned' && !state.units.some(u=>u.current_incident_id===i.id)) return false;
+    if(assigned==='unassigned' && state.units.some(u=>u.current_incident_id===i.id)) return false;
+    if(zone!=='all' && (i.extra?.zone_name||'')!==zone) return false;
+    if(search){
+      const text = `${i.call_number||''} ${i.incident_number||''} ${i.call_type||''} ${i.location_text||''} ${i.caller_name||''}`.toLowerCase();
+      if(!text.includes(search)) return false;
+    }
+    return true;
+  }).sort((a,b)=> (a.priority||2)-(b.priority||2) || new Date(b.created_at)-new Date(a.created_at));
   document.getElementById('callCount').textContent = active.length;
-  const html = active.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Status</th><th>Loc</th><th>Zone</th><th>Units</th><th>SLA</th></tr></thead><tbody>` + active.map(i=>{
+  const html = active.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Status</th><th>Pickup</th><th>Zone</th><th>Dest</th><th>Units</th><th>Age</th><th>SLA</th></tr></thead><tbody>` + active.map(i=>{
     const a=state.agencyMap[i.agency_id]||{};
     const target=priorityTarget(i.priority);
     const assigned=state.units.filter(u=>u.current_incident_id===i.id).map(u=>u.call_sign).join(', ')||'-'; 
     const cls = state.selectedIncident===i.id ? 'selected' : '';
     const unv = i.extra?.verification_status==='unverified' ? ` <span class='text-red-400 font-bold' title='UNVERIFIED LOCATION'>!</span>` : '';
+    const ageSec = elapsed(i.created_at);
+    const ageCls = ageSec > target ? 'text-red-400 font-bold' : '';
+    const dest = i.extra?.destination_name || '-';
     return `<tr class='priority-${Math.min(Math.max(i.priority||2,1),4)} ${cls}' onclick='selectIncident(${i.id})'>
-      <td class='font-bold'>${i.call_number||i.incident_number}</td>
+      <td class='font-bold' title='${i.incident_number||''}'>${i.call_number||i.incident_number}</td>
       <td>${i.call_type}</td>
       <td class='text-center'>P${i.priority}</td>
       <td>${statusLabel(i.status)}</td>
-      <td>${i.location_text||'-'}${unv}</td>
+      <td title='${i.location_text||''}'>${i.location_text||'-'}${unv}</td>
       <td>${i.extra?.zone_name||'-'}</td>
+      <td>${dest}</td>
       <td>${assigned}</td>
+      <td class='timer ${ageCls}' data-iso='${i.created_at}' data-fallback='-' title='Received ${fmtTime(i.created_at)}'>-</td>
       <td class='timer' data-timer='sla' data-iso='${i.created_at}' data-target='${target}'>--:--:--</td>
     </tr>`;
   }).join('') + '</tbody></table>' : '<div class=\'p-2 text-slate-500\'>No active calls</div>';
@@ -897,7 +932,7 @@ async function load(){
     const lbl = document.getElementById('consoleLabel'); if(lbl) lbl.textContent = DISCIPLINE==='all' ? 'Console' : DISCIPLINE.toUpperCase()+' Console';
     const sel = document.getElementById('msgUnit');
     if(sel.options.length<=1){ state.units.forEach(u=>{ sel.innerHTML += `<option value='${u.id}'>${u.call_sign}</option>`; }); }
-    renderCalls(); renderUnits(); renderMap(); renderMessages();
+    renderCallFilters(); renderCalls(); renderUnits(); renderMap(); renderMessages();
     if(state.selectedIncident){ selectIncident(state.selectedIncident); }
   } catch(e){ log('Load error: '+e.message); }
 }
