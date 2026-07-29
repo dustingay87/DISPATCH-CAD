@@ -173,6 +173,27 @@ class IncidentUnit(Base):
     incident = relationship('Incident', back_populates='assigned_units')
     unit = relationship('Unit')
 
+class IncidentLocation(Base):
+    __tablename__ = 'incident_locations'
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey('incidents.id'), unique=True, index=True)
+    raw_address = Column(Text)
+    standardized_address = Column(Text)
+    city = Column(String(100))
+    state = Column(String(2))
+    postal_code = Column(String(20))
+    latitude = Column(Float)
+    longitude = Column(Float)
+    cross_streets = Column(String(255))
+    zone_id = Column(Integer, ForeignKey('post_zones.id'), nullable=True)
+    jurisdiction_id = Column(Integer, ForeignKey('agencies.id'), nullable=True)
+    verification_status = Column(String(50), default='unverified')
+    geocoded_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    incident = relationship('Incident', backref='incident_location')
+    zone = relationship('PostZone')
+    jurisdiction = relationship('Agency')
+
 class IncidentPersonnel(Base):
     __tablename__ = 'incident_personnel'
     id = Column(Integer, primary_key=True, index=True)
@@ -1720,6 +1741,115 @@ def geocode_address(query):
         print('Geocode error:', e)
     return None, None
 
+def _geocode_structured(query):
+    if not query or not query.strip():
+        return None
+    try:
+        url = 'https://nominatim.openstreetmap.org/search?' + urllib.parse.urlencode({'q': query, 'format': 'json', 'addressdetails': 1, 'limit': 1})
+        req = urllib.request.Request(url, headers={'User-Agent': 'D2D-CAD/1.0'})
+        with urllib.request.urlopen(req, timeout=GEOCODER_TIMEOUT) as r:
+            data = json.loads(r.read().decode())
+            if data:
+                d = data[0]
+                a = d.get('address') or {}
+                return {
+                    'lat': float(d['lat']),
+                    'lng': float(d['lon']),
+                    'display_name': d.get('display_name'),
+                    'address': {
+                        'house_number': a.get('house_number'),
+                        'road': a.get('road'),
+                        'city': a.get('city') or a.get('town') or a.get('village'),
+                        'county': a.get('county'),
+                        'state': a.get('state'),
+                        'postcode': a.get('postcode'),
+                        'country': a.get('country')
+                    }
+                }
+    except Exception as e:
+        print('Geocode structured error:', e)
+    return None
+
+def _point_in_ring(lat, lng, ring):
+    inside = False
+    n = len(ring)
+    j = n - 1
+    for i in range(n):
+        xi, yi = ring[i][0], ring[i][1]
+        xj, yj = ring[j][0], ring[j][1]
+        if ((yi > lng) != (yj > lng)) and (lat < (xj - xi) * (lng - yi) / (yj - yi + 1e-12) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+def _point_in_geojson(lat, lng, geojson):
+    if not geojson or lat is None or lng is None:
+        return False
+    g = geojson
+    if 'geometry' in g:
+        g = g['geometry']
+    t = g.get('type')
+    coords = g.get('coordinates')
+    if t == 'Polygon' and coords:
+        for ring in coords:
+            if _point_in_ring(lat, lng, ring):
+                return True
+        return False
+    if t == 'MultiPolygon' and coords:
+        for poly in coords:
+            for ring in poly:
+                if _point_in_ring(lat, lng, ring):
+                    return True
+        return False
+    return False
+
+def _find_zone_for_point(db, lat, lng, agency_id=None):
+    q = db.query(PostZone).filter(PostZone.is_active == True)
+    if agency_id:
+        q = q.filter(or_(PostZone.agency_id == agency_id, PostZone.agency_id == None))
+    for z in q.all():
+        if _point_in_geojson(lat, lng, z.geojson):
+            return z
+    return None
+
+def _cross_streets_around(db, lat, lng):
+    # Placeholder: cross streets require road network data.
+    return None
+
+def _validate_incident_location(db, incident, force=False):
+    loc = db.query(IncidentLocation).filter_by(incident_id=incident.id).first()
+    if not loc:
+        loc = IncidentLocation(incident_id=incident.id, raw_address=incident.location_text)
+        db.add(loc)
+    if not force and loc.verification_status == 'verified' and loc.latitude is not None and loc.longitude is not None:
+        return loc
+    extra = incident.extra or {}
+    g = _geocode_structured(incident.location_text) if incident.location_text else None
+    if g:
+        loc.standardized_address = g.get('display_name')
+        a = g.get('address') or {}
+        loc.city = a.get('city')
+        loc.state = a.get('state')
+        loc.postal_code = a.get('postcode')
+        loc.latitude = g['lat']
+        loc.longitude = g['lng']
+        loc.geocoded_at = datetime.utcnow()
+        loc.verification_status = 'verified'
+        incident.lat = g['lat']
+        incident.lng = g['lng']
+        extra['verification_status'] = 'verified'
+        extra['standardized_address'] = loc.standardized_address
+    else:
+        loc.verification_status = 'unverified'
+        extra['verification_status'] = 'unverified'
+    zone = _find_zone_for_point(db, loc.latitude, loc.longitude, incident.agency_id) if (loc.latitude and loc.longitude) else None
+    loc.zone_id = zone.id if zone else None
+    extra['zone_name'] = zone.name if zone else None
+    extra['zone_id'] = zone.id if zone else None
+    loc.cross_streets = _cross_streets_around(db, loc.latitude, loc.longitude)
+    incident.extra = extra
+    return loc
+
 def fill_agency_lat_lng(agency):
     if agency.lat is not None and agency.lng is not None:
         return
@@ -2056,21 +2186,16 @@ def create_incident(request: Request, body: IncidentCreate, db: Session = Depend
         data['incident_number'] = f"{data['agency_id']}-{count + 1:05d}"
     if not data.get('call_number'):
         data['call_number'] = data['incident_number']
-    if data.get('lat') is None or data.get('lng') is None:
-        if data.get('location_text'):
-            lat, lng = geocode_address(data['location_text'])
-            if lat is not None and lng is not None:
-                data['lat'] = lat
-                data['lng'] = lng
-        if data.get('lat') is None or data.get('lng') is None:
-            agency = db.query(Agency).get(data.get('agency_id'))
-            if agency and agency.lat is not None and agency.lng is not None:
-                data['lat'] = agency.lat
-                data['lng'] = agency.lng
     user = get_current_user(request)
     incident = Incident(**data)
     db.add(incident)
     db.flush()
+    _validate_incident_location(db, incident)
+    if incident.lat is None or incident.lng is None:
+        agency = db.query(Agency).get(data.get('agency_id'))
+        if agency and agency.lat is not None and agency.lng is not None:
+            incident.lat = agency.lat
+            incident.lng = agency.lng
     _log_event(db, 'incident_created', 'incident', incident.id, user_id=user.get('user_id'), data=data, agency_id=data.get('agency_id'))
     db.commit()
     db.refresh(incident)
@@ -2305,6 +2430,8 @@ def update_incident(request: Request, incident_id: int, body: IncidentUpdate, db
     changes = body.model_dump(exclude_unset=True)
     for k, v in changes.items():
         setattr(incident, k, v)
+    if 'location_text' in changes:
+        _validate_incident_location(db, incident, force=True)
     if body.status == 'closed' and not incident.closed_at:
         incident.closed_at = datetime.utcnow()
         for unit in db.query(Unit).filter(Unit.current_incident_id == incident.id).all():
@@ -2323,6 +2450,41 @@ def update_incident(request: Request, incident_id: int, body: IncidentUpdate, db
     db.commit()
     db.refresh(incident)
     return incident
+
+@app.get('/incidents/{incident_id}/location')
+def get_incident_location(incident_id: int, db: Session = Depends(get_db)):
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    loc = db.query(IncidentLocation).filter_by(incident_id=incident_id).first()
+    if not loc:
+        return {'incident_id': incident_id, 'verification_status': 'unverified', 'standardized_address': None, 'latitude': incident.lat, 'longitude': incident.lng}
+    zone = db.query(PostZone).get(loc.zone_id) if loc.zone_id else None
+    return {
+        'incident_id': incident_id,
+        'raw_address': loc.raw_address,
+        'standardized_address': loc.standardized_address,
+        'city': loc.city,
+        'state': loc.state,
+        'postal_code': loc.postal_code,
+        'latitude': loc.latitude,
+        'longitude': loc.longitude,
+        'cross_streets': loc.cross_streets,
+        'zone_id': loc.zone_id,
+        'zone_name': zone.name if zone else None,
+        'verification_status': loc.verification_status,
+        'geocoded_at': loc.geocoded_at
+    }
+
+@app.post('/incidents/{incident_id}/validate-location')
+def validate_incident_location_endpoint(incident_id: int, db: Session = Depends(get_db)):
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    _validate_incident_location(db, incident, force=True)
+    db.commit(); db.refresh(incident)
+    loc = db.query(IncidentLocation).filter_by(incident_id=incident_id).first()
+    return get_incident_location(incident_id, db)
 
 @app.post('/incidents/{incident_id}/dispatch/{unit_id}')
 def dispatch_unit(request: Request, incident_id: int, unit_id: int, notes: Optional[str] = None, db: Session = Depends(get_db)):

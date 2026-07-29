@@ -263,17 +263,19 @@ function renderLog(){ const el=document.getElementById('eventLog'); el.innerHTML
 function renderCalls(){
   const active = state.incidents.filter(i=>i.status!=='closed' && matchesDiscipline((state.agencyMap[i.agency_id]||{}).agency_type)).sort((a,b)=> (a.priority||2)-(b.priority||2) || new Date(b.created_at)-new Date(a.created_at));
   document.getElementById('callCount').textContent = active.length;
-  const html = active.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Status</th><th>Loc</th><th>Units</th><th>SLA</th></tr></thead><tbody>` + active.map(i=>{
+  const html = active.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Status</th><th>Loc</th><th>Zone</th><th>Units</th><th>SLA</th></tr></thead><tbody>` + active.map(i=>{
     const a=state.agencyMap[i.agency_id]||{};
     const target=priorityTarget(i.priority);
     const assigned=state.units.filter(u=>u.current_incident_id===i.id).map(u=>u.call_sign).join(', ')||'-'; 
     const cls = state.selectedIncident===i.id ? 'selected' : '';
+    const unv = i.extra?.verification_status==='unverified' ? ` <span class='text-red-400 font-bold' title='UNVERIFIED LOCATION'>!</span>` : '';
     return `<tr class='priority-${Math.min(Math.max(i.priority||2,1),4)} ${cls}' onclick='selectIncident(${i.id})'>
       <td class='font-bold'>${i.call_number||i.incident_number}</td>
       <td>${i.call_type}</td>
       <td class='text-center'>P${i.priority}</td>
       <td>${statusLabel(i.status)}</td>
-      <td>${i.location_text||'-'}</td>
+      <td>${i.location_text||'-'}${unv}</td>
+      <td>${i.extra?.zone_name||'-'}</td>
       <td>${assigned}</td>
       <td class='timer' data-timer='sla' data-iso='${i.created_at}' data-target='${target}'>--:--:--</td>
     </tr>`;
@@ -348,7 +350,11 @@ async function selectIncident(id){
         <span title='Time to first on scene city'>On Scene City: ${milestoneText(onSceneAt, goals.on_scene_city_seconds, start)}</span>
         <span title='Time to first on scene county'>On Scene County: ${milestoneText(onSceneAt, goals.on_scene_county_seconds, start)}</span>
       </div>
-      <div class='text-xs text-slate-400'>Location: <b class='text-white'>${i.location_text||'-'}</b></div>
+      <div class='text-xs text-slate-400'>Location: <b class='text-white'>${i.location_text||'-'}</b> <span id='locBadge'></span></div>
+      <div id='locationPanel' class='text-xs bg-slate-900 p-1 rounded hidden'>
+        <div id='locDetails' class='text-slate-300'>Loading...</div>
+        <button class='mt-1 bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded text-[10px]' onclick='validateLocation(${i.id})'>Re-validate</button>
+      </div>
       <div class='text-xs text-slate-400'>Caller: <b class='text-white'>${i.caller_name||'-'} ${i.callback||''}</b></div>
       <div class='text-xs bg-slate-900 p-1 rounded max-h-24 overflow-auto' id='incNarrative'>${narrative || 'No narrative'}</div>
       <div class='flex gap-2'>
@@ -410,6 +416,7 @@ async function selectIncident(id){
     </div>`;
   restorePanelForm('incidentPanel', savedForm);
   await loadRecommendations(i.id);
+  await loadLocation(i.id);
   if(features.transport){ await loadDestination(i.id); await loadTransportLegs(i.id); }
   if(features.mileage){ await loadMileage(i.id); }
   if(showPersonnel){ await loadIncidentPersonnel(i.id); }
@@ -436,6 +443,28 @@ async function loadRecommendations(id){
       </div>`;
     }).join('') : '<div class=\'text-slate-500\'>No available recommended units</div>';
   } catch(e){ el.innerHTML = '<div class=\'text-slate-500\'>Recommendations unavailable</div>'; }
+}
+
+async function loadLocation(id){
+  const panel = document.getElementById('locationPanel');
+  const details = document.getElementById('locDetails');
+  const badge = document.getElementById('locBadge');
+  if(!panel) return;
+  try {
+    const loc = await api(`/incidents/${id}/location`);
+    const status = loc.verification_status === 'verified' ? `<span class='text-green-400' title='Verified at ${loc.geocoded_at||''}'>verified</span>` : `<span class='text-red-400 font-bold' title='Could not verify address'>UNVERIFIED</span>`;
+    if(badge) badge.innerHTML = `(${status})`;
+    panel.classList.remove('hidden');
+    if(details) details.innerHTML = `
+      <div><span class='text-slate-500'>Standardized:</span> ${loc.standardized_address||'-'}</div>
+      <div><span class='text-slate-500'>Zone:</span> ${loc.zone_name||'-'}</div>
+      <div><span class='text-slate-500'>Coords:</span> ${loc.latitude!=null&&loc.longitude!=null ? loc.latitude.toFixed(5)+', '+loc.longitude.toFixed(5) : '-'}</div>
+    `;
+  } catch(e){ panel.classList.add('hidden'); }
+}
+window.validateLocation = async function(id){
+  try { await api(`/incidents/${id}/validate-location`, {method:'POST'}); await load(); if(state.selectedIncident===id) await loadLocation(id); }
+  catch(e){ log('Validate error: '+e.message); }
 }
 
 async function loadDestination(id){
