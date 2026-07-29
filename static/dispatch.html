@@ -420,7 +420,21 @@ async function loadRecommendations(id){
   const el = document.getElementById('recs'); if(!el) return;
   try {
     const recs = await api(`/incidents/${id}/recommend`);
-    el.innerHTML = recs.length ? recs.map(r=>`<div class='text-slate-300'>${r.call_sign} (${r.unit_type}) <span class='text-slate-500'>${r.distance_miles!=null ? r.distance_miles.toFixed(1)+' mi' : 'no loc'}</span> <span class='text-blue-400'>${r.reason}</span></div>`).join('') : '<div class=\'text-slate-500\'>No available recommended units</div>';
+    el.innerHTML = recs.length ? recs.map((r,i)=>{
+      const eta = r.eta_minutes!=null ? `${r.eta_minutes} min` : '-';
+      const dist = r.distance_miles!=null ? `${r.distance_miles.toFixed(1)} mi` : '-';
+      const cls = r.eligible ? 'text-slate-300' : 'text-slate-500';
+      const btn = r.eligible ? `<button class='bg-blue-700 hover:bg-blue-600 px-1.5 py-0.5 rounded text-[10px] text-white' onclick='dispatchRecommended(${r.unit_id})'>Assign</button>` : `<span class='text-slate-600 text-[10px]'>ineligible</span>`;
+      return `<div class='flex items-center justify-between gap-2 ${cls}' title='${r.reason}'>
+        <div class='flex items-center gap-1 min-w-0'>
+          <span class='font-mono w-4 opacity-60'>${i+1}</span>
+          <span class='font-semibold truncate'>${r.call_sign}</span>
+          <span class='text-slate-500'>${r.unit_type||'-'}</span>
+          <span class='text-slate-500 whitespace-nowrap'>${eta} · ${dist}</span>
+        </div>
+        ${btn}
+      </div>`;
+    }).join('') : '<div class=\'text-slate-500\'>No available recommended units</div>';
   } catch(e){ el.innerHTML = '<div class=\'text-slate-500\'>Recommendations unavailable</div>'; }
 }
 
@@ -612,6 +626,10 @@ async function dispatchSelected(){
   const uid = document.getElementById('dispUnit').value;
   if(!uid || !state.selectedIncident) return;
   try { await api(`/incidents/${state.selectedIncident}/dispatch/${uid}`, {method:'POST'}); log(`Dispatched unit ${uid} to ${state.selectedIncident}`); await load(); } catch(e){ log('Dispatch error: '+e.message); }
+}
+window.dispatchRecommended = async function(unitId){
+  if(!unitId || !state.selectedIncident) return;
+  try { await api(`/incidents/${state.selectedIncident}/dispatch/${unitId}`, {method:'POST'}); log(`Dispatched unit ${unitId} to ${state.selectedIncident}`); await load(); } catch(e){ log('Dispatch error: '+e.message); }
 }
 async function closeSelected(){
   if(!state.selectedIncident) return;

@@ -1664,6 +1664,8 @@ def _taip_stale_state(last_seen_at: Optional[datetime]):
     return age > TAIP_STALE_SECONDS, age > TAIP_OFFLINE_SECONDS
 
 _CALL_ACTIVE_STATUSES = {'AK','ER','OS','TR','ED','WATER','EXT','OVER','TC','ARR','CT','BK'}
+_ASSIGNABLE_STATUSES = {'AQ','AFR','POSTING','STAGED','AT_STATION','AVAILABLE_ON_RADIO'}
+_OUT_OF_SERVICE_STATUSES = {'OOS','LUN','MAINT','OFF_DUTY','MEAL'}
 
 def map_status(code: str) -> str:
     return {
@@ -2100,7 +2102,7 @@ def get_incident(incident_id: int, db: Session = Depends(get_db)):
     return incident
 
 @app.get('/incidents/{incident_id}/recommend')
-def recommend_units(incident_id: int, limit: int = Query(5), db: Session = Depends(get_db)):
+def recommend_units(incident_id: int, limit: int = Query(10), db: Session = Depends(get_db)):
     incident = db.query(Incident).get(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail='Incident not found')
@@ -2112,42 +2114,106 @@ def recommend_units(incident_id: int, limit: int = Query(5), db: Session = Depen
     call_lower = (incident.call_type or '').lower()
     agency_type = agency.agency_type if agency else 'ems'
     required_level = 'ALS' if agency_type == 'ems' and any(k in call_lower for k in als_keywords) else 'BLS'
-    units = db.query(Unit).filter(Unit.current_status == 'AQ').all()
+    emergency = incident.priority in (1,2)
+    speed_mph = 35.0 if emergency else 25.0
+    now = datetime.utcnow()
+
+    # Pre-compute active posting counts per zone for coverage-loss penalty
+    from sqlalchemy import func
+    posting_counts = {}
+    for zone_id, cnt in db.query(UnitPosting.post_zone_id, func.count(UnitPosting.id)).filter(UnitPosting.is_current == True).group_by(UnitPosting.post_zone_id).all():
+        posting_counts[zone_id] = cnt
+    zones = {z.id: z for z in db.query(PostZone).all() if z.minimum_units}
+    units = db.query(Unit).filter(Unit.is_active == True).all()
     scored = []
     for u in units:
-        s = 0
+        s = 0.0
         reasons = []
+        eligible = True
         caps = u.capabilities or {}
-        unit_level = (caps.get('service_level') or 'BLS').upper() if agency_type == 'ems' else (u.unit_type or '')
         u_agency = db.query(Agency).get(u.agency_id)
-        if u_agency and u_agency.agency_type != agency_type:
-            s -= 1000; reasons.append('different agency type')
-        if u.agency_id == incident.agency_id:
-            s += 100; reasons.append('same agency')
+
+        # Hard eligibility rules
+        if not u_agency or u_agency.agency_type != agency_type:
+            eligible = False; reasons.append('different discipline')
+        if u.current_incident_id:
+            eligible = False; reasons.append('assigned to call')
+        if u.current_status in _OUT_OF_SERVICE_STATUSES:
+            eligible = False; reasons.append('out of service')
+        elif u.current_status not in _ASSIGNABLE_STATUSES:
+            eligible = False; reasons.append(f"status {u.current_status}")
+        if u.last_seen_at is None:
+            eligible = False; reasons.append('no GPS')
+        elif (now - u.last_seen_at).total_seconds() > TAIP_OFFLINE_SECONDS:
+            eligible = False; reasons.append('GPS offline')
+        elif (now - u.last_seen_at).total_seconds() > TAIP_STALE_SECONDS:
+            age = (now - u.last_seen_at).total_seconds()
+            s -= age * 0.05; reasons.append('GPS stale')
+
+        # Distance and ETA
+        dist_miles = None
+        eta_seconds = None
+        if incident.lat is not None and incident.lng is not None and u.lat is not None and u.lng is not None:
+            dist_m = _haversine_m(u.lat, u.lng, incident.lat, incident.lng)
+            if dist_m is not None:
+                dist_miles = dist_m / 1609.34
+                eta_seconds = (dist_miles / speed_mph) * 3600
+                s -= eta_seconds * 0.05
+                reasons.append(f"{dist_miles:.1f} mi · {eta_seconds/60:.0f} min")
+        if dist_miles is None:
+            eligible = False; reasons.append('no GPS')
+
+        # Service level / capability
+        unit_level = (caps.get('service_level') or 'BLS').upper() if agency_type == 'ems' else (u.unit_type or '')
         if agency_type == 'ems':
             if required_level == 'ALS':
                 if unit_level == 'ALS':
                     s += 300; reasons.append('ALS capable')
                 else:
-                    s -= 500; reasons.append('BLS only')
+                    eligible = False; reasons.append('BLS only')
             else:
                 if unit_level == 'ALS':
-                    s += 50; reasons.append('ALS available')
-        if u.unit_type in recommended_types:
-            s += 100; reasons.append('run-card match')
-        dist = None
-        if incident.lat is not None and incident.lng is not None and u.lat is not None and u.lng is not None:
-            R = 3959
-            toR = math.pi/180
-            dlat = (u.lat - incident.lat)*toR
-            dlng = (u.lng - incident.lng)*toR
-            a = math.sin(dlat/2)**2 + math.cos(incident.lat*toR)*math.cos(u.lat*toR)*math.sin(dlng/2)**2
-            dist = 2*R*math.atan2(math.sqrt(a), math.sqrt(1-a))
-            s -= dist * 20
-        reasons.append(f"{dist:.1f} mi" if dist is not None else 'no GPS')
+                    s += 50; reasons.append('ALS overqualified')
+                elif unit_level == 'BLS':
+                    s += 100; reasons.append('BLS match')
+
+        # Agency preference
+        if u.agency_id == incident.agency_id:
+            s += 100; reasons.append('same agency')
+
+        # Run-card / resource requirement
+        if recommended_types:
+            if (u.unit_type or '') in recommended_types:
+                s += 200; reasons.append('run-card match')
+            else:
+                eligible = False; reasons.append('not a run-card resource')
+
+        # Coverage loss penalty
+        current_posting = db.query(UnitPosting).filter_by(unit_id=u.id, is_current=True).first()
+        if current_posting:
+            zone_id = current_posting.post_zone_id
+            zone = zones.get(zone_id)
+            if zone:
+                remaining = posting_counts.get(zone_id, 0) - 1
+                if remaining < zone.minimum_units:
+                    s -= 200; reasons.append('removes only coverage in zone')
+
         role = unit_level if agency_type == 'ems' else (u.unit_type or '')
-        scored.append({'unit_id': u.id, 'call_sign': u.call_sign, 'unit_type': u.unit_type, 'agency_id': u.agency_id, 'agency_type': u_agency.agency_type if u_agency else None, 'service_level': role, 'distance_miles': round(dist,2) if dist is not None else None, 'score': round(s,2), 'reason': ' | '.join(reasons)})
-    scored.sort(key=lambda x: -x['score'])
+        scored.append({
+            'unit_id': u.id,
+            'call_sign': u.call_sign,
+            'unit_type': u.unit_type,
+            'agency_id': u.agency_id,
+            'agency_type': u_agency.agency_type if u_agency else None,
+            'service_level': role,
+            'distance_miles': round(dist_miles, 2) if dist_miles is not None else None,
+            'eta_seconds': int(eta_seconds) if eta_seconds is not None else None,
+            'eta_minutes': round(eta_seconds/60, 1) if eta_seconds is not None else None,
+            'score': round(s, 2),
+            'eligible': eligible,
+            'reason': ' · '.join(reasons)
+        })
+    scored.sort(key=lambda x: (-x['eligible'], -x['score']))
     return scored[:limit]
 
 @app.get('/incidents/{incident_id}/timeline')
