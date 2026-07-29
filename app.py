@@ -401,6 +401,35 @@ class ScheduledEvent(Base):
     agency = relationship('Agency')
     unit = relationship('Unit')
 
+class StandingOrder(Base):
+    __tablename__ = 'standing_orders'
+    id = Column(Integer, primary_key=True, index=True)
+    agency_id = Column(Integer, ForeignKey('agencies.id'))
+    patient_name = Column(String(255))
+    pickup_address = Column(Text)
+    pickup_lat = Column(Float)
+    pickup_lng = Column(Float)
+    destination_id = Column(Integer, ForeignKey('destinations.id'))
+    destination_name = Column(String(255))
+    destination_address = Column(Text)
+    destination_lat = Column(Float)
+    destination_lng = Column(Float)
+    call_type = Column(String(100), default='Routine Transport')
+    service_level = Column(String(50), default='BLS')
+    mobility_level = Column(String(50))
+    oxygen = Column(Boolean, default=False)
+    isolation = Column(Boolean, default=False)
+    stretcher = Column(Boolean, default=False)
+    wheelchair = Column(Boolean, default=False)
+    special_equipment = Column(JSON)
+    notes = Column(Text)
+    recurrence = Column(JSON)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    agency = relationship('Agency')
+    destination = relationship('Destination')
+
 class PostZone(Base):
     __tablename__ = 'post_zones'
     id = Column(Integer, primary_key=True, index=True)
@@ -747,6 +776,85 @@ class ScheduledTransportOut(BaseModel):
     incident: Optional["IncidentOut"] = None
     class Config:
         from_attributes = True
+
+class StandingOrderCreate(BaseModel):
+    agency_id: int
+    patient_name: Optional[str] = None
+    pickup_address: Optional[str] = None
+    pickup_lat: Optional[float] = None
+    pickup_lng: Optional[float] = None
+    destination_id: Optional[int] = None
+    destination_name: Optional[str] = None
+    destination_address: Optional[str] = None
+    destination_lat: Optional[float] = None
+    destination_lng: Optional[float] = None
+    call_type: Optional[str] = 'Routine Transport'
+    service_level: Optional[str] = 'BLS'
+    mobility_level: Optional[str] = None
+    oxygen: Optional[bool] = False
+    isolation: Optional[bool] = False
+    stretcher: Optional[bool] = False
+    wheelchair: Optional[bool] = False
+    special_equipment: Optional[dict] = None
+    notes: Optional[str] = None
+    recurrence: Optional[dict] = None
+    active: Optional[bool] = True
+
+class StandingOrderUpdate(BaseModel):
+    patient_name: Optional[str] = None
+    pickup_address: Optional[str] = None
+    pickup_lat: Optional[float] = None
+    pickup_lng: Optional[float] = None
+    destination_id: Optional[int] = None
+    destination_name: Optional[str] = None
+    destination_address: Optional[str] = None
+    destination_lat: Optional[float] = None
+    destination_lng: Optional[float] = None
+    call_type: Optional[str] = None
+    service_level: Optional[str] = None
+    mobility_level: Optional[str] = None
+    oxygen: Optional[bool] = None
+    isolation: Optional[bool] = None
+    stretcher: Optional[bool] = None
+    wheelchair: Optional[bool] = None
+    special_equipment: Optional[dict] = None
+    notes: Optional[str] = None
+    recurrence: Optional[dict] = None
+    active: Optional[bool] = None
+
+class StandingOrderOut(BaseModel):
+    id: int
+    agency_id: int
+    patient_name: Optional[str] = None
+    pickup_address: Optional[str] = None
+    pickup_lat: Optional[float] = None
+    pickup_lng: Optional[float] = None
+    destination_id: Optional[int] = None
+    destination_name: Optional[str] = None
+    destination_address: Optional[str] = None
+    destination_lat: Optional[float] = None
+    destination_lng: Optional[float] = None
+    call_type: Optional[str] = 'Routine Transport'
+    service_level: Optional[str] = 'BLS'
+    mobility_level: Optional[str] = None
+    oxygen: Optional[bool] = False
+    isolation: Optional[bool] = False
+    stretcher: Optional[bool] = False
+    wheelchair: Optional[bool] = False
+    special_equipment: Optional[dict] = None
+    notes: Optional[str] = None
+    recurrence: Optional[dict] = None
+    active: Optional[bool] = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    agency: Optional["AgencyOut"] = None
+    destination: Optional[DestinationOut] = None
+    class Config:
+        from_attributes = True
+
+class StandingOrderGenerate(BaseModel):
+    start_date: date
+    end_date: date
 
 class ScheduledEventCreate(BaseModel):
     agency_id: int
@@ -3834,6 +3942,135 @@ def update_scheduled_event(se_id: int, body: ScheduledEventUpdate, current_user:
     db.commit(); db.refresh(se)
     _log_event(db, 'scheduled_event_updated', 'scheduled_event', se.id, user_id=current_user.get('user_id'), data=body.model_dump(exclude_unset=True), agency_id=se.agency_id)
     return se
+
+def _generate_standing_order_instances(db, standing_order, start_date, end_date):
+    if not standing_order.active or not standing_order.recurrence or not start_date or not end_date:
+        return []
+    rec = standing_order.recurrence
+    freq = rec.get('frequency','daily')
+    interval = max(1, rec.get('interval',1))
+    time_str = rec.get('time','08:00')
+    try:
+        hour, minute = map(int, (time_str or '08:00').split(':'))
+    except ValueError:
+        hour, minute = 8, 0
+    days_of_week = rec.get('days_of_week') or []
+    day_of_month = rec.get('day_of_month')
+    created = []
+    cur = start_date
+    import calendar
+    while cur <= end_date:
+        match = False
+        if freq == 'daily':
+            delta = (cur - start_date).days
+            match = (delta % interval == 0)
+        elif freq == 'weekly':
+            if not days_of_week or cur.weekday() in days_of_week:
+                weeks = (cur - start_date).days // 7
+                match = (weeks % interval == 0)
+        elif freq == 'monthly':
+            months = (cur.year - start_date.year) * 12 + (cur.month - start_date.month)
+            if months % interval == 0:
+                if day_of_month is None:
+                    match = cur.day == start_date.day
+                else:
+                    last_day = calendar.monthrange(cur.year, cur.month)[1]
+                    match = cur.day == min(day_of_month, last_day)
+        if match:
+            scheduled_at = datetime.combine(cur, time(hour, minute))
+            existing = db.query(ScheduledTransport).filter_by(agency_id=standing_order.agency_id, patient_name=standing_order.patient_name, scheduled_at=scheduled_at).first()
+            if not existing:
+                st = ScheduledTransport(
+                    agency_id=standing_order.agency_id,
+                    patient_name=standing_order.patient_name,
+                    pickup_address=standing_order.pickup_address,
+                    pickup_lat=standing_order.pickup_lat,
+                    pickup_lng=standing_order.pickup_lng,
+                    destination_id=standing_order.destination_id,
+                    destination_name=standing_order.destination_name,
+                    destination_address=standing_order.destination_address,
+                    destination_lat=standing_order.destination_lat,
+                    destination_lng=standing_order.destination_lng,
+                    call_type=standing_order.call_type,
+                    service_level=standing_order.service_level,
+                    mobility_level=standing_order.mobility_level,
+                    oxygen=standing_order.oxygen,
+                    isolation=standing_order.isolation,
+                    stretcher=standing_order.stretcher,
+                    wheelchair=standing_order.wheelchair,
+                    special_equipment=standing_order.special_equipment,
+                    notes=standing_order.notes,
+                    scheduled_at=scheduled_at,
+                    status='scheduled'
+                )
+                db.add(st); db.flush(); created.append(st)
+        if freq == 'monthly':
+            year = cur.year + (cur.month // 12)
+            month = (cur.month % 12) + 1
+            last_day = calendar.monthrange(year, month)[1]
+            day = min(day_of_month or cur.day, last_day)
+            cur = date(year, month, day)
+        else:
+            cur += timedelta(days=1)
+    return created
+
+@app.get('/standing-orders-page')
+def standing_orders_page():
+    return FileResponse('static/standing_orders.html')
+
+@app.get('/standing-orders', response_model=List[StandingOrderOut])
+def list_standing_orders(agency_id: Optional[int] = None, active: Optional[bool] = None, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    q = db.query(StandingOrder)
+    if agency_id:
+        q = q.filter(StandingOrder.agency_id == agency_id)
+    if active is not None:
+        q = q.filter(StandingOrder.active == active)
+    return q.order_by(StandingOrder.created_at.desc()).all()
+
+@app.post('/standing-orders', response_model=StandingOrderOut)
+def create_standing_order(body: StandingOrderCreate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    so = StandingOrder(**body.dict())
+    db.add(so); db.commit(); db.refresh(so)
+    _log_event(db, 'standing_order_created', 'standing_order', so.id, user_id=current_user.get('user_id'), data=body.dict(), agency_id=so.agency_id)
+    return so
+
+@app.get('/standing-orders/{so_id}', response_model=StandingOrderOut)
+def get_standing_order(so_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    so = db.query(StandingOrder).get(so_id)
+    if not so:
+        raise HTTPException(status_code=404, detail='Standing order not found')
+    return so
+
+@app.put('/standing-orders/{so_id}', response_model=StandingOrderOut)
+def update_standing_order(so_id: int, body: StandingOrderUpdate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    so = db.query(StandingOrder).get(so_id)
+    if not so:
+        raise HTTPException(status_code=404, detail='Standing order not found')
+    for k, v in body.dict(exclude_unset=True).items():
+        setattr(so, k, v)
+    db.commit(); db.refresh(so)
+    _log_event(db, 'standing_order_updated', 'standing_order', so.id, user_id=current_user.get('user_id'), data=body.dict(exclude_unset=True), agency_id=so.agency_id)
+    return so
+
+@app.delete('/standing-orders/{so_id}')
+def delete_standing_order(so_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    so = db.query(StandingOrder).get(so_id)
+    if not so:
+        raise HTTPException(status_code=404, detail='Standing order not found')
+    db.delete(so); db.commit()
+    _log_event(db, 'standing_order_deleted', 'standing_order', so.id, user_id=current_user.get('user_id'), data={}, agency_id=so.agency_id)
+    return {'deleted': so_id}
+
+@app.post('/standing-orders/{so_id}/generate')
+def generate_standing_order_transports(so_id: int, body: StandingOrderGenerate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    so = db.query(StandingOrder).get(so_id)
+    if not so:
+        raise HTTPException(status_code=404, detail='Standing order not found')
+    created = _generate_standing_order_instances(db, so, body.start_date, body.end_date)
+    if created:
+        db.commit()
+    _log_event(db, 'standing_order_generated', 'standing_order', so.id, user_id=current_user.get('user_id'), data={'count': len(created), 'start_date': str(body.start_date), 'end_date': str(body.end_date)}, agency_id=so.agency_id)
+    return {'created': len(created), 'scheduled_transport_ids': [st.id for st in created]}
 
 @app.delete('/scheduled-events/{se_id}')
 def delete_scheduled_event(se_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
