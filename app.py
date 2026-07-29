@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, D
 from sqlalchemy.orm import declarative_base, relationship, backref, Session, sessionmaker
 from pydantic import BaseModel, computed_field
 from datetime import datetime, date, time, timedelta
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 import os
 import re
 import math
