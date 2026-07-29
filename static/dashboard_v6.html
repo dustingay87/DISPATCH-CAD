@@ -99,7 +99,7 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, 
   </div>
 <script>
 const CENTER=[39.9612,-82.9988];
-let state={agencies:[],units:[],mapUnits:[],incidents:[],scheduled:[],agencyMap:{},postZones:[],unitPostings:[],postingMap:{},personnel:[],selectedTrip:null,selectedVehicle:null,user:null,crossAgencies:[]};
+let state={agencies:[],units:[],mapUnits:[],incidents:[],scheduled:[],scheduledEvents:[],agencyMap:{},postZones:[],unitPostings:[],postingMap:{},personnel:[],selectedTrip:null,selectedVehicle:null,user:null,crossAgencies:[]};
 const LAYOUT_STORAGE='d2d_dashboard_layout';
 const MODULE_LABELS={ems:'EMS',fire:'Fire',law:'Law',all:'Command'};
 const MODULE_BRAND={ems:'D2D EMS',fire:'D2D Fire',law:'D2D Law',all:'D2D Command'};
@@ -114,6 +114,18 @@ function elapsed(iso){return iso?(Date.now()-new Date(iso).getTime())/1000:0;}
 function priorityClass(p){return `pri-${Math.min(Math.max(p||2,1),4)}`;}
 function statClass(c){if(c==='AQ')return 'stat-AQ';if(c==='OS')return 'stat-OS';if(['ER','TR','DEL'].includes(c))return 'stat-ER';return 'text-slate-400';}
 function isUserInteracting(){ const a=document.activeElement; if(!a||a===document.body) return false; return ['INPUT','SELECT','TEXTAREA','BUTTON'].includes(a.tagName) || a.closest('#openWork,#vehicleInfo,#tripSummary')!==null; }
+
+function getSelectedType(){
+  const m = state.user?.selected_module || localStorage.getItem('ur_module') || 'all';
+  if(m && m!=='all') return m;
+  if(state.user?.agency_id){
+    const t = (state.agencyMap[state.user.agency_id] || state.agencies.find(a=>a.id===state.user.agency_id))?.agency_type;
+    if(t==='police') return 'law';
+    if(t) return t;
+  }
+  return 'all';
+}
+function isFireSelected(){ return getSelectedType() === 'fire'; }
 
 function applyModuleBadge(){
   const m=state.user?.selected_module||localStorage.getItem('ur_module')||'all';
@@ -157,8 +169,7 @@ function populateModuleSelect(){
   };
 }
 function defaultDashboardLayout(){
-  const m=state.user?.selected_module||localStorage.getItem('ur_module')||'all';
-  return {activeCalls:true, map:true, scheduled:(m!=='fire'), onDutyUnits:true, summary:true, locked:false};
+  return {activeCalls:true, map:true, scheduled:true, onDutyUnits:true, summary:true, locked:false};
 }
 function loadDashboardLayout(){
   try{ const raw=localStorage.getItem(LAYOUT_STORAGE); if(raw) return JSON.parse(raw); }catch(e){}
@@ -166,9 +177,11 @@ function loadDashboardLayout(){
 }
 function applyDashboardLayout(){
   const layout=loadDashboardLayout();
-  const isFire = (state.user?.selected_module||localStorage.getItem('ur_module')||'all')==='fire';
-  if(isFire) layout.scheduled=false;
-  document.getElementById('scheduledLink')?.classList.toggle('hidden', isFire);
+  const isFire = isFireSelected();
+  const link = document.getElementById('scheduledLink');
+  if(link){ link.href = isFire ? '/scheduled-events-page' : '/scheduled-transports-page'; link.textContent = isFire ? 'Events' : 'Scheduled'; link.classList.remove('hidden'); }
+  const panelHead = document.getElementById('scheduledPanel')?.querySelector('.panel-head span');
+  if(panelHead){ panelHead.textContent = isFire ? 'Scheduled Events' : 'Scheduled Transports'; }
   document.getElementById('activeCallsPanel').classList.toggle('hidden', !layout.activeCalls);
   document.getElementById('mapPanel').classList.toggle('hidden', !layout.map);
   document.getElementById('scheduledPanel').classList.toggle('hidden', !layout.scheduled);
@@ -192,9 +205,9 @@ function openLayoutEditor(){
     localStorage.setItem(LAYOUT_STORAGE, JSON.stringify(layout));
     applyDashboardLayout();
   }
-  const isFire = (state.user?.selected_module||localStorage.getItem('ur_module')||'all')==='fire';
-  if(isFire){ layout.scheduled=false; }
-  document.getElementById('showScheduledRow')?.classList.toggle('hidden', isFire);
+  const isFire = isFireSelected();
+  const schedRow = document.getElementById('showScheduledRow');
+  if(schedRow) schedRow.querySelector('label').lastChild.textContent = isFire ? ' Scheduled Events' : ' Scheduled Transports';
   document.getElementById('showActiveCalls').checked = layout.activeCalls;
   document.getElementById('showMap').checked = layout.map;
   document.getElementById('showScheduled').checked = layout.scheduled;
@@ -209,11 +222,10 @@ function closeLayoutEditor(){
   document.getElementById('layoutModal').classList.remove('flex');
 }
 function saveDashboardLayout(){
-  const isFire = (state.user?.selected_module||localStorage.getItem('ur_module')||'all')==='fire';
   const layout={
     activeCalls: document.getElementById('showActiveCalls').checked,
     map: document.getElementById('showMap').checked,
-    scheduled: isFire ? false : document.getElementById('showScheduled').checked,
+    scheduled: document.getElementById('showScheduled').checked,
     onDutyUnits: document.getElementById('showUnits').checked,
     summary: document.getElementById('showSummary').checked,
     locked: document.getElementById('lockLayout').checked
@@ -251,14 +263,16 @@ async function init(){
 }
 async function load(){
   const aid=state.user?.agency_id;
-  const isFire = (state.user?.selected_module||localStorage.getItem('ur_module')||'all')==='fire';
+  const isFire = isFireSelected();
   const promises=[api('/agencies'),api('/units'),api('/incidents'),api('/post-zones'),api('/unit-postings')];
   if(!isFire) promises.push(api('/scheduled-transports?status=scheduled'));
+  if(isFire) promises.push(api('/scheduled-events?status=scheduled'));
   if(aid) promises.push(api(`/personnel?agency_id=${aid}`));
   const [agencies,units,incidents,postZones,unitPostings,...rest]=await Promise.all(promises);
   const scheduled = isFire ? [] : (rest.shift()||[]);
+  const scheduledEvents = isFire ? (rest.shift()||[]) : [];
   state.personnel=aid?rest[0]:[];
-  state.agencies=agencies;state.incidents=incidents;state.scheduled=scheduled||[];state.agencyMap={};state.agencies.forEach(a=>state.agencyMap[a.id]=a);
+  state.agencies=agencies;state.incidents=incidents;state.scheduled=scheduled||[];state.scheduledEvents=scheduledEvents||[];state.agencyMap={};state.agencies.forEach(a=>state.agencyMap[a.id]=a);
   if(state.user && state.user.selected_module && state.user.selected_module!=='all'){
     const sm=state.user.selected_module;
     state.incidents=state.incidents.filter(i=>{const at=(state.agencyMap[i.agency_id]||{}).agency_type;return (sm==='law'&&at==='police')||at===sm;});
@@ -269,6 +283,7 @@ async function load(){
   }
   state.postZones=postZones||[];state.unitPostings=unitPostings||[];state.postingMap={};
   (state.unitPostings||[]).forEach(p=>{ if(p.is_current) state.postingMap[p.unit_id]=p.post_zone; });
+  applyDashboardLayout();
   renderOpenWork();renderVehicleInfo();renderMap();renderTripSummary();renderScheduled();
 }
 function initMap(){if(map)return;map=L.map('map');L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap'}).addTo(map);layers={units:L.layerGroup().addTo(map),incidents:L.layerGroup().addTo(map),zones:L.layerGroup().addTo(map)};}
@@ -405,8 +420,31 @@ window.removeCrew=async function(personnelId){if(!confirm('Remove crew from unit
 window.loadRecommendations=async function(incidentId){const el=document.getElementById('recs');if(!el)return;try{const recs=await api(`/incidents/${incidentId}/recommend`);el.innerHTML=recs.length?recs.map(r=>`<div class='flex justify-between items-center py-0.5 border-b border-slate-700'><div><b>${r.call_sign}</b> <span class='text-slate-400'>${r.service_level||''}</span> <span class='text-slate-500'>${r.distance_miles!=null?r.distance_miles.toFixed(1)+' mi':''}</span></div><div class='text-right'><div class='text-slate-400'>${r.reason}</div><button class='bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='addRecUnit(${incidentId},${r.unit_id})'>Add</button></div></div>`).join(''):'<span class="text-slate-500">No recommendations</span>';}catch(e){el.innerHTML='<span class="text-red-400">Error loading recommendations</span>';}}
 window.addRecUnit=async function(incidentId,unitId){try{await api(`/incidents/${incidentId}/dispatch/${unitId}`,{method:'POST'});await load();}catch(e){alert(e.message);}}
 function renderScheduled(){
-  const isFire = (state.user?.selected_module||localStorage.getItem('ur_module')||'all')==='fire';
-  if(isFire){ document.getElementById('scheduledCount').textContent='0'; document.getElementById('scheduledList').innerHTML=''; return; }
+  const isFire = isFireSelected();
+  if(isFire){
+    const list=state.scheduledEvents.slice().sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
+    document.getElementById('scheduledCount').textContent=list.length;
+    const html=list.length?`<table class='tbl'><thead><tr><th>Due</th><th>Event</th><th>Type</th><th>Location</th><th>Agency</th><th>Status</th></tr></thead><tbody>`+list.map(e=>{
+      const due=e.scheduled_at?new Date(e.scheduled_at).getTime():0;
+      const now=Date.now();
+      const ms=due-now;
+      const flash=ms>0 && ms<=3600000?'flash-urgent':'';
+      const overdue=ms<=0?'overdue':'';
+      const dueText=ms>0?fmtDur(ms/1000)+' out':'Overdue '+fmtDur(-ms/1000);
+      const a=state.agencyMap[e.agency_id]||{};
+      const typeLabel={inspection:'Building Inspection',parade:'Parade',fair:'Fair / Festival',school:'School Event',training:'Training',meeting:'Meeting',other:'Other'}[e.event_type]||e.event_type;
+      return `<tr class='${flash} ${overdue}'>
+        <td class='whitespace-nowrap'>${fmtTime(e.scheduled_at)}<br><span class='text-xs ${overdue}'>${dueText}</span></td>
+        <td>${e.title||'-'}</td>
+        <td>${typeLabel}</td>
+        <td>${e.location_text||'-'}</td>
+        <td>${a.name||'-'}</td>
+        <td>${e.status||'scheduled'}</td>
+      </tr>`;
+    }).join('')+'</tbody></table>':'<div class="p-2 text-slate-500">No scheduled events</div>';
+    document.getElementById('scheduledList').innerHTML=html;
+    return;
+  }
   const list=state.scheduled.slice().sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
   document.getElementById('scheduledCount').textContent=list.length;
   const html=list.length?`<table class='tbl'><thead><tr><th>Due</th><th>Patient</th><th>Pickup</th><th>Destination</th><th>Agency</th><th>Status</th></tr></thead><tbody>`+list.map(st=>{

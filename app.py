@@ -335,6 +335,25 @@ class ScheduledTransport(Base):
     unit = relationship('Unit')
     incident = relationship('Incident')
 
+class ScheduledEvent(Base):
+    __tablename__ = 'scheduled_events'
+    id = Column(Integer, primary_key=True, index=True)
+    agency_id = Column(Integer, ForeignKey('agencies.id'))
+    title = Column(String(255), nullable=False)
+    event_type = Column(String(50), default='other')
+    location_text = Column(Text)
+    lat = Column(Float)
+    lng = Column(Float)
+    scheduled_at = Column(DateTime)
+    duration_minutes = Column(Integer, default=60)
+    unit_id = Column(Integer, ForeignKey('units.id'))
+    notes = Column(Text)
+    status = Column(String(50), default='scheduled')
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    agency = relationship('Agency')
+    unit = relationship('Unit')
+
 class PostZone(Base):
     __tablename__ = 'post_zones'
     id = Column(Integer, primary_key=True, index=True)
@@ -681,6 +700,51 @@ class ScheduledTransportOut(BaseModel):
     destination: Optional[DestinationOut] = None
     unit: Optional["UnitOut"] = None
     incident: Optional["IncidentOut"] = None
+    class Config:
+        from_attributes = True
+
+class ScheduledEventCreate(BaseModel):
+    agency_id: int
+    title: str
+    event_type: Optional[str] = 'other'
+    location_text: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    scheduled_at: Optional[datetime] = None
+    duration_minutes: Optional[int] = 60
+    unit_id: Optional[int] = None
+    notes: Optional[str] = None
+    status: Optional[str] = 'scheduled'
+
+class ScheduledEventUpdate(BaseModel):
+    title: Optional[str] = None
+    event_type: Optional[str] = None
+    location_text: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    scheduled_at: Optional[datetime] = None
+    duration_minutes: Optional[int] = None
+    unit_id: Optional[int] = None
+    notes: Optional[str] = None
+    status: Optional[str] = None
+
+class ScheduledEventOut(BaseModel):
+    id: int
+    agency_id: int
+    title: str
+    event_type: Optional[str] = 'other'
+    location_text: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    scheduled_at: Optional[datetime] = None
+    duration_minutes: Optional[int] = 60
+    unit_id: Optional[int] = None
+    notes: Optional[str] = None
+    status: Optional[str] = 'scheduled'
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    agency: Optional["AgencyOut"] = None
+    unit: Optional["UnitOut"] = None
     class Config:
         from_attributes = True
 
@@ -2652,6 +2716,57 @@ def dispatch_scheduled_transport(st_id: int, body: StatusUpdate, current_user: d
     db.commit(); db.refresh(st)
     _log_event(db, 'scheduled_transport_dispatched', 'scheduled_transport', st.id, user_id=current_user.get('user_id'), data={'incident_id': incident.id, 'unit_id': unit.id}, agency_id=st.agency_id)
     return st
+
+@app.get('/scheduled-events-page')
+def scheduled_events_page():
+    return FileResponse('static/scheduled_events.html')
+
+@app.get('/scheduled-events', response_model=List[ScheduledEventOut])
+def list_scheduled_events(status: Optional[str] = None, agency_id: Optional[int] = None, date: Optional[date] = Query(None), current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    q = db.query(ScheduledEvent)
+    if agency_id:
+        q = q.filter(ScheduledEvent.agency_id == agency_id)
+    if status:
+        q = q.filter(ScheduledEvent.status == status)
+    if date:
+        start = datetime.combine(date, time.min)
+        end = datetime.combine(date, time.max)
+        q = q.filter(ScheduledEvent.scheduled_at >= start, ScheduledEvent.scheduled_at <= end)
+    return q.order_by(ScheduledEvent.scheduled_at.asc()).all()
+
+@app.post('/scheduled-events', response_model=ScheduledEventOut)
+def create_scheduled_event(body: ScheduledEventCreate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    se = ScheduledEvent(**body.dict())
+    db.add(se); db.commit(); db.refresh(se)
+    _log_event(db, 'scheduled_event_created', 'scheduled_event', se.id, user_id=current_user.get('user_id'), data=body.dict(), agency_id=se.agency_id)
+    return se
+
+@app.get('/scheduled-events/{se_id}', response_model=ScheduledEventOut)
+def get_scheduled_event(se_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    se = db.query(ScheduledEvent).get(se_id)
+    if not se:
+        raise HTTPException(status_code=404, detail='Scheduled event not found')
+    return se
+
+@app.put('/scheduled-events/{se_id}', response_model=ScheduledEventOut)
+def update_scheduled_event(se_id: int, body: ScheduledEventUpdate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    se = db.query(ScheduledEvent).get(se_id)
+    if not se:
+        raise HTTPException(status_code=404, detail='Scheduled event not found')
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(se, k, v)
+    db.commit(); db.refresh(se)
+    _log_event(db, 'scheduled_event_updated', 'scheduled_event', se.id, user_id=current_user.get('user_id'), data=body.model_dump(exclude_unset=True), agency_id=se.agency_id)
+    return se
+
+@app.delete('/scheduled-events/{se_id}')
+def delete_scheduled_event(se_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    se = db.query(ScheduledEvent).get(se_id)
+    if not se:
+        raise HTTPException(status_code=404, detail='Scheduled event not found')
+    db.delete(se); db.commit()
+    _log_event(db, 'scheduled_event_deleted', 'scheduled_event', se.id, user_id=current_user.get('user_id'), data={}, agency_id=se.agency_id)
+    return {'deleted': se_id}
 
 @app.get('/post-zones', response_model=List[PostZoneOut])
 def list_post_zones(agency_id: Optional[int] = None, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):

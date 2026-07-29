@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Scheduled Events</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  body { background:#0f172a; color:#e2e8f0; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  .panel { background:#1e293b; border:1px solid #334155; border-radius:.5rem; }
+  .btn { background:#3b82f6; padding:.4rem .75rem; border-radius:.375rem; font-weight:600; }
+  .btn:hover { background:#2563eb; }
+  .btn-red { background:#ef4444; }
+  .btn-red:hover { background:#dc2626; }
+  .btn-sm { padding:.25rem .5rem; font-size:.75rem; }
+  .form-input { background:#0f172a; border:1px solid #475569; border-radius:.375rem; padding:.4rem; color:#fff; width:100%; }
+  .form-input:focus { border-color:#3b82f6; outline:none; }
+  .tag { display:inline-block; padding:.1rem .4rem; border-radius:.25rem; font-size:.7rem; font-weight:600; background:#334155; }
+</style>
+</head>
+<body class='p-4'>
+<div class='max-w-7xl mx-auto'>
+  <div class='flex justify-between items-center mb-4'>
+    <h1 class='text-2xl font-bold'>Scheduled Events</h1>
+    <div class='flex space-x-2'>
+      <a href='/' class='text-sm text-blue-400 hover:underline'>Dashboard</a>
+      <a href='/scheduled-transports-page' class='text-sm text-blue-400 hover:underline'>Scheduled Transports</a>
+    </div>
+  </div>
+
+  <div class='grid grid-cols-1 lg:grid-cols-3 gap-4'>
+    <div class='lg:col-span-2 panel p-3'>
+      <div class='flex gap-2 mb-2 text-sm'>
+        <select id='statusFilter' class='form-input w-32' onchange='load()'>
+          <option value=''>All</option>
+          <option value='scheduled'>Scheduled</option>
+          <option value='in_progress'>In Progress</option>
+          <option value='completed'>Completed</option>
+          <option value='cancelled'>Cancelled</option>
+        </select>
+        <input id='dateFilter' type='date' class='form-input w-40' onchange='load()'>
+        <button class='btn btn-sm' onclick='load()'>Refresh</button>
+      </div>
+      <div id='list' class='text-sm space-y-2'>Loading...</div>
+    </div>
+
+    <div class='panel p-3'>
+      <h2 class='font-bold mb-2'>Create / Edit</h2>
+      <form id='evtForm' class='space-y-2' onsubmit='return false;'>
+        <input type='hidden' id='evtId'>
+        <label class='text-xs text-slate-400'>Agency</label>
+        <select id='agency' class='form-input'></select>
+        <label class='text-xs text-slate-400'>Title</label>
+        <input id='title' class='form-input' placeholder='e.g. School Show & Tell'>
+        <label class='text-xs text-slate-400'>Event Type</label>
+        <select id='eventType' class='form-input'>
+          <option value='inspection'>Building Inspection</option>
+          <option value='parade'>Parade</option>
+          <option value='fair'>Fair / Festival</option>
+          <option value='school'>School Event</option>
+          <option value='training'>Training</option>
+          <option value='meeting'>Meeting</option>
+          <option value='other'>Other</option>
+        </select>
+        <label class='text-xs text-slate-400'>Location</label>
+        <input id='locationText' class='form-input' placeholder='Address / place'>
+        <label class='text-xs text-slate-400'>Lat / Lng</label>
+        <div class='grid grid-cols-2 gap-2'><input id='lat' class='form-input' placeholder='lat'><input id='lng' class='form-input' placeholder='lng'></div>
+        <label class='text-xs text-slate-400'>Scheduled Date/Time</label>
+        <input id='scheduledAt' type='datetime-local' class='form-input'>
+        <label class='text-xs text-slate-400'>Duration (minutes)</label>
+        <input id='duration' type='number' class='form-input' value='60'>
+        <label class='text-xs text-slate-400'>Assigned Unit</label>
+        <select id='unit' class='form-input'><option value=''>None</option></select>
+        <label class='text-xs text-slate-400'>Notes</label>
+        <textarea id='notes' class='form-input' rows='2'></textarea>
+        <label class='text-xs text-slate-400'>Status</label>
+        <select id='status' class='form-input'>
+          <option value='scheduled'>Scheduled</option>
+          <option value='in_progress'>In Progress</option>
+          <option value='completed'>Completed</option>
+          <option value='cancelled'>Cancelled</option>
+        </select>
+        <div class='flex space-x-2 pt-2'>
+          <button class='btn flex-1' onclick='save()'>Save</button>
+          <button class='btn btn-red flex-1' onclick='clearForm()'>Clear</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+let state={agencies:[],units:[],events:[]};
+
+async function init(){
+  [state.agencies, state.units] = await Promise.all([api('/agencies'), api('/units')]);
+  const agencySel = document.getElementById('agency');
+  agencySel.innerHTML = state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
+  const unitSel = document.getElementById('unit');
+  unitSel.innerHTML = `<option value=''>None</option>` + state.units.filter(u=>u.current_status==='AQ'||u.current_status==='AFR').map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
+  await load();
+}
+
+async function load(){
+  const status = document.getElementById('statusFilter').value;
+  const date = document.getElementById('dateFilter').value;
+  const q = new URLSearchParams();
+  if(status) q.set('status', status);
+  if(date) q.set('date', date);
+  try {
+    state.events = await api(`/scheduled-events?${q.toString()}`);
+    renderList();
+  } catch(e){ document.getElementById('list').innerHTML = `<div class='text-red-400'>Error: ${e.message}</div>`; }
+}
+
+function fmtDateTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}); }
+
+function typeLabel(t){ const M={inspection:'Building Inspection',parade:'Parade',fair:'Fair / Festival',school:'School Event',training:'Training',meeting:'Meeting',other:'Other'}; return M[t]||t; }
+function statusClass(s){ return `tag status-${s||'scheduled'}`; }
+
+function renderList(){
+  const el = document.getElementById('list');
+  if(!state.events.length){ el.innerHTML = '<div class="text-slate-400">No scheduled events.</div>'; return; }
+  const uMap = {}; state.units.forEach(u=>uMap[u.id]=u.call_sign);
+  const aMap = {}; state.agencies.forEach(a=>aMap[a.id]=a.name);
+  el.innerHTML = state.events.map(e=>`
+    <div class='bg-slate-800 rounded p-3 border border-slate-700'>
+      <div class='flex justify-between items-start'>
+        <div>
+          <div class='font-bold text-white'>${e.title} <span class='${statusClass(e.status)}'>${e.status||'scheduled'}</span></div>
+          <div class='text-slate-400'>${typeLabel(e.event_type)} • ${aMap[e.agency_id]||'-'}</div>
+          <div class='text-slate-300 mt-1'><b>Where:</b> ${e.location_text||'-'}</div>
+          <div class='text-slate-500 text-xs mt-1'>Scheduled ${fmtDateTime(e.scheduled_at)} • ${e.duration_minutes||60} min • Unit: ${uMap[e.unit_id]||'None'}</div>
+          ${e.notes?`<div class='text-slate-500 text-xs mt-1'>${e.notes}</div>`:''}
+        </div>
+        <div class='flex gap-1'>
+          <button class='btn btn-sm' onclick='editEvent(${e.id})'>Edit</button>
+          <button class='btn btn-red btn-sm' onclick='deleteEvent(${e.id})'>Del</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function save(){
+  const id = document.getElementById('evtId').value;
+  const payload = {
+    agency_id: parseInt(document.getElementById('agency').value),
+    title: document.getElementById('title').value,
+    event_type: document.getElementById('eventType').value,
+    location_text: document.getElementById('locationText').value,
+    lat: parseFloat(document.getElementById('lat').value) || null,
+    lng: parseFloat(document.getElementById('lng').value) || null,
+    scheduled_at: document.getElementById('scheduledAt').value ? new Date(document.getElementById('scheduledAt').value).toISOString() : null,
+    duration_minutes: parseInt(document.getElementById('duration').value) || 60,
+    unit_id: document.getElementById('unit').value ? parseInt(document.getElementById('unit').value) : null,
+    notes: document.getElementById('notes').value,
+    status: document.getElementById('status').value
+  };
+  if(!payload.title){ alert('Title required'); return; }
+  try {
+    if(id){ await api(`/scheduled-events/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); }
+    else { await api('/scheduled-events', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); }
+    clearForm(); await load();
+  } catch(e){ alert(e.message); }
+}
+
+function editEvent(id){
+  const e = state.events.find(x=>x.id===id); if(!e) return;
+  document.getElementById('evtId').value = e.id;
+  document.getElementById('agency').value = e.agency_id;
+  document.getElementById('title').value = e.title||'';
+  document.getElementById('eventType').value = e.event_type||'other';
+  document.getElementById('locationText').value = e.location_text||'';
+  document.getElementById('lat').value = e.lat||'';
+  document.getElementById('lng').value = e.lng||'';
+  document.getElementById('scheduledAt').value = e.scheduled_at ? new Date(e.scheduled_at).toISOString().slice(0,16) : '';
+  document.getElementById('duration').value = e.duration_minutes||60;
+  document.getElementById('unit').value = e.unit_id||'';
+  document.getElementById('notes').value = e.notes||'';
+  document.getElementById('status').value = e.status||'scheduled';
+}
+
+async function deleteEvent(id){
+  if(!confirm('Delete this scheduled event?')) return;
+  try { await api(`/scheduled-events/${id}`, {method:'DELETE'}); await load(); } catch(e){ alert(e.message); }
+}
+
+function clearForm(){
+  document.getElementById('evtId').value='';
+  document.getElementById('title').value='';
+  document.getElementById('eventType').value='other';
+  document.getElementById('locationText').value='';
+  document.getElementById('lat').value='';
+  document.getElementById('lng').value='';
+  document.getElementById('scheduledAt').value='';
+  document.getElementById('duration').value='60';
+  document.getElementById('unit').value='';
+  document.getElementById('notes').value='';
+  document.getElementById('status').value='scheduled';
+}
+
+init();
+</script>
+</body>
+</html>
