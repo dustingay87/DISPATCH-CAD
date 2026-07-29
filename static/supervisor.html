@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Supervisor Dashboard</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  body { background:#0f172a; color:#e2e8f0; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  .panel { background:#1e293b; border:1px solid #334155; border-radius:.5rem; }
+  .btn { background:#3b82f6; padding:.4rem .75rem; border-radius:.375rem; font-weight:600; font-size:.85rem; }
+  .btn:hover { background:#2563eb; }
+  .tag { display:inline-block; padding:.1rem .4rem; border-radius:.25rem; font-size:.7rem; font-weight:600; background:#334155; }
+</style>
+</head>
+<body class='p-4'>
+<div class='max-w-7xl mx-auto'>
+  <div class='flex justify-between items-center mb-4'>
+    <h1 class='text-2xl font-bold'>Supervisor Dashboard</h1>
+    <a href='/' class='text-sm text-blue-400 hover:underline'>Dashboard</a>
+  </div>
+  <div id='summary' class='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4'>
+    <div class='panel p-3'><div class='text-slate-400 text-xs'>Active Incidents</div><div id='activeCount' class='text-2xl font-bold'>-</div></div>
+    <div class='panel p-3'><div class='text-slate-400 text-xs'>Alerts</div><div id='alertCount' class='text-2xl font-bold text-red-400'>-</div></div>
+    <div class='panel p-3'><div class='text-slate-400 text-xs'>Stale / Offline Units</div><div id='staleCount' class='text-2xl font-bold text-yellow-400'>-</div></div>
+    <div class='panel p-3'><div class='text-slate-400 text-xs'>On Duty Personnel</div><div id='dutyCount' class='text-2xl font-bold'>-</div></div>
+  </div>
+  <div class='grid grid-cols-1 lg:grid-cols-2 gap-4'>
+    <div class='panel p-3'>
+      <h2 class='font-bold mb-2'>Active Calls</h2>
+      <div id='activeList' class='text-sm space-y-2'>Loading...</div>
+    </div>
+    <div class='panel p-3'>
+      <h2 class='font-bold mb-2'>Alerts</h2>
+      <div id='alertList' class='text-sm space-y-2'>Loading...</div>
+    </div>
+    <div class='panel p-3 lg:col-span-2'>
+      <h2 class='font-bold mb-2'>Recent Audit Events</h2>
+      <div id='eventList' class='text-sm space-y-1'>Loading...</div>
+    </div>
+    <div class='panel p-3 lg:col-span-2'>
+      <h2 class='font-bold mb-2'>QA Playback</h2>
+      <div class='flex gap-2 mb-2'>
+        <input id='playbackId' type='number' class='form-input w-40 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white' placeholder='Incident ID'>
+        <button class='btn' onclick='loadPlayback()'>Load Playback</button>
+      </div>
+      <div id='playback' class='text-sm space-y-2 hidden'>
+        <div id='playbackHead' class='font-bold'></div>
+        <div id='playbackTimeline' class='space-y-1'></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+
+async function load(){
+  try {
+    const s = await api('/supervisor/summary');
+    document.getElementById('activeCount').textContent = s.active_incidents_count;
+    document.getElementById('alertCount').textContent = s.alerts_count;
+    document.getElementById('staleCount').textContent = (s.stale_units||0) + ' / ' + (s.offline_units||0);
+    document.getElementById('dutyCount').textContent = s.on_duty_personnel;
+    document.getElementById('activeList').innerHTML = s.active_incidents.length ? s.active_incidents.map(i=>`<div class='bg-slate-800 rounded p-2 border border-slate-700'><b>${i.call_number||'#'+i.id}</b> ${i.call_type} P${i.priority} <span class='tag'>${i.status}</span> <button class='btn btn-sm' onclick='loadPlayback(${i.id})'>Playback</button></div>`).join('') : '<div class="text-slate-500">No active incidents</div>';
+    document.getElementById('alertList').innerHTML = s.alerts.length ? s.alerts.map(a=>`<div class='bg-slate-800 rounded p-2 border border-red-900 text-red-300'><b>${a.call_number||'#'+a.incident_id}</b> ${a.call_type} P${a.priority}<br><span class='text-xs'>${a.alerts.join('; ')}</span></div>`).join('') : '<div class="text-slate-500">No alerts</div>';
+    document.getElementById('eventList').innerHTML = s.recent_events.length ? s.recent_events.map(e=>`<div class='text-xs text-slate-300 border-b border-slate-700 pb-1'><span class='text-slate-500'>${fmtTime(e.timestamp)}</span> ${e.event_type} ${e.entity_type} #${e.entity_id}</div>`).join('') : '<div class="text-slate-500">No recent events</div>';
+  } catch(e){ alert(e.message); }
+}
+
+async function loadPlayback(id){
+  const incidentId = id || document.getElementById('playbackId').value;
+  if(!incidentId){ alert('Enter incident ID'); return; }
+  try {
+    const p = await api(`/supervisor/playback/${incidentId}`);
+    document.getElementById('playback').classList.remove('hidden');
+    document.getElementById('playbackHead').innerHTML = `<div class='text-white'>${p.incident.call_number} • ${p.incident.call_type} P${p.incident.priority} <span class='tag'>${p.incident.status}</span></div><div class='text-slate-400 text-xs'>${p.incident.narrative||''}</div>`;
+    const timeline = p.timeline.map(t=>`<div class='text-xs text-slate-300'><span class='text-slate-500'>${fmtTime(t.at)}</span> ${t.status_code} ${t.reason||''} ${t.lat?`(${t.lat.toFixed(4)},${t.lng.toFixed(4)})`:''}</div>`).join('');
+    const messages = p.messages.length ? '<div class="text-slate-400 text-xs mt-1">Messages</div>' + p.messages.map(m=>`<div class='text-xs text-slate-300'>${fmtTime(m.at)} [${m.channel}] ${m.message_text}</div>`).join('') : '';
+    document.getElementById('playbackTimeline').innerHTML = `<div class='text-slate-400 text-xs'>Timeline</div>${timeline}${messages}`;
+  } catch(e){ alert(e.message); }
+}
+
+load();
+</script>
+</body>
+</html>

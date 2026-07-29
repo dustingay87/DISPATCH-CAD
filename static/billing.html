@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Billing / ePCR Exports</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  body { background:#0f172a; color:#e2e8f0; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  .panel { background:#1e293b; border:1px solid #334155; border-radius:.5rem; }
+  .btn { background:#3b82f6; padding:.4rem .75rem; border-radius:.375rem; font-weight:600; font-size:.85rem; }
+  .btn:hover { background:#2563eb; }
+  .btn-green { background:#22c55e; color:#000; }
+  .btn-green:hover { background:#16a34a; }
+  .tag { display:inline-block; padding:.1rem .4rem; border-radius:.25rem; font-size:.7rem; font-weight:600; background:#334155; }
+  .form-input { background:#0f172a; border:1px solid #475569; border-radius:.375rem; padding:.4rem; color:#fff; width:100%; font-size:.85rem; }
+</style>
+</head>
+<body class='p-4'>
+<div class='max-w-7xl mx-auto'>
+  <div class='flex justify-between items-center mb-4'>
+    <h1 class='text-2xl font-bold'>Billing / ePCR Exports</h1>
+    <a href='/' class='text-sm text-blue-400 hover:underline'>Dashboard</a>
+  </div>
+  <div class='panel p-3 mb-4'>
+    <div class='flex gap-2'>
+      <label class='text-sm text-slate-400'>Last <input id='days' type='number' value='30' class='form-input w-20 inline mx-1'> days</label>
+      <button class='btn' onclick='load()'>Load</button>
+    </div>
+  </div>
+  <div class='panel p-3'>
+    <h2 class='font-bold mb-2'>Billable Incidents</h2>
+    <div id='list' class='text-sm space-y-2'>Loading...</div>
+  </div>
+</div>
+
+<script>
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+function fmtDate(iso){ return iso ? new Date(iso).toLocaleDateString() : '-'; }
+
+async function load(){
+  const days = document.getElementById('days').value;
+  try {
+    const rows = await api(`/billing/billable-incidents?days=${days}`);
+    const el = document.getElementById('list');
+    if(!rows.length){ el.innerHTML = '<div class="text-slate-500">No billable incidents for this period.</div>'; return; }
+    el.innerHTML = rows.map(r=>`
+      <div class='bg-slate-800 rounded p-3 border border-slate-700 flex justify-between items-start'>
+        <div>
+          <div class='font-bold text-white'>${r.call_number||'#'+r.incident_id} <span class='tag'>${r.call_type}</span></div>
+          <div class='text-slate-400 text-xs'>Patient: ${r.patient_name||'-'} • ${fmtDate(r.created_at)}</div>
+          <div class='text-slate-400 text-xs'>Mileage: ${r.mileage} • Legs: ${r.transport_legs_count}</div>
+          <div class='text-slate-400 text-xs'>ePCR: ${r.epcr_exported?'<span class="text-green-400">Exported ('+(r.epcr_status||'')+')</span>':'<span class="text-yellow-400">Not exported</span>'}</div>
+        </div>
+        <div class='flex flex-col gap-1'>
+          <a class='btn btn-sm' href='/incidents/${r.incident_id}/epcr' target='_blank'>View ePCR</a>
+          <a class='btn btn-green btn-sm' href='/incidents/${r.incident_id}/mileage-summary' target='_blank'>Mileage</a>
+        </div>
+      </div>
+    `).join('');
+  } catch(e){ document.getElementById('list').innerHTML = `<div class='text-red-400'>Error: ${e.message}</div>`; }
+}
+
+load();
+</script>
+</body>
+</html>

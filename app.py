@@ -4388,6 +4388,84 @@ def unit_trail(unit_id: int, hours: int = 8, current_user: dict = Depends(get_cu
     events = db.query(StatusEvent).filter(StatusEvent.unit_id == unit_id, StatusEvent.lat != None, StatusEvent.lng != None, StatusEvent.created_at >= since).order_by(StatusEvent.created_at.asc()).all()
     return [{'lat': e.lat, 'lng': e.lng, 'status_code': e.status_code, 'created_at': e.created_at.isoformat() if e.created_at else None} for e in events]
 
+@app.get('/supervisor/summary')
+def supervisor_summary(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    since = now - timedelta(days=1)
+    active_incidents = db.query(Incident).filter(Incident.status != 'closed').all()
+    alerts = _active_incident_alerts(db)
+    stale_units = db.query(Unit).filter(Unit.stale == True, Unit.offline == False).count()
+    offline_units = db.query(Unit).filter(Unit.offline == True).count()
+    on_duty = db.query(Personnel).filter(Personnel.duty_status == 'on_duty').count()
+    recent_events = db.query(Event).filter(Event.timestamp >= since).order_by(Event.timestamp.desc()).limit(50).all()
+    avg_dispatch = db.query(func.avg(StatusEvent.created_at - Incident.created_at)).filter(
+        StatusEvent.status_code.in_(['AK','dispatched']),
+        StatusEvent.incident_id == Incident.id,
+        Incident.created_at >= now - timedelta(days=7)
+    ).first()[0]
+    return {
+        'active_incidents_count': len(active_incidents),
+        'active_incidents': [{'id': i.id, 'call_number': i.call_number, 'call_type': i.call_type, 'status': i.status, 'priority': i.priority} for i in active_incidents],
+        'alerts_count': len(alerts),
+        'alerts': alerts[:10],
+        'stale_units': stale_units,
+        'offline_units': offline_units,
+        'on_duty_personnel': on_duty,
+        'recent_events': [{'event_type': e.event_type, 'entity_type': e.entity_type, 'entity_id': e.entity_id, 'timestamp': e.timestamp.isoformat() if e.timestamp else None, 'data': e.data} for e in recent_events],
+        'avg_dispatch_seconds': int(avg_dispatch.total_seconds()) if avg_dispatch else None
+    }
+
+@app.get('/supervisor/playback/{incident_id}')
+def supervisor_playback(incident_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    timeline = db.query(StatusEvent).filter_by(incident_id=incident_id).order_by(StatusEvent.created_at.asc()).all()
+    messages = db.query(DispatchMessage).filter_by(incident_id=incident_id).order_by(DispatchMessage.created_at.asc()).all()
+    notes = db.query(IncidentDestination).filter_by(incident_id=incident_id).order_by(IncidentDestination.created_at.asc()).all()
+    return {
+        'incident': {'id': incident.id, 'call_number': incident.call_number, 'call_type': incident.call_type, 'priority': incident.priority, 'status': incident.status, 'narrative': incident.narrative, 'created_at': incident.created_at.isoformat() if incident.created_at else None},
+        'timeline': [{'at': e.created_at.isoformat(), 'status_code': e.status_code, 'reason': e.reason, 'unit_id': e.unit_id, 'lat': e.lat, 'lng': e.lng} for e in timeline],
+        'messages': [{'at': m.created_at.isoformat() if m.created_at else None, 'channel': m.channel, 'message_text': m.message_text} for m in messages],
+        'destinations': [{'at': n.created_at.isoformat() if n.created_at else None, 'destination_id': n.destination_id, 'notes': n.notes} for n in notes]
+    }
+
+@app.get('/billing/billable-incidents')
+def billable_incidents(days: int = 30, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    since = datetime.utcnow() - timedelta(days=max(1, min(days, 90)))
+    # EMS transports and scheduled transports that are completed/dispatched are billable
+    q = db.query(Incident).filter(Incident.created_at >= since, Incident.status.in_(['closed','cleared']))
+    incidents = q.order_by(Incident.created_at.desc()).all()
+    rows = []
+    for i in incidents:
+        legs = db.query(TransportLeg).filter_by(incident_id=i.id).all()
+        epcr = db.query(EpcrExport).filter_by(incident_id=i.id).first()
+        mileage = 0.0
+        for leg in legs:
+            if leg.pickup_mileage is not None and leg.dropoff_mileage is not None:
+                mileage += max(0, leg.dropoff_mileage - leg.pickup_mileage)
+        rows.append({
+            'incident_id': i.id,
+            'call_number': i.call_number,
+            'call_type': i.call_type,
+            'patient_name': i.caller_name,
+            'agency_id': i.agency_id,
+            'created_at': i.created_at.isoformat() if i.created_at else None,
+            'mileage': round(mileage, 1),
+            'transport_legs_count': len(legs),
+            'epcr_exported': bool(epcr),
+            'epcr_status': epcr.status if epcr else None
+        })
+    return rows
+
+@app.get('/supervisor-page')
+def supervisor_page():
+    return FileResponse('static/supervisor.html')
+
+@app.get('/billing-page')
+def billing_page():
+    return FileResponse('static/billing.html')
+
 # Resolve forward references now that all Pydantic models are defined
 for _fwd in (ScheduledTransportOut, UnitPostingOut, EpcrExportOut):
     _fwd.model_rebuild()
