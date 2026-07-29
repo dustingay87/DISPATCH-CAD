@@ -182,6 +182,7 @@ async function start(){
     state.config.callTypes = cfg.find(c=>c.category==='call_types')?.value || [];
     const disp = cfg.find(c=>c.category==='dispositions')?.value;
     state.config.dispositions = disp ? (Array.isArray(disp)?disp:[disp]) : [];
+    try { state.zones = await api('/post-zones'); } catch(e){ state.zones = []; }
     if(unit.current_incident_id){ state.incident = await api(`/incidents/${unit.current_incident_id}`); }
     else { state.incident = null; }
     render();
@@ -307,12 +308,25 @@ async function selectIncident(id){
 function initMap(){
   if(state.map) return;
   state.map = L.map('map');
+  state.zonesLayer = L.layerGroup().addTo(state.map);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap'}).addTo(state.map);
 }
+function serviceAreaColor(type){ if(type==='primary') return '#22c55e'; if(type==='secondary') return '#3b82f6'; if(type==='mutual') return '#eab308'; return '#3b82f6'; }
 function renderMap(){
   initMap();
   state.map.eachLayer(l=>{ if(l instanceof L.Marker || l instanceof L.CircleMarker) state.map.removeLayer(l); });
+  if(state.zonesLayer){ state.zonesLayer.clearLayers(); }
+  else { state.zonesLayer = L.layerGroup().addTo(state.map); }
   let bounds=L.latLngBounds([]);
+  (state.zones||[]).forEach(z=>{
+    if(!z.geojson) return;
+    try{
+      const c = z.color || serviceAreaColor(z.zone_type);
+      const gj = L.geoJSON(z.geojson, {style:{color:c, fillColor:c, fillOpacity:0.1, weight:2}}).addTo(state.zonesLayer);
+      gj.bindPopup(`<b>${z.name}</b><br>${z.zone_type}`);
+      if(gj.getBounds && gj.getBounds().isValid()) bounds.extend(gj.getBounds());
+    }catch(e){}
+  });
   const showIds = [state.me.agency_id, ...state.crossAgencies];
   state.allUnits.forEach(u=>{
     if(!u.lat || !u.lng) return;

@@ -65,6 +65,7 @@ function initMap(){
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
   layers.units = L.layerGroup().addTo(map);
   layers.trails = L.layerGroup().addTo(map);
+  layers.zones = L.layerGroup().addTo(map);
 }
 
 function unitColor(st){ if(st==='OS') return '#ef4444'; if(st==='ER'||st==='TR'||st==='DEL') return '#eab308'; if(st==='AQ') return '#22c55e'; return '#64748b'; }
@@ -75,8 +76,8 @@ function arrowIcon(color, heading){
 
 async function load(){
   try {
-    const [agencies, units, positions] = await Promise.all([api('/agencies'), api('/units'), api('/taip/positions?limit=200')]).catch(()=>[[],[],[]]);
-    state.agencies = agencies; state.units = units; state.positions = positions || [];
+    const [agencies, units, positions, zones] = await Promise.all([api('/agencies'), api('/units'), api('/taip/positions?limit=200'), api('/post-zones')]).catch(()=>[[],[],[],[]]);
+    state.agencies = agencies; state.units = units; state.positions = positions || []; state.zones = zones || [];
     renderUnitList(); renderMap(); updateTelemetry();
   } catch(e){ document.getElementById('unitList').innerHTML = `<div class='p-4 text-red-400'>Error: ${e.message}</div>`; }
 }
@@ -111,8 +112,10 @@ function renderUnitList(){
   const sim = document.getElementById('simUnit'); sim.innerHTML = state.units.map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
 }
 
+function serviceAreaColor(type){ if(type==='primary') return '#22c55e'; if(type==='secondary') return '#3b82f6'; if(type==='mutual') return '#eab308'; return '#3b82f6'; }
+
 function renderMap(){
-  layers.units.clearLayers(); layers.trails.clearLayers();
+  layers.units.clearLayers(); layers.trails.clearLayers(); layers.zones.clearLayers();
   let bounds=L.latLngBounds([]);
   const am=agencyMap();
   state.units.forEach(u=>{
@@ -123,6 +126,15 @@ function renderMap(){
     marker.bindPopup(`<b>${u.call_sign}</b><br>${u.current_status}<br>${am[u.agency_id]?.name||''}<br>Spd: ${u.speed??'-'} Hdg: ${u.heading??'-'}`);
     if(state.selected===u.id) marker.openPopup();
     bounds.extend([u.lat,u.lng]);
+  });
+  (state.zones||[]).forEach(z=>{
+    if(!z.geojson) return;
+    try{
+      const c = z.color || serviceAreaColor(z.zone_type);
+      const gj = L.geoJSON(z.geojson, {style:{color:c, fillColor:c, fillOpacity:0.1, weight:2}}).addTo(layers.zones);
+      gj.bindPopup(`<b>${z.name}</b><br>${z.zone_type}`);
+      if(gj.getBounds && gj.getBounds().isValid()) bounds.extend(gj.getBounds());
+    }catch(e){}
   });
   if(document.getElementById('trailsToggle').checked) drawTrails();
   drawSelectedTrail();

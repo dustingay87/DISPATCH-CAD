@@ -59,7 +59,7 @@
 <script>
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleString(); }
-let state = { agencies:[], selected:null, selectedIncident:null, unitTrails:[] }; let map;
+let state = { agencies:[], zones:[], selected:null, selectedIncident:null, unitTrails:[] }; let map;
 const DEFAULT_CENTER = [39.9612, -82.9988];
 
 async function search(){
@@ -171,16 +171,34 @@ function buildTimeline(t){
   return html;
 }
 
+function serviceAreaColor(type){ if(type==='primary') return '#22c55e'; if(type==='secondary') return '#3b82f6'; if(type==='mutual') return '#eab308'; return '#3b82f6'; }
+
 function initMap(){
   if(map) map.remove();
   map = L.map('map');
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+  const zoneLayer = L.layerGroup().addTo(map);
+  (state.zones||[]).forEach(z=>{
+    if(!z.geojson) return;
+    try{
+      const c = z.color || serviceAreaColor(z.zone_type);
+      const gj = L.geoJSON(z.geojson, {style:{color:c, fillColor:c, fillOpacity:0.1, weight:2}}).addTo(zoneLayer);
+      gj.bindPopup(`<b>${z.name}</b><br>${z.zone_type}`);
+    }catch(e){}
+  });
 }
 
 function renderTrails(unitIds, positions){
   if(!map) return;
   const trailLayer = L.layerGroup().addTo(map);
   let bounds = L.latLngBounds([]);
+  (state.zones||[]).forEach(z=>{
+    if(!z.geojson) return;
+    try{
+      const gb = L.geoJSON(z.geojson).getBounds();
+      if(gb && gb.isValid()) bounds.extend(gb);
+    }catch(e){}
+  });
   const filtered = (positions || []).filter(p => unitIds.includes(p.unit_id) && p.lat!=null && p.lng!=null);
   const grouped = {};
   filtered.forEach(p => { if(!grouped[p.unit_id]) grouped[p.unit_id]=[]; grouped[p.unit_id].push([p.lat, p.lng]); });
@@ -207,6 +225,7 @@ function renderTrails(unitIds, positions){
 
 async function loadAgencies(){
   state.agencies = await api('/agencies');
+  try { state.zones = await api('/post-zones'); } catch(e){ state.zones = []; }
   const opts = state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
   document.getElementById('agencyFilter').innerHTML = '<option value="">All agencies</option>' + opts;
 }

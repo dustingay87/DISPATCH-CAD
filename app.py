@@ -14,6 +14,8 @@ import asyncio
 import time
 import hmac
 import hashlib
+import urllib.request
+import urllib.parse
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -427,6 +429,8 @@ if DATABASE_URL.startswith('sqlite'):
     print(f'SQLite file: {os.path.abspath(db_path)}')
     print('WARNING: SQLite data is stored in a local file. Container redeploys will clear it unless the file is on a persistent volume.')
     ensure_sqlite_columns()
+
+geocode_missing_agencies()
 
 app = FastAPI(title='VolCAD Prototype', version='0.1.0')
 
@@ -1449,6 +1453,47 @@ def refresh_incident_status(db: Session, incident):
 
 # Endpoints
 
+GEOCODER_TIMEOUT = 5
+
+def _build_geo_query(parts):
+    return ' '.join(str(p) for p in parts if p is not None and str(p).strip())
+
+def geocode_address(query):
+    if not query or not query.strip():
+        return None, None
+    try:
+        url = 'https://nominatim.openstreetmap.org/search?' + urllib.parse.urlencode({'q': query, 'format': 'json', 'limit': 1})
+        req = urllib.request.Request(url, headers={'User-Agent': 'D2D-CAD/1.0'})
+        with urllib.request.urlopen(req, timeout=GEOCODER_TIMEOUT) as r:
+            data = json.loads(r.read().decode())
+            if data:
+                return float(data[0]['lat']), float(data[0]['lon'])
+    except Exception as e:
+        print('Geocode error:', e)
+    return None, None
+
+def fill_agency_lat_lng(agency):
+    if agency.lat is not None and agency.lng is not None:
+        return
+    parts = [agency.address, agency.city, agency.state, agency.zip_code, agency.name]
+    query = _build_geo_query(parts)
+    if not query:
+        return
+    lat, lng = geocode_address(query)
+    if lat is not None and lng is not None:
+        agency.lat = lat
+        agency.lng = lng
+
+def geocode_missing_agencies():
+    try:
+        db = SessionLocal()
+        for a in db.query(Agency).all():
+            if a.lat is None or a.lng is None:
+                fill_agency_lat_lng(a)
+        db.commit()
+    except Exception as e:
+        print('Startup agency geocode error:', e)
+
 @app.get('/health')
 def health():
     return {'status': 'ok'}
@@ -1456,6 +1501,7 @@ def health():
 @app.post('/agencies', response_model=AgencyOut)
 def create_agency(body: AgencyCreate, db: Session = Depends(get_db)):
     agency = Agency(**body.model_dump())
+    fill_agency_lat_lng(agency)
     db.add(agency)
     db.commit()
     db.refresh(agency)
@@ -1472,6 +1518,7 @@ def update_agency(agency_id: int, body: AgencyUpdate, current_user: dict = Depen
         raise HTTPException(status_code=404, detail='Agency not found')
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(a, k, v)
+    fill_agency_lat_lng(a)
     db.commit(); db.refresh(a)
     return a
 
@@ -1762,10 +1809,16 @@ def create_incident(request: Request, body: IncidentCreate, db: Session = Depend
     if not data.get('call_number'):
         data['call_number'] = data['incident_number']
     if data.get('lat') is None or data.get('lng') is None:
-        agency = db.query(Agency).get(data.get('agency_id'))
-        if agency and agency.lat is not None and agency.lng is not None:
-            data['lat'] = agency.lat
-            data['lng'] = agency.lng
+        if data.get('location_text'):
+            lat, lng = geocode_address(data['location_text'])
+            if lat is not None and lng is not None:
+                data['lat'] = lat
+                data['lng'] = lng
+        if data.get('lat') is None or data.get('lng') is None:
+            agency = db.query(Agency).get(data.get('agency_id'))
+            if agency and agency.lat is not None and agency.lng is not None:
+                data['lat'] = agency.lat
+                data['lng'] = agency.lng
     user = get_current_user(request)
     incident = Incident(**data)
     db.add(incident)

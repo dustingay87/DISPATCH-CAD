@@ -86,6 +86,7 @@ def main():
             a.zip_code = agency.get('zip_code')
             a.lat = agency.get('lat')
             a.lng = agency.get('lng')
+            app.fill_agency_lat_lng(a)
             a.approved = True
             a.approved_at = datetime.utcnow()
             session.flush()
