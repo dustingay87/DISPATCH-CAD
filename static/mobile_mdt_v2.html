@@ -183,8 +183,8 @@ async function start(){
     const disp = cfg.find(c=>c.category==='dispositions')?.value;
     state.config.dispositions = disp ? (Array.isArray(disp)?disp:[disp]) : [];
     try { state.zones = await api('/post-zones'); } catch(e){ state.zones = []; }
-    if(unit.current_incident_id){ state.incident = await api(`/incidents/${unit.current_incident_id}`); }
-    else { state.incident = null; }
+    if(unit.current_incident_id){ state.incident = await api(`/incidents/${unit.current_incident_id}`); try { state.packet = await api(`/incidents/${unit.current_incident_id}/packet/${unitId}`); } catch(e){ state.packet = null; } }
+    else { state.incident = null; state.packet = null; }
     render();
   } catch(e){
     console.error(e);
@@ -218,16 +218,36 @@ function render(){
 
 function renderCallPanel(){
   const el=document.getElementById('callPanel');
-  const i=state.incident;
-  if(!i){ el.innerHTML = `<div class='text-slate-500'>No active call</div>`; return; }
-  const agency=state.agencyMap[i.agency_id]||{};
-  const elapsedCall = fmtDur(elapsed(i.created_at));
+  const p=state.packet;
+  if(!p){ el.innerHTML = `<div class='text-slate-500'>No active call</div>`; return; }
+  const elapsedCall = fmtDur(elapsed(p.acknowledged_at||p.incident_id));
+  const dest = p.destination ? `<div class='text-xs text-slate-300 mt-1'>Dest: <span class='font-semibold'>${p.destination.name}</span> ${p.destination.address||''}</div>` : '';
+  const assigned = p.assigned_units.map(u=>u.call_sign).join(', ') || '-';
+  const loc = [p.standardized_address||p.location_text, p.cross_streets, p.zone_name].filter(Boolean).join(' • ') || '-';
+  const ack = p.requires_ack ? `<button class='mt-2 w-full touch-btn bg-green-700 hover:bg-green-600 rounded font-semibold text-sm' onclick='ackPacket()'>Acknowledge Dispatch</button>` : `<div class='mt-2 text-xs text-green-400 font-semibold'>Acknowledged</div>`;
+  const resource = p.resource_status && p.resource_status.profiled ? `<div class='text-xs text-slate-400 mt-1'>Resources: ${p.resource_status.filled}/${p.resource_status.total_required} filled</div>` : '';
   el.innerHTML = `
-    <div class='font-bold text-lg text-white mb-1'>${i.call_number||i.incident_number}</div>
-    <div class='text-sm'>${i.call_type} <span class='text-slate-400'>P${i.priority}</span></div>
-    <div class='text-xs text-slate-300 mt-1'>${i.location_text||'-'}</div>
+    <div class='font-bold text-lg text-white mb-1'>${p.call_number||p.incident_number}</div>
+    <div class='text-sm'>${p.call_type} <span class='text-slate-400'>P${p.priority}</span></div>
+    <div class='text-xs text-slate-300 mt-1'>${loc}</div>
+    <div class='text-xs text-slate-400 mt-1'>Units: ${assigned}</div>
+    <div class='text-xs text-slate-300 mt-1 bg-slate-900 p-1 rounded max-h-24 overflow-auto'>${p.narrative||'No narrative'}</div>
+    ${resource}
+    ${dest}
     <div class='text-xs text-slate-400 mt-1'>Elapsed: ${elapsedCall}</div>
+    ${ack}
   `;
+}
+
+async function ackPacket(){
+  if(!state.packet) return;
+  showLoading('Acknowledging...');
+  try {
+    await api(`/incidents/${state.packet.incident_id}/units/${unitId}/ack`, {method:'POST'});
+    state.packet = await api(`/incidents/${state.packet.incident_id}/packet/${unitId}`);
+    render();
+  } catch(e){ alert(e.message); }
+  finally { hideLoading(); }
 }
 
 function renderStatusButtons(){

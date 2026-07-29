@@ -194,6 +194,17 @@ class IncidentLocation(Base):
     zone = relationship('PostZone')
     jurisdiction = relationship('Agency')
 
+class IncidentUnitAck(Base):
+    __tablename__ = 'incident_unit_acks'
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey('incidents.id'), nullable=False)
+    unit_id = Column(Integer, ForeignKey('units.id'), nullable=False)
+    acknowledged_at = Column(DateTime, default=datetime.utcnow)
+    acknowledged_by = Column(String(255))
+    __table_args__ = (UniqueConstraint('incident_id', 'unit_id', name='uix_incident_unit_ack'),)
+    incident = relationship('Incident', backref='unit_acks')
+    unit = relationship('Unit')
+
 class IncidentPersonnel(Base):
     __tablename__ = 'incident_personnel'
     id = Column(Integer, primary_key=True, index=True)
@@ -2735,6 +2746,64 @@ def dispatch_unit(request: Request, incident_id: int, unit_id: int, notes: Optio
         'assigned_at': iu.assigned_at,
         'assignment_status': iu.assignment_status
     }
+
+@app.get('/incidents/{incident_id}/packet/{unit_id}')
+def get_dispatch_packet(incident_id: int, unit_id: int, db: Session = Depends(get_db)):
+    incident = db.query(Incident).get(incident_id)
+    unit = db.query(Unit).get(unit_id)
+    if not incident or not unit:
+        raise HTTPException(status_code=404, detail='Incident or unit not found')
+    iu = db.query(IncidentUnit).filter_by(incident_id=incident_id, unit_id=unit_id).first()
+    if not iu:
+        raise HTTPException(status_code=400, detail='Unit not assigned to incident')
+    loc = db.query(IncidentLocation).filter_by(incident_id=incident_id).first()
+    agency = db.query(Agency).get(incident.agency_id)
+    assigned = db.query(IncidentUnit, Unit).join(Unit, IncidentUnit.unit_id == Unit.id).filter(IncidentUnit.incident_id == incident_id, IncidentUnit.assignment_status != 'cleared').all()
+    ack = db.query(IncidentUnitAck).filter_by(incident_id=incident_id, unit_id=unit_id).first()
+    idest = db.query(IncidentDestination).filter_by(incident_id=incident_id).first()
+    dest = db.query(Destination).get(idest.destination_id) if idest else None
+    packet = {
+        'incident_id': incident.id,
+        'incident_number': incident.incident_number,
+        'call_number': incident.call_number,
+        'call_type': incident.call_type,
+        'priority': incident.priority,
+        'narrative': incident.narrative,
+        'location_text': incident.location_text,
+        'lat': incident.lat,
+        'lng': incident.lng,
+        'standardized_address': loc.standardized_address if loc else None,
+        'cross_streets': loc.cross_streets if loc else None,
+        'zone_name': loc.zone.name if loc and loc.zone else None,
+        'destination': {'name': dest.name, 'address': dest.address, 'lat': dest.lat, 'lng': dest.lng} if dest else None,
+        'agency': {'id': agency.id, 'name': agency.name, 'agency_type': agency.agency_type} if agency else None,
+        'unit': {'id': unit.id, 'call_sign': unit.call_sign, 'unit_type': unit.unit_type},
+        'assigned_units': [{'id': u.id, 'call_sign': u.call_sign, 'unit_type': u.unit_type} for _, u in assigned],
+        'resource_status': _incident_resource_status(db, incident),
+        'acknowledged_at': ack.acknowledged_at.isoformat() if ack else None,
+        'requires_ack': not ack
+    }
+    return packet
+
+@app.post('/incidents/{incident_id}/units/{unit_id}/ack')
+def ack_dispatch_packet(request: Request, incident_id: int, unit_id: int, db: Session = Depends(get_db)):
+    user = check_role(request, FIELD_ROLES)
+    iu = db.query(IncidentUnit).filter_by(incident_id=incident_id, unit_id=unit_id).first()
+    if not iu:
+        raise HTTPException(status_code=404, detail='Unit not assigned to incident')
+    existing = db.query(IncidentUnitAck).filter_by(incident_id=incident_id, unit_id=unit_id).first()
+    if not existing:
+        existing = IncidentUnitAck(incident_id=incident_id, unit_id=unit_id, acknowledged_by=user.get('email'))
+        db.add(existing)
+    existing.acknowledged_at = datetime.utcnow()
+    db.commit()
+    _log_event(db, 'packet_acknowledged', 'incident', incident_id, user_id=user.get('user_id'), data={'unit_id': unit_id}, agency_id=iu.incident.agency_id)
+    return {'acknowledged': True, 'acknowledged_at': existing.acknowledged_at}
+
+@app.get('/incidents/{incident_id}/acks')
+def list_incident_acks(incident_id: int, db: Session = Depends(get_db)):
+    acks = db.query(IncidentUnitAck).filter_by(incident_id=incident_id).all()
+    return [{'unit_id': a.unit_id, 'acknowledged_at': a.acknowledged_at, 'acknowledged_by': a.acknowledged_by} for a in acks]
 
 @app.post('/incidents/{incident_id}/units/{unit_id}/status')
 def update_unit_status(request: Request, incident_id: int, unit_id: int, body: StatusUpdate, db: Session = Depends(get_db)):
