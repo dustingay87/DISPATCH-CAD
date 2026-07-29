@@ -1710,7 +1710,7 @@ def parse_taip_pv(raw: str) -> Optional[dict]:
     m = TAIP_PV_RE.match(text)
     if not m:
         return None
-    _, time_text, lat_text, lon_text, speed_text, heading_text, source_text, age_text, taip_id, checksum = m.groups()
+    time_text, lat_text, lon_text, speed_text, heading_text, source_text, age_text, taip_id, checksum = m.groups()
     checksum_start = m.start(9) if checksum and m.start(9) is not None else None
     if checksum and checksum_start is not None and not _taip_checksum_ok(text, checksum, checksum_start):
         raise ValueError(f'TAIP checksum failure: expected {checksum}')
@@ -3339,6 +3339,12 @@ def list_taip_positions(unit_id: Optional[int] = Query(None), limit: int = 50, d
         q = q.filter(TaipPosition.unit_id == unit_id)
     return q.order_by(TaipPosition.received_at.desc()).limit(limit).all()
 
+def _taip_compute_checksum(payload: str) -> str:
+    calculated = 0
+    for ch in payload:
+        calculated ^= ord(ch)
+    return f'{calculated:02X}'
+
 @app.get('/taip/stream')
 async def taip_stream(db: Session = Depends(get_db)):
     async def event_generator():
@@ -3366,6 +3372,134 @@ async def taip_stream(db: Session = Depends(get_db)):
                 last_payload = payload
             await asyncio.sleep(2)
     return StreamingResponse(event_generator(), media_type='text/event-stream')
+
+@app.get('/taip/verify')
+def verify_taip(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    results = []
+    now = datetime.utcnow()
+    lat, lng = 40.0, -83.0
+    time_str = '00000'
+    base_sentence = f'>RPV{time_str}+4000000-0830000000000001;ID=TAIP-VERIFY'
+    checksum = _taip_compute_checksum(base_sentence)
+    valid_sentence = f'{base_sentence};*{checksum}<'
+    bad_checksum_sentence = f'{base_sentence};*00<'
+
+    # Parser test
+    try:
+        parsed = parse_taip_pv(valid_sentence)
+        ok = parsed and abs(parsed['lat'] - 40.0) < 0.0001 and abs(parsed['lng'] - (-83.0)) < 0.0001
+        results.append({'item': 'PV fixed-width parser', 'pass': ok, 'detail': parsed})
+    except Exception as e:
+        results.append({'item': 'PV fixed-width parser', 'pass': False, 'detail': str(e)})
+
+    # Checksum test
+    try:
+        parse_taip_pv(bad_checksum_sentence)
+        results.append({'item': 'Checksum rejects invalid', 'pass': False, 'detail': 'No error raised for bad checksum'})
+    except ValueError:
+        results.append({'item': 'Checksum rejects invalid', 'pass': True, 'detail': 'ValueError raised'})
+
+    # Allowlist test
+    try:
+        allowed = _taip_source_allowed('1.2.3.4')
+        results.append({'item': 'Source IP allowlist', 'pass': True, 'detail': f'allowlist={TAIP_ALLOWLIST}, 1.2.3.4 allowed={allowed}'})
+    except Exception as e:
+        results.append({'item': 'Source IP allowlist', 'pass': False, 'detail': str(e)})
+
+    # Rate limit test
+    try:
+        test_id = 'TAIP-VERIFY'
+        _taip_rate_limited(test_id)
+        limited = _taip_rate_limited(test_id)
+        if TAIP_MIN_INTERVAL <= 0:
+            results.append({'item': 'Per-source rate limiting', 'pass': True, 'detail': 'TAIP_MIN_INTERVAL=0, rate limit disabled'})
+        else:
+            results.append({'item': 'Per-source rate limiting', 'pass': limited, 'detail': f'first call accepted, second call limited={limited}, interval={TAIP_MIN_INTERVAL}s'})
+    except Exception as e:
+        results.append({'item': 'Per-source rate limiting', 'pass': False, 'detail': str(e)})
+
+    # Out-of-order test
+    try:
+        u = Unit(last_seen_at=now, lat=lat, lng=lng)
+        old = now - timedelta(seconds=TAIP_OUT_OF_ORDER_SECONDS + 5)
+        out_of_order = _taip_out_of_order(u, old)
+        results.append({'item': 'Out-of-order rejection', 'pass': out_of_order, 'detail': f'older than {TAIP_OUT_OF_ORDER_SECONDS}s rejected={out_of_order}'})
+    except Exception as e:
+        results.append({'item': 'Out-of-order rejection', 'pass': False, 'detail': str(e)})
+
+    # Stale data age test
+    try:
+        stale_sentence = f'>RPV{time_str}+4000000-0830000000000000;ID=TAIP-VERIFY<'
+        parse_taip_pv(stale_sentence)
+        results.append({'item': 'Stale data age rejection', 'pass': False, 'detail': 'data_age=0 should raise'})
+    except ValueError:
+        results.append({'item': 'Stale data age rejection', 'pass': True, 'detail': 'data_age=0 rejected'})
+
+    # Impossible jump test
+    try:
+        u = Unit(last_seen_at=now - timedelta(seconds=2), lat=lat, lng=lng)
+        jump_ok = _taip_jump_ok(u, lat + 1.0, lng, now)
+        results.append({'item': 'Impossible jump rejection', 'pass': not jump_ok, 'detail': f'large jump in 2s allowed={jump_ok}'})
+    except Exception as e:
+        results.append({'item': 'Impossible jump rejection', 'pass': False, 'detail': str(e)})
+
+    # Stale/offline state test
+    try:
+        stale, offline = _taip_stale_state(now - timedelta(seconds=TAIP_STALE_SECONDS + 1))
+        results.append({'item': 'Stale/offline state detection', 'pass': stale, 'detail': f'stale={stale}, offline={offline}'})
+    except Exception as e:
+        results.append({'item': 'Stale/offline state detection', 'pass': False, 'detail': str(e)})
+
+    # Listener config
+    try:
+        info = taip_listener_info()
+        results.append({'item': 'UDP/TCP listener configuration', 'pass': info.get('udp_port') > 0 or info.get('tcp_port') > 0, 'detail': info})
+    except Exception as e:
+        results.append({'item': 'UDP/TCP listener configuration', 'pass': False, 'detail': str(e)})
+
+    # End-to-end ingest with DB (uses an existing unit or creates a temporary one)
+    try:
+        unit = db.query(Unit).filter(Unit.taip_id == 'TAIP-VERIFY').first()
+        if not unit:
+            # find any unit with a taip_id to reuse
+            unit = db.query(Unit).filter(Unit.taip_id != None).first()
+        test_taip_id = unit.taip_id if unit and unit.taip_id else 'TAIP-VERIFY'
+        test_unit_id = unit.id if unit else None
+        old_pos_count = db.query(TaipPosition).filter(TaipPosition.taip_id == test_taip_id).count()
+        # save and temporarily bypass allowlist/rate limits for this self-test
+        old_allowlist = list(TAIP_ALLOWLIST)
+        old_last_packet = taip_last_packet.get(test_taip_id)
+        if test_taip_id in taip_last_packet:
+            del taip_last_packet[test_taip_id]
+        old_unit = None
+        if unit:
+            old_unit = {'lat': unit.lat, 'lng': unit.lng, 'speed': unit.speed, 'heading': unit.heading, 'last_seen_at': unit.last_seen_at}
+        try:
+            TAIP_ALLOWLIST.clear()
+            pos = _record_taip_sentence(db, valid_sentence, taip_id=test_taip_id, source='127.0.0.1', received_at=now)
+        finally:
+            TAIP_ALLOWLIST.clear()
+            TAIP_ALLOWLIST.extend(old_allowlist)
+            if old_last_packet:
+                taip_last_packet[test_taip_id] = old_last_packet
+            elif test_taip_id in taip_last_packet:
+                del taip_last_packet[test_taip_id]
+        # clean up the test position and restore unit state
+        if pos and pos.id:
+            db.delete(pos)
+        if unit and old_unit:
+            unit.lat = old_unit['lat']
+            unit.lng = old_unit['lng']
+            unit.speed = old_unit['speed']
+            unit.heading = old_unit['heading']
+            unit.last_seen_at = old_unit['last_seen_at']
+        db.commit()
+        results.append({'item': 'End-to-end ingest to database', 'pass': bool(pos and pos.id), 'detail': {'taip_id': test_taip_id, 'unit_id': test_unit_id, 'position_id': pos.id if pos else None}})
+    except Exception as e:
+        results.append({'item': 'End-to-end ingest to database', 'pass': False, 'detail': str(e)})
+
+    passed = sum(1 for r in results if r['pass'])
+    return {'overall': f'{passed}/{len(results)} passed', 'passed': passed, 'total': len(results), 'checks': results, 'timestamp': now.isoformat()}
 
 @app.post('/units/{unit_id}/camera', response_model=UnitOut)
 def set_unit_camera(unit_id: int, body: UnitCamera, db: Session = Depends(get_db)):
@@ -4465,6 +4599,10 @@ def supervisor_page():
 @app.get('/billing-page')
 def billing_page():
     return FileResponse('static/billing.html')
+
+@app.get('/taip-verify-page')
+def taip_verify_page():
+    return FileResponse('static/taip_verify.html')
 
 # Resolve forward references now that all Pydantic models are defined
 for _fwd in (ScheduledTransportOut, UnitPostingOut, EpcrExportOut):

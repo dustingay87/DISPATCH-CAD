@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>TAIP Operational Checklist</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  body { background:#0f172a; color:#e2e8f0; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  .panel { background:#1e293b; border:1px solid #334155; border-radius:.5rem; }
+  .btn { background:#3b82f6; padding:.4rem .75rem; border-radius:.375rem; font-weight:600; font-size:.85rem; }
+  .btn:hover { background:#2563eb; }
+  .pass { color:#22c55e; }
+  .fail { color:#ef4444; }
+  .tag { display:inline-block; padding:.1rem .4rem; border-radius:.25rem; font-size:.7rem; font-weight:600; background:#334155; }
+</style>
+</head>
+<body class='p-4'>
+<div class='max-w-4xl mx-auto'>
+  <div class='flex justify-between items-center mb-4'>
+    <h1 class='text-2xl font-bold'>TAIP Operational Checklist</h1>
+    <a href='/' class='text-sm text-blue-400 hover:underline'>Dashboard</a>
+  </div>
+  <div class='panel p-3 mb-4'>
+    <div id='overall' class='text-lg font-bold'>Click Run to verify</div>
+    <button class='btn mt-2' onclick='run()'>Run Checklist</button>
+  </div>
+  <div id='list' class='text-sm space-y-2'></div>
+</div>
+
+<script>
+function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+
+async function run(){
+  const el = document.getElementById('list');
+  el.innerHTML = '<div class="text-slate-400">Running...</div>';
+  try {
+    const res = await api('/taip/verify');
+    document.getElementById('overall').innerHTML = `Overall: ${res.overall} <span class="tag">${res.timestamp}</span>`;
+    if(!res.checks.length){ el.innerHTML = '<div class="text-slate-500">No checks returned.</div>'; return; }
+    el.innerHTML = res.checks.map(c=>`
+      <div class='bg-slate-800 rounded p-3 border border-slate-700'>
+        <div class='flex justify-between'>
+          <div class='font-bold text-white'>${c.item}</div>
+          <div class='${c.pass?"pass font-bold":"fail font-bold"}'>${c.pass?'PASS':'FAIL'}</div>
+        </div>
+        <pre class='text-xs text-slate-400 mt-1 overflow-x-auto'>${JSON.stringify(c.detail, null, 2)}</pre>
+      </div>
+    `).join('');
+  } catch(e){ el.innerHTML = `<div class='text-red-400'>Error: ${e.message}</div>`; }
+}
+</script>
+</body>
+</html>
