@@ -906,6 +906,21 @@ def require_admin(request: Request):
         raise HTTPException(status_code=403, detail='Admin required')
     return user
 
+CALL_TAKER_ROLES = {'call_taker','dispatcher','admin'}
+DISPATCHER_ROLES = {'dispatcher','admin'}
+FIELD_ROLES = {'responder','dispatcher','admin'}
+
+def check_role(request: Request, allowed: set):
+    user = get_current_user(request)
+    if user.get('role') not in allowed and user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail='Role required')
+    return user
+
+def require_role(allowed_roles: set):
+    def _require(request: Request):
+        return check_role(request, allowed_roles)
+    return _require
+
 def seed_default_admin():
     db = SessionLocal()
     try:
@@ -2181,6 +2196,7 @@ def delete_personnel(personnel_id: int, current_user: dict = Depends(get_current
 
 @app.post('/incidents', response_model=IncidentOut)
 def create_incident(request: Request, body: IncidentCreate, db: Session = Depends(get_db)):
+    check_role(request, CALL_TAKER_ROLES)
     data = body.model_dump()
     if not data.get('incident_number'):
         count = db.query(Incident).filter(Incident.agency_id == data['agency_id']).count()
@@ -2424,10 +2440,12 @@ def fire_report(incident_id: int, db: Session = Depends(get_db)):
 
 @app.put('/incidents/{incident_id}', response_model=IncidentOut)
 def update_incident(request: Request, incident_id: int, body: IncidentUpdate, db: Session = Depends(get_db)):
+    user = check_role(request, CALL_TAKER_ROLES)
+    if body.status == 'closed' or body.status == 'open':
+        check_role(request, DISPATCHER_ROLES)
     incident = db.query(Incident).get(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail='Incident not found')
-    user = get_current_user(request)
     changes = body.model_dump(exclude_unset=True)
     for k, v in changes.items():
         setattr(incident, k, v)
@@ -2489,6 +2507,7 @@ def validate_incident_location_endpoint(incident_id: int, db: Session = Depends(
 
 @app.post('/incidents/{incident_id}/dispatch/{unit_id}')
 def dispatch_unit(request: Request, incident_id: int, unit_id: int, notes: Optional[str] = None, db: Session = Depends(get_db)):
+    check_role(request, DISPATCHER_ROLES)
     incident = db.query(Incident).get(incident_id)
     unit = db.query(Unit).get(unit_id)
     if not incident or not unit:
@@ -2517,6 +2536,7 @@ def dispatch_unit(request: Request, incident_id: int, unit_id: int, notes: Optio
 
 @app.post('/incidents/{incident_id}/units/{unit_id}/status')
 def update_unit_status(request: Request, incident_id: int, unit_id: int, body: StatusUpdate, db: Session = Depends(get_db)):
+    check_role(request, FIELD_ROLES)
     iu = db.query(IncidentUnit).filter_by(incident_id=incident_id, unit_id=unit_id).first()
     if not iu:
         raise HTTPException(status_code=404, detail='Unit not assigned to incident')
@@ -2878,7 +2898,8 @@ def set_unit_shift(unit_id: int, body: UnitShift, db: Session = Depends(get_db))
     return unit
 
 @app.post('/units/{unit_id}/status', response_model=UnitOut)
-def set_unit_status(unit_id: int, body: UnitStatus, db: Session = Depends(get_db)):
+def set_unit_status(request: Request, unit_id: int, body: UnitStatus, db: Session = Depends(get_db)):
+    check_role(request, FIELD_ROLES)
     unit = db.query(Unit).get(unit_id)
     if not unit:
         raise HTTPException(status_code=404, detail='Unit not found')
