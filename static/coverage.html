@@ -76,6 +76,11 @@
     <h2 class='font-bold mb-2'>GIS Map</h2>
     <div id='map'></div>
   </div>
+
+  <div class='panel p-3 lg:col-span-3'>
+    <h2 class='font-bold mb-2'>Coverage Analysis</h2>
+    <div id='analysis' class='text-sm space-y-2'>Loading...</div>
+  </div>
 </div>
 
 <script>
@@ -156,7 +161,24 @@ async function init(){
   const postUnit = document.getElementById('postUnit');
   if(postUnit) postUnit.innerHTML = `<option value=''>Unit</option>` + state.units.filter(u=>u.current_status==='AQ'||u.current_status==='AFR'||u.current_status==='Available').map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
   try { initMap(); } catch(e){ console.error('initMap error', e); errors.push('Map: '+e.message); }
-  renderZones(errors); renderPostings(); renderZonesMap();
+  renderZones(errors); renderPostings(); renderZonesMap(); loadAnalysis();
+}
+
+async function loadAnalysis(){
+  const el = document.getElementById('analysis'); if(!el) return;
+  try {
+    const rows = await api('/coverage/analysis');
+    if(!rows.length){ el.innerHTML = '<div class="text-slate-500">No active post zones.</div>'; return; }
+    el.innerHTML = rows.map(z=>`
+      <div class='bg-slate-800 rounded p-2 border border-slate-700 flex justify-between items-start'>
+        <div>
+          <div class='font-bold text-white'>${z.zone_name} <span class='tag'>${z.zone_type}</span></div>
+          <div class='text-xs text-slate-400'>Posted: ${z.current_units} / Min: ${z.minimum_units} • Gap: ${z.gap} • Recent incidents: ${z.recent_incidents}</div>
+        </div>
+        <div class='text-xs ${z.gap>0?"text-red-400 font-bold":"text-green-400"}'>${z.gap>0?"Need units":"OK"}</div>
+      </div>
+    `).join('');
+  } catch(e){ el.innerHTML = `<div class='text-red-400'>Error: ${e.message}</div>`; }
 }
 
 function renderZones(errors){

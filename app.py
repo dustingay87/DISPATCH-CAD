@@ -4151,6 +4151,72 @@ def remove_unit_posting(up_id: int, current_user: dict = Depends(get_current_use
     _log_event(db, 'unit_posting_removed', 'unit_posting', up.id, user_id=current_user.get('user_id'), data={}, agency_id=up.unit.agency_id)
     return up
 
+def _coverage_analysis(db, agency_id=None):
+    since = datetime.utcnow() - timedelta(days=30)
+    q = db.query(PostZone).filter(PostZone.is_active == True)
+    if agency_id:
+        q = q.filter(PostZone.agency_id == agency_id)
+    zones = q.all()
+    result = []
+    for z in zones:
+        current = db.query(UnitPosting).filter_by(post_zone_id=z.id, is_current=True).count()
+        recent_incidents = db.query(IncidentLocation).filter(IncidentLocation.zone_id == z.id).join(Incident).filter(Incident.created_at >= since).count()
+        gap = max(0, (z.minimum_units or 0) - current)
+        need = max(gap, 0)
+        score = need * 100 + recent_incidents
+        result.append({
+            'zone_id': z.id,
+            'zone_name': z.name,
+            'zone_type': z.zone_type,
+            'color': z.color,
+            'agency_id': z.agency_id,
+            'minimum_units': z.minimum_units or 0,
+            'current_units': current,
+            'gap': gap,
+            'recent_incidents': recent_incidents,
+            'score': score
+        })
+    result.sort(key=lambda x: -x['score'])
+    return result
+
+@app.get('/coverage/analysis')
+def get_coverage_analysis(agency_id: Optional[int] = Query(None), current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _coverage_analysis(db, agency_id)
+
+@app.get('/coverage/recommend-unit/{unit_id}')
+def recommend_unit_posting(unit_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    if not unit.lat or not unit.lng:
+        raise HTTPException(status_code=400, detail='Unit has no location')
+    analysis = _coverage_analysis(db, unit.agency_id)
+    if not analysis:
+        raise HTTPException(status_code=404, detail='No active post zones')
+    best = None
+    best_score = None
+    for zone in analysis:
+        if zone['gap'] <= 0:
+            continue
+        # zone center fallback: use first coordinate of polygon or unit's current zone
+        z = db.query(PostZone).get(zone['zone_id'])
+        center = _zone_center(z)
+        dist = _haversine_m(unit.lat, unit.lng, center[0], center[1]) if center else 0
+        score = zone['score'] - (dist / 1000.0)
+        if best is None or score > best_score:
+            best = zone; best_score = score
+    if not best:
+        best = analysis[0]
+    return {'recommended_zone_id': best['zone_id'], 'recommended_zone_name': best['zone_name'], 'reason': f"gap {best['gap']} / min {best['minimum_units']}, recent incidents {best['recent_incidents']}"}
+
+def _zone_center(z: PostZone):
+    if z and z.geojson and z.geojson.get('type') == 'Polygon' and z.geojson.get('coordinates'):
+        coords = z.geojson['coordinates'][0]
+        lats = [c[1] for c in coords]
+        lngs = [c[0] for c in coords]
+        return [sum(lats)/len(lats), sum(lngs)/len(lngs)]
+    return None
+
 @app.get('/incidents/{incident_id}/epcr', response_model=EpcrExportOut)
 def get_epcr_export(incident_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     return db.query(EpcrExport).filter_by(incident_id=incident_id).order_by(EpcrExport.exported_at.desc()).first() or {}
