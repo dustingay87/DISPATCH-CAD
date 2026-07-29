@@ -3,6 +3,7 @@
 <head>
 <meta charset='utf-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
+<meta http-equiv='Cache-Control' content='no-cache, no-store, must-revalidate'>
 <title>Coverage / Deployment</title>
 <script src='https://cdn.tailwindcss.com'></script>
 <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
@@ -144,34 +145,38 @@ function renderZonesMap(){
 }
 
 async function init(){
-  try { state.agencies = await api('/agencies'); } catch(e){ console.error(e); }
-  try { state.zones = await api('/post-zones'); } catch(e){ console.error(e); }
-  try { state.units = await api('/units'); } catch(e){ console.error(e); }
-  try { state.postings = await api('/unit-postings'); } catch(e){ console.error(e); }
+  let errors = [];
+  try { state.agencies = await api('/agencies'); } catch(e){ console.error(e); errors.push('Agencies: '+e.message); }
+  try { state.zones = await api('/post-zones'); } catch(e){ console.error(e); errors.push('Zones: '+e.message); }
+  try { state.units = await api('/units'); } catch(e){ console.error(e); errors.push('Units: '+e.message); }
+  try { state.postings = await api('/unit-postings'); } catch(e){ console.error(e); errors.push('Postings: '+e.message); }
+  ['agencies','zones','units','postings'].forEach(k=>{ if(!Array.isArray(state[k])) state[k]=[]; });
   const agencySel = document.getElementById('zoneAgency');
   if(agencySel) agencySel.innerHTML = state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
   const postUnit = document.getElementById('postUnit');
   if(postUnit) postUnit.innerHTML = `<option value=''>Unit</option>` + state.units.filter(u=>u.current_status==='AQ'||u.current_status==='AFR'||u.current_status==='Available').map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
-  initMap();
-  renderZones(); renderPostings(); renderZonesMap();
+  try { initMap(); } catch(e){ console.error('initMap error', e); errors.push('Map: '+e.message); }
+  renderZones(errors); renderPostings(); renderZonesMap();
 }
 
-function renderZones(){
+function renderZones(errors){
   const el = document.getElementById('zones');
-  el.innerHTML = state.zones.map(z=>`
+  if(!el) return;
+  const errorHtml = (errors && errors.length) ? `<div class='text-red-400 text-xs mb-2'>${errors.join('<br>')}</div>` : '';
+  el.innerHTML = errorHtml + (state.zones.map(z=>`
     <div class='bg-slate-800 rounded p-2 border border-slate-700 flex justify-between items-start'>
       <div>
         <div class='font-bold text-white flex items-center gap-2'><span class='w-3 h-3 rounded-full' style='background:${z.color || defaultColor(z.zone_type)}'></span>${z.name}</div>
-        <div class='text-xs text-slate-400'>${z.zone_type} • min ${z.minimum_units}</div>
+        <div class='text-xs text-slate-400'>${z.zone_type} • min ${z.minimum_units || 0}</div>
       </div>
       <div class='flex gap-1'>
         <button class='btn btn-sm' onclick='editZone(${z.id})'>Edit</button>
         <button class='btn-red btn-sm' onclick='deleteZone(${z.id})'>Del</button>
       </div>
     </div>
-  `).join('') || '<div class="text-slate-500">No post zones.</div>';
+  `).join('') || '<div class="text-slate-500">No post zones.</div>');
   const postZone = document.getElementById('postZone');
-  postZone.innerHTML = `<option value=''>Zone</option>` + state.zones.map(z=>`<option value='${z.id}'>${z.name}</option>`).join('');
+  if(postZone) postZone.innerHTML = `<option value=''>Zone</option>` + state.zones.map(z=>`<option value='${z.id}'>${z.name}</option>`).join('');
   renderZonesMap();
 }
 
@@ -229,9 +234,10 @@ async function deleteZone(id){
 
 function renderPostings(){
   const el = document.getElementById('postings');
-  if(!state.postings.length){ el.innerHTML = '<div class="text-slate-500">No current postings.</div>'; return; }
-  const zoneMap = {}; state.zones.forEach(z=>zoneMap[z.id]=z);
-  const unitMap = {}; state.units.forEach(u=>unitMap[u.id]=u);
+  if(!el) return;
+  if(!state.postings || !state.postings.length){ el.innerHTML = '<div class="text-slate-500">No current postings.</div>'; return; }
+  const zoneMap = {}; (state.zones||[]).forEach(z=>zoneMap[z.id]=z);
+  const unitMap = {}; (state.units||[]).forEach(u=>unitMap[u.id]=u);
   el.innerHTML = state.postings.filter(p=>p.is_current).map(p=>`
     <div class='bg-slate-800 rounded p-2 border border-slate-700 flex justify-between items-center'>
       <div>

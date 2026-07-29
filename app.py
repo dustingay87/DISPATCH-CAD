@@ -2512,7 +2512,7 @@ def scheduled_transports_page():
 
 @app.get('/coverage-page')
 def coverage_page():
-    return FileResponse('static/coverage.html')
+    return FileResponse('static/coverage.html', headers={'Cache-Control':'no-cache, no-store, must-revalidate'})
 
 @app.get('/scheduled-transports', response_model=List[ScheduledTransportOut])
 def list_scheduled_transports(status: Optional[str] = None, agency_id: Optional[int] = None, date: Optional[date] = Query(None), current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
