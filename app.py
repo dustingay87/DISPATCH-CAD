@@ -1761,6 +1761,11 @@ def create_incident(request: Request, body: IncidentCreate, db: Session = Depend
         data['incident_number'] = f"{data['agency_id']}-{count + 1:05d}"
     if not data.get('call_number'):
         data['call_number'] = data['incident_number']
+    if data.get('lat') is None or data.get('lng') is None:
+        agency = db.query(Agency).get(data.get('agency_id'))
+        if agency and agency.lat is not None and agency.lng is not None:
+            data['lat'] = agency.lat
+            data['lng'] = agency.lng
     user = get_current_user(request)
     incident = Incident(**data)
     db.add(incident)

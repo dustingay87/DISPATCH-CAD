@@ -364,7 +364,7 @@ async function selectIncident(id){
             const mileageClass = features.mileage || (a.agency_type==='ems') ? '' : 'hidden';
             return `<div class='flex flex-wrap gap-2 items-center text-xs'>
               <span class='font-bold text-white'>${u.call_sign}</span>
-              <select id='incUStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onchange='handleIncidentUnitStatusChange(${i.id},${u.id})'>${unitStatusOptions(a.agency_type, i.agency_id)}</select>
+              <select id='incUStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onchange='handleIncidentUnitStatusChange(${i.id},${u.id})'>${unitStatusOptions(a.agency_type, i.agency_id, u.current_status)}</select>
               <select id='incUDest_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden'>${destOpts}</select>
               <input id='incUMile_${u.id}' type='number' step='0.1' class='${mileageClass} bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-20 hidden' placeholder='Miles'>
               <button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='setIncidentUnitStatus(${i.id},${u.id})'>Set</button>
@@ -639,7 +639,7 @@ function renderUnits(){
       <td class='timer' data-fallback='-' data-iso='${sceneIso||''}'>-</td>
       <td class='timer' data-fallback='-' data-acc='${callAcc}' data-iso='${callIso||''}'>-</td>
       <td class='timer' data-fallback='-' data-iso='${shiftIso||''}'>-</td>
-      <td onclick='event.stopPropagation()'><select id='uStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onclick='event.stopPropagation()' onchange='event.stopPropagation()'>${unitStatusOptions(a.agency_type, a.id)}</select><button class='ml-1 bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();setUnitStatus(${u.id})'>Set</button></td>
+      <td onclick='event.stopPropagation()'><select id='uStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onclick='event.stopPropagation()' onchange='event.stopPropagation()'>${unitStatusOptions(a.agency_type, a.id, u.current_status)}</select><button class='ml-1 bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();setUnitStatus(${u.id})'>Set</button></td>
     </tr>`;
   }).join('');
   const html = rows ? `<table class='tbl'><thead><tr><th>Unit</th><th>Type</th><th>Status</th><th>Call</th><th>Avail</th><th>Scene</th><th>Call T</th><th>Shift</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class=\'p-2 text-slate-500\'>No units</div>';
@@ -671,7 +671,7 @@ function updateTimers(){
   });
 }
 
-function unitStatusOptions(type, agencyId){
+function unitStatusOptions(type, agencyId, selectedCode=''){
   // Build options from customer config if available, otherwise defaults.
   const cfg = (state.configs && state.configs[agencyId]) || {};
   const custom = cfg.statuses;
@@ -681,19 +681,19 @@ function unitStatusOptions(type, agencyId){
   if(custom && custom.length){
     codes = custom.map(s=>s.code);
   } else {
-    const police = ['AQ','OS','ER','TR','CAN','LUN','AFR'];
+    const police = ['AQ','AK','ER','OS','TR','CAN','LUN','AFR'];
     const fire = showTransport
-      ? ['AQ','OS','ER','WATER','EXT','OVER','TR','CAN','LUN','OOS','AFR','MAINT']
-      : ['AQ','OS','ER','WATER','EXT','OVER','CAN','LUN','OOS','AFR','MAINT'];
+      ? ['AQ','AK','ER','OS','WATER','EXT','OVER','TR','CAN','LUN','OOS','AFR','MAINT']
+      : ['AQ','AK','ER','OS','WATER','EXT','OVER','CAN','LUN','OOS','AFR','MAINT'];
     const ems = showTransport
-      ? ['AQ','ER','OS','TR','CAN','NPF','DEL','AFR']
-      : ['AQ','ER','OS','CAN','NPF','AFR'];
-    codes = {police,fire,ems}[type]||['AQ','OS','ER','CAN'];
+      ? ['AQ','AK','ER','OS','TR','DEL','CAN','NPF','AFR']
+      : ['AQ','AK','ER','OS','CAN','NPF','AFR'];
+    codes = {police,fire,ems}[type]||['AQ','AK','ER','OS','CAN'];
   }
   if(!showTransport){
     codes = codes.filter(c=>!['TR','ED','DEL'].includes(c));
   }
-  return `<option value=''>Set...</option>` + codes.map(c=>`<option value='${c}'>${statusLabel(c)}</option>`).join('');
+  return `<option value=''>Set...</option>` + codes.map(c=>`<option value='${c}' ${c===selectedCode?'selected':''}>${statusLabel(c)}</option>`).join('');
 }
 window.setUnitStatus = async function(unitId){ const s = document.getElementById('uStat_'+unitId).value; if(!s) return; const u=state.units.find(x=>x.id===unitId); const inc=state.incidents.find(i=>i.id===u.current_incident_id); const path=inc ? `/incidents/${inc.id}/units/${unitId}/status` : `/units/${unitId}/status`; try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status_code:s})}); log(`Unit ${u.call_sign} set to ${statusLabel(s)}`); await load(); } catch(e){ log('Status error: '+e.message); } };
 
@@ -731,11 +731,14 @@ function renderMap(){
     bounds.extend([u.lat,u.lng]);
   });
   state.incidents.forEach(i=>{
-    if(i.lat==null || i.lng==null) return;
+    const ag = state.agencyMap[i.agency_id]||{};
+    const lat = i.lat!=null ? i.lat : (i.id===state.selectedIncident ? ag.lat : null);
+    const lng = i.lng!=null ? i.lng : (i.id===state.selectedIncident ? ag.lng : null);
+    if(lat==null || lng==null) return;
     const col = i.status==='closed' ? '#64748b' : i.priority===1 ? '#ef4444' : i.priority===2 ? '#f97316' : '#eab308';
-    const m = L.circleMarker([i.lat,i.lng],{radius:8,color:col,fillColor:col,fillOpacity:0.6,weight:2}).addTo(layers.incidents);
-    m.bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${i.location_text||''}`);
-    bounds.extend([i.lat,i.lng]);
+    const m = L.circleMarker([lat,lng],{radius:8,color:col,fillColor:col,fillOpacity:0.6,weight:2}).addTo(layers.incidents);
+    m.bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${i.location_text||''}${(i.lat==null)?'<br><span class="text-slate-400">(agency location)</span>':''}`);
+    bounds.extend([lat,lng]);
   });
   if(state.showTrails && state.selectedUnit && state.trails[state.selectedUnit] && state.trails[state.selectedUnit].length){
     const pts = state.trails[state.selectedUnit].map(p=>[p.lat,p.lng]);
@@ -774,9 +777,14 @@ function renderMap(){
       else map.setView(DEFAULT_CENTER, 11);
     }
   }
-  if(a && a.lat!=null && a.lng!=null){
-    map.setView([a.lat,a.lng], 16, {animate:false});
-    layers.incidents.getLayers().forEach(m=>{ if(m.getPopup().getContent().includes(a.call_number||a.incident_number)){ m.openPopup(); m.setStyle({radius:12, fillOpacity:0.9}); } });
+  if(a){
+    const ag = state.agencyMap[a.agency_id]||{};
+    const lat = a.lat!=null ? a.lat : ag.lat;
+    const lng = a.lng!=null ? a.lng : ag.lng;
+    if(lat!=null && lng!=null){
+      map.setView([lat,lng], 16, {animate:false});
+      layers.incidents.getLayers().forEach(m=>{ if(m.getPopup().getContent().includes(a.call_number||a.incident_number)){ m.openPopup(); m.setStyle({radius:12, fillOpacity:0.9}); } });
+    }
   }
 }
 
