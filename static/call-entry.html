@@ -81,9 +81,16 @@
           <div id='responseGoals' class='text-xs text-slate-400'></div>
         </div>
         <div class='md:col-span-2 flex justify-end space-x-2'>
-          <button type='submit' class='btn btn-primary'>Create Incident</button>
+          <button type='submit' class='btn btn-primary'>Save Intake</button>
         </div>
       </form>
+      <div id='intakeActions' class='hidden mt-4 p-3 bg-slate-800 rounded border border-slate-600 text-sm'>
+        <div class='mb-2'>Incident <b id='intakeNumber' class='text-white'></b> is in <span class='text-yellow-400'>INTAKE</span>.</div>
+        <div class='flex gap-2'>
+          <button id='openBtn' class='btn btn-primary'>Open for Dispatch</button>
+          <a id='consoleLink' href='#' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Console</a>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -174,6 +181,8 @@ document.getElementById('disciplineTabs').addEventListener('click', e=>{ if(e.ta
 document.getElementById('agency').addEventListener('change', loadConfig);
 document.getElementById('callType').addEventListener('change', updatePriority);
 
+let createdIncidentId = null;
+
 document.getElementById('callForm').addEventListener('submit', async e=>{
   e.preventDefault();
   const body = {
@@ -187,12 +196,24 @@ document.getElementById('callForm').addEventListener('submit', async e=>{
     lat: document.getElementById('lat').value ? parseFloat(document.getElementById('lat').value) : null,
     lng: document.getElementById('lng').value ? parseFloat(document.getElementById('lng').value) : null,
     call_entry_started_at: state.callEntryStarted,
-    status: 'open'
+    status: 'intake'
   };
   try {
-    await api('/incidents', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    showMsg('Incident created');
-    setTimeout(()=>{ window.location.href = `/console?discipline=${state.DISCIPLINE}`; }, 800);
+    const inc = await api('/incidents', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    createdIncidentId = inc.id;
+    document.getElementById('intakeNumber').textContent = inc.call_number || inc.incident_number;
+    document.getElementById('consoleLink').href = `/console?discipline=${state.DISCIPLINE}`;
+    document.getElementById('intakeActions').classList.remove('hidden');
+    document.getElementById('callForm').classList.add('hidden');
+    showMsg(`Incident ${inc.call_number||inc.incident_number} saved in INTAKE`);
+  } catch(err){ showMsg(err.message, false); }
+});
+
+document.getElementById('openBtn').addEventListener('click', async e=>{
+  if(!createdIncidentId) return;
+  try {
+    await api(`/incidents/${createdIncidentId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:'open'})});
+    window.location.href = `/console?discipline=${state.DISCIPLINE}`;
   } catch(err){ showMsg(err.message, false); }
 });
 

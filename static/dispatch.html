@@ -279,7 +279,7 @@ function renderCalls(){
   const zone = document.getElementById('cfZone')?.value || 'all';
   const search = (document.getElementById('cfSearch')?.value || '').toLowerCase();
   const active = state.incidents.filter(i=>{
-    if(i.status==='closed') return false;
+    if(i.status==='closed' || i.status==='intake') return false;
     if(!matchesDiscipline((state.agencyMap[i.agency_id]||{}).agency_type)) return false;
     if(priority!=='all' && String(i.priority||2)!==priority) return false;
     if(status!=='all' && i.status!==status) return false;

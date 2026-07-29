@@ -1372,6 +1372,7 @@ class IncidentCreate(BaseModel):
     call_number: Optional[str] = None
     call_type: str
     priority: int = 2
+    status: Optional[str] = 'open'
     location_text: Optional[str] = None
     extra: Optional[dict] = None
     lat: Optional[float] = None
