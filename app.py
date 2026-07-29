@@ -464,10 +464,6 @@ if DATABASE_URL.startswith('sqlite'):
     print('WARNING: SQLite data is stored in a local file. Container redeploys will clear it unless the file is on a persistent volume.')
     ensure_sqlite_columns()
 
-geocode_missing_agencies()
-start_taip_udp_listener()
-start_taip_tcp_listener()
-
 app = FastAPI(title='VolCAD Prototype', version='0.1.0')
 
 app.mount('/static', StaticFiles(directory='static'), name='static')
@@ -3346,3 +3342,8 @@ def unit_trail(unit_id: int, hours: int = 8, current_user: dict = Depends(get_cu
 # Resolve forward references now that all Pydantic models are defined
 for _fwd in (ScheduledTransportOut, UnitPostingOut, EpcrExportOut):
     _fwd.model_rebuild()
+
+# Startup: geocode any agencies without lat/lng and start TAIP listeners
+geocode_missing_agencies()
+start_taip_udp_listener()
+start_taip_tcp_listener()
