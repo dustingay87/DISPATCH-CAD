@@ -1702,6 +1702,36 @@ def _haversine_m(lat1, lng1, lat2, lng2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
+def _road_eta_matrix(unit_points, dest_lat, dest_lng):
+    """Return list of (duration_seconds, distance_meters) for unit_points using OSRM table API, or (None, None) on failure."""
+    if not OSRM_URL or not unit_points or dest_lat is None or dest_lng is None:
+        return [(None, None)] * len(unit_points)
+    results = []
+    chunk_size = 50
+    for i in range(0, len(unit_points), chunk_size):
+        chunk = unit_points[i:i+chunk_size]
+        coords = [f"{dest_lng},{dest_lat}"] + [f"{u[1]},{u[0]}" for u in chunk]
+        url = f"{OSRM_URL.rstrip('/')}/table/v1/driving/{';'.join(coords)}?sources=0&destinations=all&annotations=duration,distance"
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'D2D-CAD/1.0'})
+            with urllib.request.urlopen(req, timeout=OSRM_TIMEOUT) as r:
+                data = json.loads(r.read().decode('utf-8'))
+                if data.get('code') != 'Ok' or not data.get('durations'):
+                    results.extend([(None, None)] * len(chunk))
+                    continue
+                durations = data['durations'][0]
+                distances = data.get('distances', [[]])[0]
+                for j in range(1, len(coords)):
+                    dur = durations[j] if j < len(durations) else None
+                    dist = distances[j] if j < len(distances) else None
+                    if dur is None:
+                        results.append((None, None))
+                    else:
+                        results.append((dur, dist))
+        except Exception:
+            results.extend([(None, None)] * len(chunk))
+    return results
+
 def _taip_reported_time(data: dict, received_at: datetime) -> Optional[datetime]:
     if data.get('reported_at'):
         return data['reported_at']
@@ -1780,6 +1810,8 @@ def refresh_incident_status(db: Session, incident):
 # Endpoints
 
 GEOCODER_TIMEOUT = 5
+OSRM_URL = os.getenv('OSRM_URL', 'https://router.project-osrm.org')
+OSRM_TIMEOUT = int(os.getenv('OSRM_TIMEOUT', 3))
 
 def _build_geo_query(parts):
     return ' '.join(str(p) for p in parts if p is not None and str(p).strip())
@@ -2402,6 +2434,16 @@ def recommend_units(incident_id: int, limit: int = Query(10), db: Session = Depe
         posting_counts[zone_id] = cnt
     zones = {z.id: z for z in db.query(PostZone).all() if z.minimum_units}
     units = db.query(Unit).filter(Unit.is_active == True).all()
+    unit_points = [(u.lat, u.lng) for u in units if u.lat is not None and u.lng is not None]
+    road_results = _road_eta_matrix(unit_points, incident.lat, incident.lng)
+    road_map = {}
+    road_idx = 0
+    for u in units:
+        if u.lat is not None and u.lng is not None and road_idx < len(road_results):
+            road_map[u.id] = road_results[road_idx]
+            road_idx += 1
+        else:
+            road_map[u.id] = (None, None)
     scored = []
     for u in units:
         s = 0.0
@@ -2427,13 +2469,24 @@ def recommend_units(incident_id: int, limit: int = Query(10), db: Session = Depe
             age = (now - u.last_seen_at).total_seconds()
             s -= age * 0.05; reasons.append('GPS stale')
 
-        # Distance and ETA
+        # Distance and ETA (road-based with OSRM, fallback to Haversine)
         dist_miles = None
         eta_seconds = None
+        road_dur, road_dist = road_map.get(u.id, (None, None))
         if incident.lat is not None and incident.lng is not None and u.lat is not None and u.lng is not None:
-            dist_m = _haversine_m(u.lat, u.lng, incident.lat, incident.lng)
-            if dist_m is not None:
-                dist_miles = dist_m / 1609.34
+            if road_dist is not None:
+                dist_miles = road_dist / 1609.34
+            else:
+                dist_m = _haversine_m(u.lat, u.lng, incident.lat, incident.lng)
+                if dist_m is not None:
+                    dist_miles = dist_m / 1609.34
+            if road_dur is not None:
+                eta_seconds = road_dur
+                s -= eta_seconds * 0.03
+                if road_dist is None:
+                    dist_miles = max(dist_miles or 0, (eta_seconds / 3600) * speed_mph)
+                reasons.append(f"{dist_miles:.1f} mi · {eta_seconds/60:.0f} min (road)")
+            elif dist_miles is not None:
                 eta_seconds = (dist_miles / speed_mph) * 3600
                 s -= eta_seconds * 0.05
                 reasons.append(f"{dist_miles:.1f} mi · {eta_seconds/60:.0f} min")
