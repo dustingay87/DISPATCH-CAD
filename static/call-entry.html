@@ -185,16 +185,19 @@ document.getElementById('callType').addEventListener('change', updatePriority);
 let createdIncidentId = null;
 
 function getFormBody(status='intake'){
+  const priority = parseInt(document.getElementById('priority').value);
+  const lat = document.getElementById('lat').value ? parseFloat(document.getElementById('lat').value) : null;
+  const lng = document.getElementById('lng').value ? parseFloat(document.getElementById('lng').value) : null;
   return {
     agency_id: parseInt(document.getElementById('agency').value),
     call_type: document.getElementById('callType').value,
-    priority: parseInt(document.getElementById('priority').value),
+    priority: Number.isNaN(priority) ? 2 : priority,
     location_text: document.getElementById('location').value,
     callback: document.getElementById('callback').value,
     caller_name: document.getElementById('caller').value,
     narrative: document.getElementById('narrative').value,
-    lat: document.getElementById('lat').value ? parseFloat(document.getElementById('lat').value) : null,
-    lng: document.getElementById('lng').value ? parseFloat(document.getElementById('lng').value) : null,
+    lat: Number.isNaN(lat) ? null : lat,
+    lng: Number.isNaN(lng) ? null : lng,
     status
   };
 }
@@ -268,6 +271,7 @@ async function init(){
       document.getElementById('disciplineTabs').classList.add('hidden');
     }
     setDiscipline(defaultDiscipline);
+    await loadConfig();
     await createIntake();
     startTimer();
   } catch(err){ showMsg(err.message, false); }
