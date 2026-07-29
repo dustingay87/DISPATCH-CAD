@@ -24,7 +24,8 @@ load_dotenv()
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-change-me')
 INSECURE_DEV = os.getenv('INSECURE_DEV', 'false').lower() == 'true'
-TAIP_UDP_PORT = int(os.getenv('TAIP_UDP_PORT', '5005'))
+TAIP_UDP_PORT = int(os.getenv('TAIP_UDP_PORT', os.getenv('TAIP_PORT', '5005')))
+TAIP_TCP_PORT = int(os.getenv('TAIP_TCP_PORT', os.getenv('TAIP_PORT', str(TAIP_UDP_PORT))))
 
 login_attempts = {}
 
@@ -215,6 +216,9 @@ class TaipPosition(Base):
     ignition = Column(Boolean)
     odometer = Column(Float)
     fix_quality = Column(String(10))
+    gps_seconds_of_day = Column(Integer)
+    data_age = Column(Integer)
+    gps_source = Column(Integer)
     reported_at = Column(DateTime)
     received_at = Column(DateTime, default=datetime.utcnow)
     unit = relationship('Unit')
@@ -454,6 +458,7 @@ if DATABASE_URL.startswith('sqlite'):
 
 geocode_missing_agencies()
 start_taip_udp_listener()
+start_taip_tcp_listener()
 
 app = FastAPI(title='VolCAD Prototype', version='0.1.0')
 
@@ -1420,6 +1425,9 @@ class TaipPositionOut(BaseModel):
     ignition: Optional[bool] = None
     odometer: Optional[float] = None
     fix_quality: Optional[str] = None
+    gps_seconds_of_day: Optional[int] = None
+    data_age: Optional[int] = None
+    gps_source: Optional[int] = None
     reported_at: Optional[datetime] = None
     received_at: Optional[datetime] = None
     class Config:
@@ -1466,7 +1474,64 @@ class TaipIngest(BaseModel):
 
 # TAIP parser
 
+TAIP_PV_RE = re.compile(
+    r'^>RPV(\d{5})([+-]\d{7})([+-]\d{8})(\d{3})(\d{3})(\d)(\d)(?:;ID=([A-Z0-9-]{1,20}))?(?:;\*([0-9A-Fa-f]{2}))?<$',
+    re.IGNORECASE
+)
+
+def _taip_checksum_ok(raw: str, checksum: str, checksum_start: int) -> bool:
+    if not checksum:
+        return True
+    payload = raw[:checksum_start]
+    calculated = 0
+    for ch in payload:
+        calculated ^= ord(ch)
+    expected = f'{calculated:02X}'
+    return expected.upper() == checksum.upper()
+
+def parse_taip_pv(raw: str) -> Optional[dict]:
+    text = raw.strip().upper()
+    m = TAIP_PV_RE.match(text)
+    if not m:
+        return None
+    _, time_text, lat_text, lon_text, speed_text, heading_text, source_text, age_text, taip_id, checksum = m.groups()
+    checksum_start = m.start(9) if checksum and m.start(9) is not None else None
+    if checksum and checksum_start is not None and not _taip_checksum_ok(text, checksum, checksum_start):
+        raise ValueError(f'TAIP checksum failure: expected {checksum}')
+    lat = int(lat_text) / 100000.0
+    lng = int(lon_text) / 100000.0
+    speed = int(speed_text)
+    heading = int(heading_text)
+    gps_source = int(source_text)
+    data_age = int(age_text)
+    if data_age == 0:
+        raise ValueError('TAIP location data is unavailable (data_age=0)')
+    if lat < -90 or lat > 90 or lng < -180 or lng > 180:
+        raise ValueError('TAIP coordinates are outside valid geographic bounds')
+    if heading < 0 or heading > 359:
+        raise ValueError('TAIP heading is outside the valid range')
+    return {
+        'raw': raw,
+        'taip_id': taip_id or None,
+        'lat': lat,
+        'lng': lng,
+        'speed': speed,
+        'heading': heading,
+        'gps_source': gps_source,
+        'data_age': data_age,
+        'gps_seconds_of_day': int(time_text),
+        'reported_at': None,
+        'ignition': None,
+        'odometer': None
+    }
+
 def parse_taip(raw: str) -> dict:
+    try:
+        pv = parse_taip_pv(raw)
+        if pv:
+            return pv
+    except ValueError:
+        raise
     cleaned = raw.strip().lstrip('>').rstrip('&')
     cleaned = re.sub(r'\*[0-9A-Fa-f]{2}$', '', cleaned)
     cleaned = cleaned.replace('$>', '')
@@ -2251,6 +2316,10 @@ def _record_taip_sentence(db, raw: str, taip_id: Optional[str] = None) -> TaipPo
         heading=data.get('heading'),
         ignition=data.get('ignition'),
         odometer=data.get('odometer'),
+        fix_quality=data.get('fix_quality'),
+        gps_seconds_of_day=data.get('gps_seconds_of_day'),
+        data_age=data.get('data_age'),
+        gps_source=data.get('gps_source'),
         reported_at=data.get('reported_at')
     )
     if unit:
@@ -2271,8 +2340,15 @@ def _record_taip_sentence(db, raw: str, taip_id: Optional[str] = None) -> TaipPo
 
 @app.post('/taip/ingest')
 def ingest_taip(body: TaipIngest, db: Session = Depends(get_db)):
-    pos = _record_taip_sentence(db, body.raw, body.taip_id)
+    try:
+        pos = _record_taip_sentence(db, body.raw, body.taip_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {'taip_id': pos.taip_id, 'parsed': parse_taip(body.raw), 'unit_id': pos.unit_id}
+
+def _extract_taip_sentences(text: str) -> List[str]:
+    """Pull one or more TAIP sentences out of a raw byte stream."""
+    return re.findall(r'>[^<]+<', text)
 
 def _taip_udp_listener():
     try:
@@ -2284,13 +2360,14 @@ def _taip_udp_listener():
             try:
                 data, addr = sock.recvfrom(2048)
                 text = data.decode('utf-8', errors='ignore')
-                for line in text.splitlines():
-                    line = line.strip()
-                    if not line:
+                sentences = _extract_taip_sentences(text) or [text.strip()]
+                for sentence in sentences:
+                    sentence = sentence.strip()
+                    if not sentence:
                         continue
                     try:
                         db = SessionLocal()
-                        _record_taip_sentence(db, line)
+                        _record_taip_sentence(db, sentence)
                     except Exception as e:
                         print(f'TAIP UDP record error from {addr}: {e}')
                     finally:
@@ -2302,15 +2379,82 @@ def _taip_udp_listener():
     except Exception as e:
         print(f'TAIP UDP listener error: {e}')
 
+def _taip_tcp_client(conn, addr):
+    db = None
+    buffer = ''
+    try:
+        while True:
+            data = conn.recv(2048)
+            if not data:
+                break
+            buffer += data.decode('utf-8', errors='ignore')
+            while True:
+                start = buffer.find('>')
+                end = buffer.find('<', start)
+                if start == -1 or end == -1:
+                    break
+                sentence = buffer[start:end+1]
+                buffer = buffer[end+1:]
+                try:
+                    db = SessionLocal()
+                    _record_taip_sentence(db, sentence)
+                except Exception as e:
+                    print(f'TAIP TCP record error from {addr}: {e}')
+                finally:
+                    if db:
+                        db.close(); db = None
+    except Exception as e:
+        print(f'TAIP TCP client error {addr}: {e}')
+    finally:
+        if db:
+            db.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+def _taip_tcp_listener():
+    try:
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(('0.0.0.0', TAIP_TCP_PORT))
+        server.listen(5)
+        print(f'TAIP TCP listener started on 0.0.0.0:{TAIP_TCP_PORT}')
+        while True:
+            try:
+                conn, addr = server.accept()
+                threading.Thread(target=_taip_tcp_client, args=(conn, addr), daemon=True).start()
+            except Exception as e:
+                print(f'TAIP TCP accept error: {e}')
+    except OSError as e:
+        print(f'TAIP TCP listener could not bind to port {TAIP_TCP_PORT}: {e}')
+    except Exception as e:
+        print(f'TAIP TCP listener error: {e}')
+
 def start_taip_udp_listener():
     if TAIP_UDP_PORT <= 0:
         return
     t = threading.Thread(target=_taip_udp_listener, daemon=True)
     t.start()
 
+def start_taip_tcp_listener():
+    if TAIP_TCP_PORT <= 0:
+        return
+    t = threading.Thread(target=_taip_tcp_listener, daemon=True)
+    t.start()
+
+@app.get('/taip/listener-info')
+def taip_listener_info():
+    return {
+        'udp_port': TAIP_UDP_PORT,
+        'tcp_port': TAIP_TCP_PORT,
+        'bind_host': '0.0.0.0',
+        'note': 'Configure your remote TAIP feed to send UDP or TCP to the public IP of this server on the listed port. TAIP ID in the sentence (or from the PV ID= field) must match a Unit.taip_id in VolCAD.'
+    }
+
 @app.get('/taip/udp-info')
 def taip_udp_info():
-    return {'port': TAIP_UDP_PORT, 'bind_host': '0.0.0.0', 'note': 'Configure your remote TAIP feed to send UDP to the public IP of this server on the listed port. The unit taip_id in the sentence must match a Unit.taip_id in VolCAD.'}
+    return taip_listener_info()
 
 @app.get('/taip/positions', response_model=List[TaipPositionOut])
 def list_taip_positions(unit_id: Optional[int] = Query(None), limit: int = 50, db: Session = Depends(get_db)):
