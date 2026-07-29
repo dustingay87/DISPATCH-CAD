@@ -1663,16 +1663,21 @@ def _taip_stale_state(last_seen_at: Optional[datetime]):
     age = (datetime.utcnow() - last_seen_at).total_seconds()
     return age > TAIP_STALE_SECONDS, age > TAIP_OFFLINE_SECONDS
 
+_CALL_ACTIVE_STATUSES = {'AK','ER','OS','TR','ED','WATER','EXT','OVER','TC','ARR','CT','BK'}
+
 def map_status(code: str) -> str:
     return {
         'AQ': 'assigned', 'AK': 'assigned',
         'ER': 'en_route', 'OS': 'on_scene',
         'TR': 'transport', 'ED': 'transport',
-        'CAN': 'clear'
+        'CAN': 'clear', 'NPF': 'clear', 'DEL': 'clear',
+        'AFR': 'clear', 'OOS': 'clear', 'LUN': 'clear', 'MAINT': 'clear'
     }.get(code, code)
 
 def refresh_incident_status(db: Session, incident):
     """Set incident status based on the most advanced status of its currently assigned units."""
+    if not incident or incident.status == 'closed':
+        return
     units = db.query(Unit).filter(Unit.current_incident_id == incident.id).all()
     if not units:
         # If the incident has ever had a unit assigned and they are now all clear, mark cleared; otherwise open.
@@ -1680,7 +1685,7 @@ def refresh_incident_status(db: Session, incident):
         new_status = 'cleared' if (was_dispatched and incident.status not in ('closed',)) else 'open'
     else:
         statuses = [u.current_status for u in units]
-        if any(s in ('OS','WATER','EXT','OVER') for s in statuses):
+        if any(s in ('OS','WATER','EXT','OVER','TC','ARR','CT','BK') for s in statuses):
             new_status = 'on_scene'
         elif any(s in ('ER','TR','ED') for s in statuses):
             new_status = 'en_route'
@@ -2236,6 +2241,18 @@ def update_incident(request: Request, incident_id: int, body: IncidentUpdate, db
         setattr(incident, k, v)
     if body.status == 'closed' and not incident.closed_at:
         incident.closed_at = datetime.utcnow()
+        for unit in db.query(Unit).filter(Unit.current_incident_id == incident.id).all():
+            iu = db.query(IncidentUnit).filter_by(incident_id=incident.id, unit_id=unit.id, cleared_at=None).first()
+            if iu:
+                iu.cleared_at = incident.closed_at
+                iu.assignment_status = 'cleared'
+                if iu.assigned_at:
+                    duration = (incident.closed_at - iu.assigned_at).total_seconds()
+                    unit.accumulated_call_seconds = (unit.accumulated_call_seconds or 0) + duration
+            agency = db.query(Agency).get(unit.agency_id) if unit.agency_id else None
+            unit.current_status = 'AFR' if (agency and agency.agency_type == 'fire') else 'AQ'
+            unit.current_incident_id = None
+            db.add(StatusEvent(unit_id=unit.id, incident_id=incident.id, status_code=unit.current_status, reason='Call closed'))
     _log_event(db, 'incident_updated', 'incident', incident.id, user_id=user.get('user_id'), data=changes, agency_id=incident.agency_id)
     db.commit()
     db.refresh(incident)
@@ -2280,18 +2297,17 @@ def update_unit_status(request: Request, incident_id: int, unit_id: int, body: S
         iu.disposition = body.disposition
     if body.passenger_count is not None:
         iu.passenger_count = body.passenger_count
-    if body.status_code == 'CAN':
+    if body.status_code in _CALL_ACTIVE_STATUSES:
+        unit.current_status = body.status_code
+        unit.current_incident_id = incident_id
+    else:
         if iu.assigned_at:
             duration = (datetime.utcnow() - iu.assigned_at).total_seconds()
             unit.accumulated_call_seconds = (unit.accumulated_call_seconds or 0) + duration
         iu.cleared_at = datetime.utcnow()
+        iu.assignment_status = 'cleared'
         unit.current_incident_id = None
-        unit.current_status = 'AQ'
-    else:
-        unit.current_status = body.status_code
-        unit.current_incident_id = incident_id
-        if body.disposition is not None:
-            iu.disposition = body.disposition
+        unit.current_status = 'AQ' if body.status_code == 'CAN' else body.status_code
     incident = db.query(Incident).get(incident_id)
     refresh_incident_status(db, incident)
     # Transport leg lifecycle
@@ -2315,13 +2331,12 @@ def update_unit_status(request: Request, incident_id: int, unit_id: int, body: S
             open_leg.status = 'arrived'
             if not open_leg.arrived_at:
                 open_leg.arrived_at = datetime.utcnow()
-        elif body.status_code in ('DEL','AQ','CAN'):
-            if open_leg:
-                open_leg.status = 'cleared'
-                if not open_leg.cleared_at:
-                    open_leg.cleared_at = datetime.utcnow()
-                if body.mileage is not None and open_leg.dropoff_mileage is None:
-                    open_leg.dropoff_mileage = body.mileage
+        elif body.status_code not in _CALL_ACTIVE_STATUSES and open_leg:
+            open_leg.status = 'cleared'
+            if not open_leg.cleared_at:
+                open_leg.cleared_at = datetime.utcnow()
+            if body.mileage is not None and open_leg.dropoff_mileage is None:
+                open_leg.dropoff_mileage = body.mileage
     user = get_current_user(request)
     db.add(StatusEvent(
         unit_id=unit_id,
@@ -2641,7 +2656,25 @@ def set_unit_status(unit_id: int, body: UnitStatus, db: Session = Depends(get_db
     unit.current_status = body.status_code
     if body.lat is not None: unit.lat = body.lat
     if body.lng is not None: unit.lng = body.lng
-    db.add(StatusEvent(unit_id=unit_id, incident_id=None, status_code=body.status_code, reason=body.reason, lat=body.lat, lng=body.lng))
+    incident_id = None
+    if unit.current_incident_id:
+        incident = db.query(Incident).get(unit.current_incident_id)
+        if incident and incident.status != 'closed':
+            iu = db.query(IncidentUnit).filter_by(incident_id=incident.id, unit_id=unit_id, cleared_at=None).first()
+            if iu:
+                if body.status_code in _CALL_ACTIVE_STATUSES:
+                    iu.assignment_status = map_status(body.status_code)
+                else:
+                    if iu.assigned_at:
+                        duration = (datetime.utcnow() - iu.assigned_at).total_seconds()
+                        unit.accumulated_call_seconds = (unit.accumulated_call_seconds or 0) + duration
+                    iu.cleared_at = datetime.utcnow()
+                    iu.assignment_status = 'cleared'
+                    unit.current_incident_id = None
+                    unit.current_status = 'AQ' if body.status_code == 'CAN' else body.status_code
+            refresh_incident_status(db, incident)
+            incident_id = incident.id
+    db.add(StatusEvent(unit_id=unit_id, incident_id=incident_id, status_code=body.status_code, reason=body.reason, lat=body.lat, lng=body.lng))
     db.commit()
     db.refresh(unit)
     return unit
