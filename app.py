@@ -955,12 +955,37 @@ def _security_headers(response):
 
 @app.middleware('http')
 async def auth_middleware(request: Request, call_next):
-    if request.method in ('GET', 'OPTIONS', 'HEAD') or request.url.path.startswith('/static/'):
+    if request.url.path.startswith('/static/'):
         return _security_headers(await call_next(request))
     if request.url.path in ('/login', '/logout', '/docs', '/openapi.json', '/taip/ingest'):
         return _security_headers(await call_next(request))
+    # Page-level role guards
+    PAGE_ROLES = {
+        '/call-entry': CALL_TAKER_ROLES,
+        '/console': CALL_TAKER_ROLES,
+        '/dispatch': CALL_TAKER_ROLES,
+        '/admin': {'admin'},
+        '/users': {'admin'},
+        '/coverage': DISPATCHER_ROLES,
+        '/scheduled': DISPATCHER_ROLES,
+        '/scheduled_events': DISPATCHER_ROLES,
+        '/mdt': FIELD_ROLES,
+        '/avl': DISPATCHER_ROLES,
+        '/hud': DISPATCHER_ROLES,
+        '/reports': DISPATCHER_ROLES,
+        '/dashboard': DISPATCHER_ROLES,
+    }
     session = request.cookies.get('session')
     payload = verify_session(session)
+    allowed = PAGE_ROLES.get(request.url.path)
+    if request.method in ('GET','OPTIONS','HEAD'):
+        if allowed:
+            if not payload:
+                return _security_headers(JSONResponse(status_code=401, content={'detail': 'Not authenticated'}, headers={'Location':'/login'}))
+            if payload.get('role') not in allowed and payload.get('role') != 'admin':
+                return _security_headers(JSONResponse(status_code=403, content={'detail': 'Role required'}))
+        return _security_headers(await call_next(request))
+    # Non-GET endpoints
     if not payload:
         return _security_headers(JSONResponse(status_code=401, content={'detail': 'Not authenticated'}))
     if request.url.path == '/config' and request.method in ('POST', 'PUT', 'DELETE') and payload.get('role') != 'admin':
