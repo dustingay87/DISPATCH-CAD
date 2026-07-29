@@ -68,7 +68,13 @@ function initMap(){
   layers.zones = L.layerGroup().addTo(map);
 }
 
-function unitColor(st){ if(st==='OS') return '#ef4444'; if(st==='ER'||st==='TR'||st==='DEL') return '#eab308'; if(st==='AQ') return '#22c55e'; return '#64748b'; }
+function unitColor(u){ 
+  if(typeof u === 'string') u = {current_status:u};
+  if(u.offline) return '#334155';
+  if(u.stale) return '#f97316';
+  const st=u.current_status; 
+  if(st==='OS') return '#ef4444'; if(st==='ER'||st==='TR'||st==='DEL') return '#eab308'; if(st==='AQ') return '#22c55e'; return '#64748b'; 
+}
 function arrowIcon(color, heading){
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='${color}' width='24' height='24'><path d='M12 2 L22 20 L12 16 L2 20 Z' transform='rotate(${heading||0} 12 12)'/></svg>`;
   return L.divIcon({ className:'', html: svg, iconSize:[24,24], iconAnchor:[12,12] });
@@ -89,7 +95,7 @@ function startStream(){
     const positions = JSON.parse(e.data);
     positions.forEach(p => {
       const u = state.units.find(x => x.id === p.id);
-      if(u){ u.lat = p.lat; u.lng = p.lng; u.heading = p.heading; u.speed = p.speed; u.last_seen_at = p.last_seen_at; u.current_status = p.current_status; }
+      if(u){ u.lat = p.lat; u.lng = p.lng; u.heading = p.heading; u.speed = p.speed; u.last_seen_at = p.last_seen_at; u.current_status = p.current_status; u.stale = p.stale; u.offline = p.offline; }
     });
     renderUnitList(); renderMap(); updateTelemetry();
   };
@@ -102,8 +108,10 @@ function renderUnitList(){
   const am=agencyMap();
   const html = state.units.map(u=>{
     const selectedClass = state.selected===u.id ? 'selected' : 'bg-slate-800';
+    const statusText = u.offline ? 'Offline' : u.stale ? 'Stale' : u.current_status;
+    const statusColor = u.offline ? 'text-red-400' : u.stale ? 'text-orange-400' : 'text-slate-400';
     return `<div class='p-2 rounded cursor-pointer ${selectedClass} hover:bg-slate-700' onclick='selectUnit(${u.id})'>
-      <div class='flex justify-between'><b>${u.call_sign}</b> <span class='text-xs text-slate-400'>${u.current_status}</span></div>
+      <div class='flex justify-between'><b>${u.call_sign}</b> <span class='text-xs ${statusColor}'>${statusText}</span></div>
       <div class='text-xs text-slate-400'>${am[u.agency_id]?.agency_type?.toUpperCase()||'-'}</div>
       <div class='text-xs'>Spd ${u.speed??'-'} | Hdg ${u.heading??'-'}</div>
     </div>`;
@@ -120,10 +128,12 @@ function renderMap(){
   const am=agencyMap();
   state.units.forEach(u=>{
     if(u.lat==null || u.lng==null) return;
-    const col = unitColor(u.current_status);
+    const col = unitColor(u);
     const marker = L.marker([u.lat,u.lng], {icon: arrowIcon(col, u.heading||0)}).addTo(layers.units);
     marker.on('click',()=>selectUnit(u.id));
-    marker.bindPopup(`<b>${u.call_sign}</b><br>${u.current_status}<br>${am[u.agency_id]?.name||''}<br>Spd: ${u.speed??'-'} Hdg: ${u.heading??'-'}`);
+    const last=u.last_seen_at?new Date(u.last_seen_at).toLocaleTimeString():'unknown';
+    const stateLabel=u.offline?'Offline':u.stale?'Stale':u.current_status;
+    marker.bindPopup(`<b>${u.call_sign}</b><br>${stateLabel}<br><span class='text-slate-400'>Last seen: ${last}</span><br>${am[u.agency_id]?.name||''}<br>Spd: ${u.speed??'-'} Hdg: ${u.heading??'-'}`);
     if(state.selected===u.id) marker.openPopup();
     bounds.extend([u.lat,u.lng]);
   });
@@ -162,7 +172,7 @@ function drawTrails(){
   positions.forEach(p=>{ if(!p.unit_id || p.lat==null || p.lng==null) return; if(!grouped[p.unit_id]) grouped[p.unit_id]=[]; grouped[p.unit_id].push([p.lat,p.lng]); });
   Object.entries(grouped).forEach(([uid, pts])=>{
     if(pts.length<2) return;
-    const u = state.units.find(x=>x.id==uid); const col = u ? unitColor(u.current_status) : '#38bdf8';
+    const u = state.units.find(x=>x.id==uid); const col = u ? unitColor(u) : '#38bdf8';
     L.polyline(pts,{color:col,weight:2,opacity:.7}).addTo(layers.trails);
   });
 }
@@ -179,7 +189,8 @@ function updateTelemetry(){
   if(!u){ el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
   document.getElementById('tCallsign').textContent = u.call_sign;
-  document.getElementById('tStatus').textContent = u.current_status;
+  const stateLabel = u.offline ? 'Offline' : u.stale ? 'Stale' : u.current_status;
+  document.getElementById('tStatus').textContent = stateLabel;
   document.getElementById('tSpeed').textContent = u.speed!=null ? u.speed.toFixed(1) : '--';
   document.getElementById('tHeading').textContent = u.heading!=null ? u.heading.toFixed(0) : '--';
   document.getElementById('tLat').textContent = u.lat!=null ? u.lat.toFixed(5) : '--';

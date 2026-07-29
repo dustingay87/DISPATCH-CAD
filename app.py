@@ -3,8 +3,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, or_, UniqueConstraint, inspect, text
 from sqlalchemy.orm import declarative_base, relationship, backref, Session, sessionmaker
-from pydantic import BaseModel
-from datetime import datetime, date, time
+from pydantic import BaseModel, computed_field
+from datetime import datetime, date, time, timedelta
 from typing import List, Optional, Any
 import os
 import re
@@ -26,6 +26,14 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-change-me')
 INSECURE_DEV = os.getenv('INSECURE_DEV', 'false').lower() == 'true'
 TAIP_UDP_PORT = int(os.getenv('TAIP_UDP_PORT', os.getenv('TAIP_PORT', '5005')))
 TAIP_TCP_PORT = int(os.getenv('TAIP_TCP_PORT', os.getenv('TAIP_PORT', str(TAIP_UDP_PORT))))
+TAIP_MIN_INTERVAL = float(os.getenv('TAIP_MIN_INTERVAL', '0.5'))
+TAIP_STALE_SECONDS = int(os.getenv('TAIP_STALE_SECONDS', '60'))
+TAIP_OFFLINE_SECONDS = int(os.getenv('TAIP_OFFLINE_SECONDS', '300'))
+TAIP_OUT_OF_ORDER_SECONDS = int(os.getenv('TAIP_OUT_OF_ORDER_SECONDS', '5'))
+TAIP_MAX_JUMP_MPS = float(os.getenv('TAIP_MAX_JUMP_MPS', '89'))
+TAIP_ALLOWLIST = [ip.strip() for ip in os.getenv('TAIP_ALLOWLIST', '').split(',') if ip.strip()]
+
+taip_last_packet: Dict[str, float] = {}
 
 login_attempts = {}
 
@@ -1282,6 +1290,21 @@ class UnitOut(BaseModel):
     taip_id: Optional[str] = None
     taip_destination_url: Optional[str] = None
     taip_port: Optional[int] = None
+
+    @computed_field
+    @property
+    def stale(self) -> bool:
+        if not self.last_seen_at:
+            return True
+        return (datetime.utcnow() - self.last_seen_at).total_seconds() > TAIP_STALE_SECONDS
+
+    @computed_field
+    @property
+    def offline(self) -> bool:
+        if not self.last_seen_at:
+            return True
+        return (datetime.utcnow() - self.last_seen_at).total_seconds() > TAIP_OFFLINE_SECONDS
+
     class Config:
         from_attributes = True
 
@@ -1567,6 +1590,82 @@ def parse_taip(raw: str) -> dict:
                 data['lat'] = float(m.group(1))
                 data['lng'] = float(m.group(2))
     return data
+
+def _taip_ip(source):
+    if isinstance(source, (tuple, list)) and len(source) > 0:
+        return source[0]
+    if source:
+        return str(source)
+    return None
+
+def _taip_source_allowed(source):
+    if not TAIP_ALLOWLIST:
+        return True
+    ip = _taip_ip(source)
+    if not ip:
+        return False
+    return ip in TAIP_ALLOWLIST
+
+def _taip_rate_limited(taip_id):
+    if TAIP_MIN_INTERVAL <= 0:
+        return False
+    now = time.time()
+    last = taip_last_packet.get(taip_id)
+    if last and now - last < TAIP_MIN_INTERVAL:
+        return True
+    taip_last_packet[taip_id] = now
+    return False
+
+def _haversine_m(lat1, lng1, lat2, lng2):
+    if lat1 is None or lng1 is None or lat2 is None or lng2 is None:
+        return None
+    R = 6371000
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lng2 - lng1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R * c
+
+def _taip_reported_time(data: dict, received_at: datetime) -> Optional[datetime]:
+    if data.get('reported_at'):
+        return data['reported_at']
+    sod = data.get('gps_seconds_of_day')
+    if sod is None:
+        return None
+    base = received_at.replace(hour=0, minute=0, second=0, microsecond=0)
+    reported = base + timedelta(seconds=sod)
+    if reported > received_at + timedelta(seconds=30):
+        reported -= timedelta(days=1)
+    return reported
+
+def _taip_out_of_order(unit, reported_at):
+    if not unit or not unit.last_seen_at or not reported_at:
+        return False
+    return reported_at < unit.last_seen_at - timedelta(seconds=TAIP_OUT_OF_ORDER_SECONDS)
+
+def _taip_jump_ok(unit, lat, lng, reported_at):
+    if not unit or unit.lat is None or unit.lng is None or not reported_at:
+        return True
+    last = unit.last_seen_at
+    if not last:
+        return True
+    distance_m = _haversine_m(unit.lat, unit.lng, lat, lng)
+    if distance_m is None or distance_m <= 0:
+        return True
+    delta_s = (reported_at - last).total_seconds()
+    if delta_s <= 0:
+        # Cannot trust time delta; allow if within reasonable distance
+        return distance_m <= TAIP_MAX_JUMP_MPS * 10
+    speed_mps = distance_m / delta_s
+    return speed_mps <= TAIP_MAX_JUMP_MPS
+
+def _taip_stale_state(last_seen_at: Optional[datetime]):
+    if not last_seen_at:
+        return True, True
+    age = (datetime.utcnow() - last_seen_at).total_seconds()
+    return age > TAIP_STALE_SECONDS, age > TAIP_OFFLINE_SECONDS
 
 def map_status(code: str) -> str:
     return {
@@ -2301,17 +2400,30 @@ def update_incident_personnel(request: Request, incident_id: int, ip_id: int, bo
     db.commit(); db.refresh(ip)
     return ip
 
-def _record_taip_sentence(db, raw: str, taip_id: Optional[str] = None) -> TaipPosition:
+def _record_taip_sentence(db, raw: str, taip_id: Optional[str] = None, source=None, received_at: Optional[datetime] = None) -> TaipPosition:
+    if not _taip_source_allowed(source):
+        raise ValueError(f'TAIP source not allowed: {_taip_ip(source)}')
     data = parse_taip(raw)
     taip_id = taip_id or data.get('taip_id')
     if not taip_id:
         raise ValueError('taip_id not found in sentence')
+    if _taip_rate_limited(taip_id):
+        raise ValueError(f'TAIP rate limit exceeded for {taip_id}')
     unit = db.query(Unit).filter(Unit.taip_id == taip_id).first()
+    if received_at is None:
+        received_at = datetime.utcnow()
+    reported_at = _taip_reported_time(data, received_at) or received_at
+    if _taip_out_of_order(unit, reported_at):
+        raise ValueError(f'TAIP packet out of order for {taip_id}')
+    lat = data.get('lat')
+    lng = data.get('lng')
+    if lat is not None and lng is not None and not _taip_jump_ok(unit, lat, lng, reported_at):
+        raise ValueError(f'TAIP impossible location jump for {taip_id}')
     pos = TaipPosition(
         taip_id=taip_id,
         raw_sentence=raw,
-        lat=data.get('lat'),
-        lng=data.get('lng'),
+        lat=lat,
+        lng=lng,
         speed=data.get('speed'),
         heading=data.get('heading'),
         ignition=data.get('ignition'),
@@ -2320,28 +2432,31 @@ def _record_taip_sentence(db, raw: str, taip_id: Optional[str] = None) -> TaipPo
         gps_seconds_of_day=data.get('gps_seconds_of_day'),
         data_age=data.get('data_age'),
         gps_source=data.get('gps_source'),
-        reported_at=data.get('reported_at')
+        reported_at=reported_at,
+        received_at=received_at
     )
     if unit:
         pos.unit_id = unit.id
-        if data.get('lat') is not None:
-            unit.lat = data['lat']
-        if data.get('lng') is not None:
-            unit.lng = data['lng']
+        if lat is not None:
+            unit.lat = lat
+        if lng is not None:
+            unit.lng = lng
         if data.get('speed') is not None:
             unit.speed = data['speed']
         if data.get('heading') is not None:
             unit.heading = data['heading']
-        unit.last_seen_at = datetime.utcnow()
+        unit.last_seen_at = reported_at
     db.add(pos)
     db.commit()
     db.refresh(pos)
     return pos
 
 @app.post('/taip/ingest')
-def ingest_taip(body: TaipIngest, db: Session = Depends(get_db)):
+def ingest_taip(request: Request, body: TaipIngest, db: Session = Depends(get_db)):
     try:
-        pos = _record_taip_sentence(db, body.raw, body.taip_id)
+        forwarded = request.headers.get('x-forwarded-for')
+        source = (forwarded.split(',')[0].strip() if forwarded else request.client.host) or 'unknown'
+        pos = _record_taip_sentence(db, body.raw, body.taip_id, source=source, received_at=datetime.utcnow())
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {'taip_id': pos.taip_id, 'parsed': parse_taip(body.raw), 'unit_id': pos.unit_id}
@@ -2359,6 +2474,7 @@ def _taip_udp_listener():
         while True:
             try:
                 data, addr = sock.recvfrom(2048)
+                received_at = datetime.utcnow()
                 text = data.decode('utf-8', errors='ignore')
                 sentences = _extract_taip_sentences(text) or [text.strip()]
                 for sentence in sentences:
@@ -2367,7 +2483,7 @@ def _taip_udp_listener():
                         continue
                     try:
                         db = SessionLocal()
-                        _record_taip_sentence(db, sentence)
+                        _record_taip_sentence(db, sentence, source=addr, received_at=received_at)
                     except Exception as e:
                         print(f'TAIP UDP record error from {addr}: {e}')
                     finally:
@@ -2387,6 +2503,7 @@ def _taip_tcp_client(conn, addr):
             data = conn.recv(2048)
             if not data:
                 break
+            received_at = datetime.utcnow()
             buffer += data.decode('utf-8', errors='ignore')
             while True:
                 start = buffer.find('>')
@@ -2397,7 +2514,7 @@ def _taip_tcp_client(conn, addr):
                 buffer = buffer[end+1:]
                 try:
                     db = SessionLocal()
-                    _record_taip_sentence(db, sentence)
+                    _record_taip_sentence(db, sentence, source=addr, received_at=received_at)
                 except Exception as e:
                     print(f'TAIP TCP record error from {addr}: {e}')
                 finally:
@@ -2469,7 +2586,21 @@ async def taip_stream(db: Session = Depends(get_db)):
         last_payload = None
         while True:
             units = db.query(Unit).all()
-            data = [{'id': u.id, 'call_sign': u.call_sign, 'lat': u.lat, 'lng': u.lng, 'heading': u.heading, 'speed': u.speed, 'last_seen_at': u.last_seen_at.isoformat() if u.last_seen_at else None, 'current_status': u.current_status} for u in units]
+            data = []
+            for u in units:
+                stale, offline = _taip_stale_state(u.last_seen_at)
+                data.append({
+                    'id': u.id,
+                    'call_sign': u.call_sign,
+                    'lat': u.lat,
+                    'lng': u.lng,
+                    'heading': u.heading,
+                    'speed': u.speed,
+                    'last_seen_at': u.last_seen_at.isoformat() if u.last_seen_at else None,
+                    'current_status': u.current_status,
+                    'stale': stale,
+                    'offline': offline
+                })
             payload = json.dumps(data, default=str)
             if payload != last_payload:
                 yield f'data: {payload}\n\n'

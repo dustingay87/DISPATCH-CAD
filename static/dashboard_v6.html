@@ -315,11 +315,13 @@ function renderVehicleInfo(){
     const inc=u.current_incident_id?(state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id):'-';
     const svc=u.capabilities && u.capabilities.service_level ? u.capabilities.service_level : '-';
     const post = state.postingMap[u.id] ? state.postingMap[u.id].name : '-';
+    const staleClass = u.offline ? 'text-slate-500' : u.stale ? 'text-orange-400' : '';
+    const stateLabel = u.offline ? 'Offline' : u.stale ? 'Stale' : statusLabel(u.current_status);
     return `<tr class='${state.selectedVehicle===u.id?'selected':''}' onclick='selectVehicle(${u.id})'>
       <td class='font-bold'>${u.call_sign}</td>
       <td>${u.unit_type||'-'}</td>
       <td>${svc}</td>
-      <td class='${statClass(u.current_status)} cursor-context-menu' oncontextmenu='showUnitStatusMenu(event, ${u.id}); return false;'>${statusLabel(u.current_status)}</td>
+      <td class='${statClass(u.current_status)} ${staleClass} cursor-context-menu' oncontextmenu='showUnitStatusMenu(event, ${u.id}); return false;'>${stateLabel}</td>
       <td>${inc}</td>
       <td>${post}</td>
       <td>${u.lat!=null&&u.lng!=null?'GPS':'-'}</td>
@@ -339,7 +341,12 @@ function renderMap(){
       if(gj.getBounds && gj.getBounds().isValid()) bounds.extend(gj.getBounds());
     } catch(e){ console.log('zone render error', z, e); }
   });
-  state.mapUnits.forEach(u=>{if(u.lat==null||u.lng==null)return;const col=u.current_status==='OS'?'#ef4444':u.current_status==='AQ'?'#22c55e':u.current_status==='ER'||u.current_status==='TR'||u.current_status==='DEL'?'#eab308':'#64748b';const a=state.agencyMap[u.agency_id]||{};const cross=a.agency_type && (a.agency_type!==(state.user?.selected_module==='law'?'police':state.user?.selected_module));const m=L.circleMarker([u.lat,u.lng],{radius:cross?4:6,color:col,fillColor:col,fillOpacity:0.9}).addTo(layers.units);m.bindPopup(`<b>${u.call_sign}</b><br>${statusLabel(u.current_status)}<br><span class='text-slate-400'>${a.name||a.agency_type||''}</span>`);bounds.extend([u.lat,u.lng]);});
+  function unitColor(u){
+    if(u.offline) return '#334155';
+    if(u.stale) return '#f97316';
+    return u.current_status==='OS'?'#ef4444':u.current_status==='AQ'?'#22c55e':u.current_status==='ER'||u.current_status==='TR'||u.current_status==='DEL'?'#eab308':'#64748b';
+  }
+  state.mapUnits.forEach(u=>{if(u.lat==null||u.lng==null)return;const col=unitColor(u);const a=state.agencyMap[u.agency_id]||{};const cross=a.agency_type && (a.agency_type!==(state.user?.selected_module==='law'?'police':state.user?.selected_module));const m=L.circleMarker([u.lat,u.lng],{radius:cross?4:6,color:col,fillColor:col,fillOpacity:0.9}).addTo(layers.units);const last=u.last_seen_at?new Date(u.last_seen_at).toLocaleTimeString():'unknown';const stateLabel=u.offline?'Offline':u.stale?'Stale':statusLabel(u.current_status);m.bindPopup(`<b>${u.call_sign}</b><br>${stateLabel}<br><span class='text-slate-400'>Last seen: ${last}</span><br>${u.speed!=null?u.speed+' mph • ':''}${u.heading!=null?u.heading+'°<br>':''}<span class='text-slate-400'>${a.name||a.agency_type||''}</span>`);bounds.extend([u.lat,u.lng]);});
   state.incidents.forEach(i=>{if(i.lat==null||i.lng==null)return;const col=i.priority===1?'#ef4444':i.priority===2?'#f97316':i.priority===3?'#eab308':'#22c55e';const m=L.circleMarker([i.lat,i.lng],{radius:8,color:col,fillColor:col,fillOpacity:0.6}).addTo(layers.incidents);m.bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${statusLabel(i.status)}`);bounds.extend([i.lat,i.lng]);});
   if(bounds.isValid()){ map.fitBounds(bounds,{padding:[20,20],maxZoom:16}); }
   else { const a=state.user?.agency_id ? state.agencyMap[state.user.agency_id] : null; if(a && a.lat!=null && a.lng!=null){ map.setView([a.lat,a.lng],11); } else { map.setView(CENTER,11); } }

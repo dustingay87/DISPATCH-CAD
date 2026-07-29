@@ -630,10 +630,12 @@ function renderUnits(){
     const callAcc = u.accumulated_call_seconds || 0;
     const callIso = onCall && u.last_assigned_at ? u.last_assigned_at : '';
     const shiftIso = u.in_service_at || '';
+    const staleClass = u.offline ? 'bg-slate-900 text-slate-500' : u.stale ? 'bg-orange-950 text-orange-400' : '';
+    const staleText = u.offline ? ' (Offline)' : u.stale ? ' (Stale)' : '';
     return `<tr class='${unitClass(u.current_status)} ${state.selectedUnit===u.id?'selected':''}' onclick='selectUnit(${u.id})'>
       <td class='font-bold'>${u.call_sign}</td>
       <td>${a.agency_type ? a.agency_type.toUpperCase() : '-'}</td>
-      <td>${statusLabel(u.current_status)}</td>
+      <td class='${staleClass}'>${statusLabel(u.current_status)}${staleText}</td>
       <td>${inc}</td>
       <td class='timer' data-fallback='-' data-iso='${availIso||''}'>-</td>
       <td class='timer' data-fallback='-' data-iso='${sceneIso||''}'>-</td>
@@ -722,11 +724,18 @@ function renderMap(){
       if(gj.getBounds && gj.getBounds().isValid()) bounds.extend(gj.getBounds());
     }catch(e){}
   });
+  function unitColor(u){
+    if(u.offline) return '#334155';
+    if(u.stale) return '#f97316';
+    return u.current_status==='OS' ? '#ef4444' : u.current_status==='AQ' ? '#22c55e' : '#eab308';
+  }
   state.units.forEach(u=>{
     if(u.lat==null || u.lng==null) return;
-    const col = u.current_status==='OS' ? '#ef4444' : u.current_status==='AQ' ? '#22c55e' : '#eab308';
+    const col = unitColor(u);
     const m = L.circleMarker([u.lat,u.lng],{radius:6,color:col,fillColor:col,fillOpacity:0.9,weight:2}).addTo(layers.units);
-    m.bindPopup(`<b>${u.call_sign}</b><br>${statusLabel(u.current_status)}<br>${state.agencyMap[u.agency_id]?.name||''}`);
+    const last=u.last_seen_at?new Date(u.last_seen_at).toLocaleTimeString():'unknown';
+    const stateLabel=u.offline?'Offline':u.stale?'Stale':statusLabel(u.current_status);
+    m.bindPopup(`<b>${u.call_sign}</b><br>${stateLabel}<br><span class='text-slate-400'>Last seen: ${last}</span><br>${u.speed!=null?u.speed+' mph • ':''}${u.heading!=null?u.heading+'°<br>':''}${state.agencyMap[u.agency_id]?.name||''}`);
     if(state.selectedUnit===u.id) m.openPopup();
     bounds.extend([u.lat,u.lng]);
   });
@@ -860,7 +869,7 @@ function startStream(){
   const es = new EventSource('/taip/stream', {withCredentials:true});
   es.onmessage = e => {
     const positions = JSON.parse(e.data);
-    positions.forEach(p => { const u=state.units.find(x=>x.id===p.id); if(u){ u.lat=p.lat; u.lng=p.lng; u.heading=p.heading; u.speed=p.speed; u.last_seen_at=p.last_seen_at; u.current_status=p.current_status; } });
+    positions.forEach(p => { const u=state.units.find(x=>x.id===p.id); if(u){ u.lat=p.lat; u.lng=p.lng; u.heading=p.heading; u.speed=p.speed; u.last_seen_at=p.last_seen_at; u.current_status=p.current_status; u.stale=p.stale; u.offline=p.offline; } });
     renderMap(); renderUnits();
   };
   es.onerror = () => { es.close(); setTimeout(startStream, 5000); };
