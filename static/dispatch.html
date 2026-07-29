@@ -414,6 +414,10 @@ async function selectIncident(id){
         </div>
       </div>
       <div class='border-t border-slate-700 pt-2'>
+        <div class='text-xs font-semibold text-slate-400 mb-1'>Resource Slots</div>
+        <div id='resourcePanel' class='text-xs text-slate-300'>Loading...</div>
+      </div>
+      <div class='border-t border-slate-700 pt-2'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Quick Notes</div>
         <div class='flex flex-wrap gap-1 mb-1'>${quickStamps}</div>
         <textarea id='incNote' rows='2' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-full' placeholder='Add note with timestamp...'></textarea>
@@ -452,6 +456,7 @@ async function selectIncident(id){
   restorePanelForm('incidentPanel', savedForm);
   await loadRecommendations(i.id);
   await loadLocation(i.id);
+  await loadResourceStatus(i.id);
   if(features.transport){ await loadDestination(i.id); await loadTransportLegs(i.id); }
   if(features.mileage){ await loadMileage(i.id); }
   if(showPersonnel){ await loadIncidentPersonnel(i.id); }
@@ -500,6 +505,22 @@ async function loadLocation(id){
 window.validateLocation = async function(id){
   try { await api(`/incidents/${id}/validate-location`, {method:'POST'}); await load(); if(state.selectedIncident===id) await loadLocation(id); }
   catch(e){ log('Validate error: '+e.message); }
+}
+
+async function loadResourceStatus(id){
+  const el = document.getElementById('resourcePanel'); if(!el) return;
+  try {
+    const rs = await api(`/incidents/${id}/resource-status`);
+    if(rs.profiled){
+      const rows = rs.slots.map(s=>{
+        const cls = s.filled ? 'text-green-400' : 'text-yellow-400';
+        return `<div class='flex justify-between ${cls}'><span>${s.unit_type}</span><span>${s.assigned}/${s.required}</span></div>`;
+      }).join('');
+      el.innerHTML = `<div class='mb-1'>Need <span class='text-white font-bold'>${rs.total_needed}</span> more / <span class='text-slate-400'>${rs.total_required}</span> total</div>${rows}`;
+    } else {
+      el.innerHTML = `<div class='text-slate-500'>No response profile for this call type. Assigned: <span class='text-white'>${rs.total_assigned||0}</span></div>`;
+    }
+  } catch(e){ el.innerHTML = '<div class=\'text-slate-500\'>Resource status unavailable</div>'; }
 }
 
 async function loadDestination(id){

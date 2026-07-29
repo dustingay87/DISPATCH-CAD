@@ -1208,6 +1208,14 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
                 'Welfare Check': ['patrol'],
                 'Suspicious Person': ['patrol','k9']
             },
+            'response_profiles': {
+                'Traffic Accident': {'slots':[{'unit_type':'patrol','count':1},{'unit_type':'supervisor','count':1}], 'response_mode':'emergency'},
+                'Theft': {'unit_types':['patrol','detective'], 'min_units':1, 'max_units':2, 'response_mode':'routine'},
+                'Domestic': {'unit_types':['patrol','supervisor'], 'min_units':2, 'max_units':3, 'response_mode':'emergency'},
+                'Assault': {'slots':[{'unit_type':'patrol','count':2},{'unit_type':'supervisor','count':1},{'unit_type':'k9','count':1}], 'response_mode':'emergency'},
+                'Welfare Check': {'unit_types':['patrol'], 'min_units':1, 'max_units':1, 'response_mode':'routine'},
+                'Suspicious Person': {'unit_types':['patrol','k9'], 'min_units':1, 'max_units':2, 'response_mode':'routine'}
+            },
             'dispositions': ['Arrested','Cited','Warned','Referred','Report','No Action','False Alarm']
         },
         'fire': {
@@ -1235,6 +1243,14 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
                 'Alarm': ['engine','ladder'],
                 'Vehicle Accident': ['engine','rescue','ambulance'],
                 'Brush Fire': ['brush','tanker']
+            },
+            'response_profiles': {
+                'Structure Fire': {'slots':[{'unit_type':'engine','count':2},{'unit_type':'ladder','count':1},{'unit_type':'rescue','count':1},{'unit_type':'chief','count':1}], 'response_mode':'emergency'},
+                'Vehicle Fire': {'slots':[{'unit_type':'engine','count':1},{'unit_type':'brush','count':1},{'unit_type':'tanker','count':1}], 'response_mode':'emergency'},
+                'Medical Assist': {'slots':[{'unit_type':'rescue','count':1},{'unit_type':'ambulance','count':1}], 'response_mode':'emergency'},
+                'Alarm': {'unit_types':['engine','ladder'], 'min_units':1, 'max_units':2, 'response_mode':'routine'},
+                'Vehicle Accident': {'slots':[{'unit_type':'engine','count':1},{'unit_type':'rescue','count':1},{'unit_type':'ambulance','count':1}], 'response_mode':'emergency'},
+                'Brush Fire': {'slots':[{'unit_type':'brush','count':1},{'unit_type':'tanker','count':1}], 'response_mode':'emergency'}
             },
             'dispositions': ['Extinguished','Controlled','Under Control','False Alarm','No Fire','Cancelled']
         },
@@ -2268,22 +2284,116 @@ def get_incident(incident_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail='Incident not found')
     return incident
 
+def _get_response_profile(db, agency_id, call_type):
+    cfg = db.query(CustomerConfig).filter_by(agency_id=agency_id, category='response_profiles', key='defaults').first()
+    if not cfg:
+        cfg = db.query(CustomerConfig).filter_by(agency_id=agency_id, category='response_plans', key='defaults').first()
+    profiles = (cfg.value or {}) if cfg else {}
+    return profiles.get(call_type) if isinstance(profiles, dict) else None
+
+def _profile_slots(profile):
+    slots = []
+    if not profile:
+        return slots
+    explicit = profile.get('slots') or []
+    if explicit:
+        return explicit
+    unit_types = profile.get('unit_types') or []
+    if unit_types:
+        count = profile.get('min_units') or profile.get('max_units') or 1
+        for t in unit_types:
+            slots.append({'unit_type': t, 'count': 1})
+        extra = count - len(unit_types)
+        if extra > 0 and unit_types:
+            slots.append({'unit_type': unit_types[0], 'count': extra})
+    return slots
+
+def _incident_resource_status(db, incident):
+    profile = _get_response_profile(db, incident.agency_id, incident.call_type)
+    slots = _profile_slots(profile)
+    assigned = db.query(IncidentUnit, Unit).join(Unit, IncidentUnit.unit_id == Unit.id).filter(IncidentUnit.incident_id == incident.id).all()
+    assigned_by_type = {}
+    for iu, u in assigned:
+        assigned_by_type[u.unit_type] = assigned_by_type.get(u.unit_type, 0) + 1
+    if slots:
+        status = []
+        for s in slots:
+            t = s.get('unit_type')
+            c = s.get('count', 1)
+            a = assigned_by_type.get(t, 0)
+            status.append({'unit_type': t, 'required': c, 'assigned': a, 'needed': max(0, c - a), 'filled': a >= c})
+        return {
+            'call_type': incident.call_type,
+            'profiled': True,
+            'slots': status,
+            'total_required': sum(s['required'] for s in status),
+            'total_assigned': sum(assigned_by_type.values()),
+            'total_needed': sum(s['needed'] for s in status)
+        }
+    total_assigned = sum(assigned_by_type.values())
+    return {
+        'call_type': incident.call_type,
+        'profiled': False,
+        'slots': [],
+        'total_required': profile.get('min_units') if profile else None,
+        'total_assigned': total_assigned,
+        'total_needed': (profile.get('min_units') - total_assigned) if profile and profile.get('min_units') else None
+    }
+
+@app.get('/incidents/{incident_id}/resource-status')
+def get_resource_status(incident_id: int, db: Session = Depends(get_db)):
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    return _incident_resource_status(db, incident)
+
 @app.get('/incidents/{incident_id}/recommend')
 def recommend_units(incident_id: int, limit: int = Query(10), db: Session = Depends(get_db)):
     incident = db.query(Incident).get(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail='Incident not found')
     agency = db.query(Agency).get(incident.agency_id)
-    cfg = db.query(CustomerConfig).filter_by(agency_id=incident.agency_id, category='response_plans', key='defaults').first()
-    plan = (cfg.value or {}) if cfg else {}
-    recommended_types = plan.get(incident.call_type, []) if isinstance(plan, dict) else []
-    als_keywords = ['cardiac','chest pain','overdose','respiratory','allergic','stroke','behavioral','choking','seizure','als','trauma','unconscious']
+    profile = _get_response_profile(db, incident.agency_id, incident.call_type)
+    plan_cfg = db.query(CustomerConfig).filter_by(agency_id=incident.agency_id, category='response_plans', key='defaults').first()
+    plan = (plan_cfg.value or {}) if plan_cfg else {}
+    slots = _profile_slots(profile)
+    if slots:
+        recommended_types = [s.get('unit_type') for s in slots]
+    else:
+        recommended_types = plan.get(incident.call_type, []) if isinstance(plan, dict) else []
+
+    # Service level from profile or fallback to keyword heuristics
     call_lower = (incident.call_type or '').lower()
-    agency_type = agency.agency_type if agency else 'ems'
-    required_level = 'ALS' if agency_type == 'ems' and any(k in call_lower for k in als_keywords) else 'BLS'
-    emergency = incident.priority in (1,2)
+    agency_type = (profile.get('agency_type') if profile and profile.get('agency_type') else None) or (agency.agency_type if agency else 'ems')
+    required_level = None
+    if agency_type == 'ems':
+        if profile and profile.get('service_level'):
+            required_level = profile.get('service_level').upper()
+        else:
+            als_keywords = ['cardiac','chest pain','overdose','respiratory','allergic','stroke','behavioral','choking','seizure','als','trauma','unconscious']
+            required_level = 'ALS' if any(k in call_lower for k in als_keywords) else 'BLS'
+
+    required_equipment = set(profile.get('equipment') or []) if profile else set()
+    response_mode = profile.get('response_mode') if profile else None
+    emergency = (response_mode == 'emergency') or (not response_mode and incident.priority in (1,2))
     speed_mph = 35.0 if emergency else 25.0
     now = datetime.utcnow()
+
+    # Resource slot fill tracking
+    assigned_units = db.query(IncidentUnit, Unit).join(Unit, IncidentUnit.unit_id == Unit.id).filter(IncidentUnit.incident_id == incident.id, IncidentUnit.assignment_status != 'cleared').all()
+    assigned_by_type = {}
+    total_assigned = 0
+    for iu, unit in assigned_units:
+        assigned_by_type[unit.unit_type] = assigned_by_type.get(unit.unit_type, 0) + 1
+        total_assigned += 1
+    slot_needed = {}
+    if slots:
+        for s in slots:
+            t = s.get('unit_type')
+            c = s.get('count', 1)
+            a = assigned_by_type.get(t, 0)
+            slot_needed[t] = max(0, c - a)
+    max_units = profile.get('max_units') if profile and not slots else None
 
     # Pre-compute active posting counts per zone for coverage-loss penalty
     from sqlalchemy import func
@@ -2332,7 +2442,7 @@ def recommend_units(incident_id: int, limit: int = Query(10), db: Session = Depe
 
         # Service level / capability
         unit_level = (caps.get('service_level') or 'BLS').upper() if agency_type == 'ems' else (u.unit_type or '')
-        if agency_type == 'ems':
+        if agency_type == 'ems' and required_level:
             if required_level == 'ALS':
                 if unit_level == 'ALS':
                     s += 300; reasons.append('ALS capable')
@@ -2344,14 +2454,28 @@ def recommend_units(incident_id: int, limit: int = Query(10), db: Session = Depe
                 elif unit_level == 'BLS':
                     s += 100; reasons.append('BLS match')
 
+        # Equipment requirement from response profile
+        if required_equipment:
+            unit_equipment = set(caps.get('equipment') or [])
+            missing = required_equipment - unit_equipment
+            if missing:
+                eligible = False; reasons.append(f"missing equipment: {', '.join(missing)}")
+            else:
+                s += 50; reasons.append('equipment match')
+
         # Agency preference
         if u.agency_id == incident.agency_id:
             s += 100; reasons.append('same agency')
 
-        # Run-card / resource requirement
+        # Resource slot / run-card match
         if recommended_types:
             if (u.unit_type or '') in recommended_types:
-                s += 200; reasons.append('run-card match')
+                if slots and slot_needed.get(u.unit_type, 0) <= 0:
+                    eligible = False; reasons.append(f"{u.unit_type} slot already filled")
+                elif max_units and total_assigned >= max_units:
+                    eligible = False; reasons.append('max units reached')
+                else:
+                    s += 200; reasons.append('resource slot match')
             else:
                 eligible = False; reasons.append('not a run-card resource')
 
@@ -3062,6 +3186,14 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
                 'Welfare Check': ['patrol'],
                 'Suspicious Person': ['patrol','k9']
             },
+            'response_profiles': {
+                'Traffic Accident': {'slots':[{'unit_type':'patrol','count':1},{'unit_type':'supervisor','count':1}], 'response_mode':'emergency'},
+                'Theft': {'unit_types':['patrol','detective'], 'min_units':1, 'max_units':2, 'response_mode':'routine'},
+                'Domestic': {'unit_types':['patrol','supervisor'], 'min_units':2, 'max_units':3, 'response_mode':'emergency'},
+                'Assault': {'slots':[{'unit_type':'patrol','count':2},{'unit_type':'supervisor','count':1},{'unit_type':'k9','count':1}], 'response_mode':'emergency'},
+                'Welfare Check': {'unit_types':['patrol'], 'min_units':1, 'max_units':1, 'response_mode':'routine'},
+                'Suspicious Person': {'unit_types':['patrol','k9'], 'min_units':1, 'max_units':2, 'response_mode':'routine'}
+            },
             'dispositions': ['Arrested','Cited','Warned','Referred','Report','No Action','False Alarm']
         },
         'fire': {
@@ -3090,6 +3222,14 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
                 'Vehicle Accident': ['engine','rescue','ambulance'],
                 'Brush Fire': ['brush','tanker']
             },
+            'response_profiles': {
+                'Structure Fire': {'slots':[{'unit_type':'engine','count':2},{'unit_type':'ladder','count':1},{'unit_type':'rescue','count':1},{'unit_type':'chief','count':1}], 'response_mode':'emergency'},
+                'Vehicle Fire': {'slots':[{'unit_type':'engine','count':1},{'unit_type':'brush','count':1},{'unit_type':'tanker','count':1}], 'response_mode':'emergency'},
+                'Medical Assist': {'slots':[{'unit_type':'rescue','count':1},{'unit_type':'ambulance','count':1}], 'response_mode':'emergency'},
+                'Alarm': {'unit_types':['engine','ladder'], 'min_units':1, 'max_units':2, 'response_mode':'routine'},
+                'Vehicle Accident': {'slots':[{'unit_type':'engine','count':1},{'unit_type':'rescue','count':1},{'unit_type':'ambulance','count':1}], 'response_mode':'emergency'},
+                'Brush Fire': {'slots':[{'unit_type':'brush','count':1},{'unit_type':'tanker','count':1}], 'response_mode':'emergency'}
+            },
             'dispositions': ['Extinguished','Controlled','Under Control','False Alarm','No Fire','Cancelled']
         },
         'ems': {
@@ -3117,6 +3257,14 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
                 'Fall': ['ambulance','medic'],
                 'Motor Vehicle Accident': ['air','ambulance','medic','supervisor'],
                 'Overdose': ['ambulance','medic']
+            },
+            'response_profiles': {
+                'Cardiac Arrest': {'slots':[{'unit_type':'medic','count':1},{'unit_type':'supervisor','count':1}], 'service_level':'ALS', 'response_mode':'emergency', 'equipment':['defibrillator','monitor']},
+                'Chest Pain': {'slots':[{'unit_type':'ambulance','count':1}], 'service_level':'ALS', 'response_mode':'emergency', 'equipment':['monitor','defibrillator']},
+                'Respiratory': {'slots':[{'unit_type':'ambulance','count':1}], 'service_level':'ALS', 'response_mode':'emergency'},
+                'Fall': {'slots':[{'unit_type':'ambulance','count':1}], 'service_level':'BLS', 'response_mode':'emergency'},
+                'Motor Vehicle Accident': {'slots':[{'unit_type':'air','count':1},{'unit_type':'ambulance','count':1},{'unit_type':'medic','count':1}], 'service_level':'ALS', 'response_mode':'emergency'},
+                'Overdose': {'slots':[{'unit_type':'ambulance','count':1}], 'service_level':'ALS', 'response_mode':'emergency'}
             },
             'dispositions': ['Transport to hospital','Refused','Treated/Released','Deceased','AMA']
         }
