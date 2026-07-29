@@ -992,13 +992,26 @@ def set_user_module(body: UserModuleUpdate, request: Request, db: Session = Depe
 def login_page():
     return FileResponse('static/login.html')
 
+def _select_home_page(request: Request):
+    try:
+        user = get_current_user(request)
+        if user.get('role') == 'dispatcher':
+            return FileResponse('static/dispatch.html')
+        return FileResponse('static/dashboard_v6.html')
+    except HTTPException:
+        return FileResponse('static/login.html')
+
 @app.get('/')
-def index():
-    return FileResponse('static/dashboard_v6.html')
+def index(request: Request):
+    return _select_home_page(request)
 
 @app.get('/dashboard_v6')
-def dashboard_v6():
-    return FileResponse('static/dashboard_v6.html')
+def dashboard_v6(request: Request):
+    return _select_home_page(request)
+
+@app.get('/dispatch')
+def dispatch_page():
+    return FileResponse('static/dispatch.html')
 
 @app.get('/dashboard_v5')
 def dashboard_v5():
