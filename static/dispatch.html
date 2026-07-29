@@ -53,6 +53,7 @@
     <a href='/call-entry' class='bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-white'>Call Entry</a>
     <a href='/mdt?unit_id=1' target='_blank' class='bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-white'>MDT</a>
     <a href='/avl' target='_blank' class='bg-cyan-700 hover:bg-cyan-600 px-2 py-1 rounded text-white'>AVL</a>
+    <button id='alertsBtn' class='hidden bg-red-800 hover:bg-red-700 px-2 py-1 rounded text-white' onclick='showAlerts()'>Alerts <span id='alertsCount' class='bg-red-500 rounded-full px-1.5'>0</span></button>
   </header>
   <main id='main' class='flex-1 grid p-1 overflow-hidden' style='grid-template-columns:var(--col1,25%) 4px var(--col2,45%) 4px var(--col3,30%);'>
     <aside class='flex flex-col gap-1 min-h-0'>
@@ -437,6 +438,10 @@ async function selectIncident(id){
         </div>
       </div>
       <div class='border-t border-slate-700 pt-2'>
+        <div class='text-xs font-semibold text-slate-400 mb-1'>Response Timers</div>
+        <div id='timerPanel' class='text-xs text-slate-300'>Loading...</div>
+      </div>
+      <div class='border-t border-slate-700 pt-2'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Timeline</div>
         <div class='space-y-1 text-xs'>${(timeline.events||[]).slice(0,6).map(e=>`<div class='text-slate-300'>${fmtTime(e.created_at)} ${statusLabel(e.status_code)} ${e.reason||''}</div>`).join('') || '<div class=\'text-slate-500\'>No events</div>'}</div>
       </div>
@@ -461,6 +466,7 @@ async function selectIncident(id){
   await loadRecommendations(i.id);
   await loadLocation(i.id);
   await loadResourceStatus(i.id);
+  await loadTimers(i.id);
   if(features.transport){ await loadDestination(i.id); await loadTransportLegs(i.id); }
   if(features.mileage){ await loadMileage(i.id); }
   if(showPersonnel){ await loadIncidentPersonnel(i.id); }
@@ -525,6 +531,20 @@ async function loadResourceStatus(id){
       el.innerHTML = `<div class='text-slate-500'>No response profile for this call type. Assigned: <span class='text-white'>${rs.total_assigned||0}</span></div>`;
     }
   } catch(e){ el.innerHTML = '<div class=\'text-slate-500\'>Resource status unavailable</div>'; }
+}
+
+async function loadTimers(id){
+  const el = document.getElementById('timerPanel'); if(!el) return;
+  try {
+    const t = await api(`/incidents/${id}/timers`);
+    const rows = t.phases.map(p=>{
+      const cls = p.status==='alert' ? 'text-red-400 font-bold' : p.status==='late' ? 'text-yellow-400' : p.status==='met' ? 'text-green-400' : 'text-slate-400';
+      const at = p.actual_at ? fmtTime(p.actual_at) : 'pending';
+      return `<div class='flex justify-between ${cls}'><span>${p.label}</span><span>${at} · ${fmtDur(p.actual_seconds)} / ${fmtDur(p.target_seconds)}</span></div>`;
+    }).join('');
+    const alert = t.alerts.length ? `<div class='mt-1 text-xs text-red-400 font-bold'>${t.alerts.join('; ')}</div>` : '';
+    el.innerHTML = `<div class='space-y-1'>${rows}</div>${alert}`;
+  } catch(e){ el.innerHTML = '<div class=\'text-slate-500\'>Timers unavailable</div>'; }
 }
 
 async function loadDestination(id){
@@ -963,6 +983,7 @@ async function load(){
     if(sel.options.length<=1){ state.units.forEach(u=>{ sel.innerHTML += `<option value='${u.id}'>${u.call_sign}</option>`; }); }
     renderCallFilters(); renderCalls(); renderUnits(); renderMap(); renderMessages();
     if(state.selectedIncident){ selectIncident(state.selectedIncident); }
+    await loadAlerts();
   } catch(e){ log('Load error: '+e.message); }
 }
 
@@ -974,6 +995,23 @@ document.getElementById('msgText').addEventListener('keydown', e=>{ if(e.key==='
 document.getElementById('disciplineSelect').addEventListener('change', e=>{ DISCIPLINE = e.target.value; renderCalls(); renderUnits(); renderMap(); });
 document.getElementById('trailToggle').addEventListener('change', e=>{ state.showTrails = e.target.checked; renderMap(); });
 document.getElementById('critToggle').addEventListener('change', e=>{ state.showCritical = e.target.checked; renderMap(); });
+
+async function loadAlerts(){
+  const btn = document.getElementById('alertsBtn'); const badge = document.getElementById('alertsCount');
+  if(!btn || !badge) return;
+  try {
+    const alerts = await api('/incidents/alerts');
+    state.alerts = alerts || [];
+    if(state.alerts.length){ badge.textContent = state.alerts.length; btn.classList.remove('hidden'); }
+    else { btn.classList.add('hidden'); }
+  } catch(e){ btn.classList.add('hidden'); }
+}
+window.showAlerts = function(){
+  if(!state.alerts || !state.alerts.length) return;
+  state.alerts.forEach(a=>{
+    log(`ALERT ${a.call_number||a.incident_id}: ${a.alerts.join('; ')}`);
+  });
+}
 
 function startStream(){
   if(!window.EventSource) return;

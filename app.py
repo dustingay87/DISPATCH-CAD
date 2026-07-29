@@ -1818,6 +1818,64 @@ def refresh_incident_status(db: Session, incident):
         incident.status = new_status
         _log_event(db, 'incident_status_changed', 'incident', incident.id, data={'new_status': new_status}, agency_id=incident.agency_id)
 
+def _incident_milestone_events(db, incident_id):
+    rows = db.query(StatusEvent).filter(StatusEvent.incident_id == incident_id).order_by(StatusEvent.created_at).all()
+    first = {}
+    for ev in rows:
+        code = ev.status_code
+        if code in ('AK','dispatched'):
+            first.setdefault('AK', ev.created_at)
+        if code in ('ER','en_route'):
+            first.setdefault('ER', ev.created_at)
+        if code in ('OS','on_scene','WATER','EXT','OVER'):
+            first.setdefault('OS', ev.created_at)
+        if code in ('TR','transport','ED'):
+            first.setdefault('TR', ev.created_at)
+    return first
+
+def _response_goals(db, incident):
+    agency = db.query(Agency).get(incident.agency_id)
+    goals_cfg = db.query(CustomerConfig).filter_by(agency_id=agency.id, category='response_goals', key='defaults').first() if agency else None
+    goals = (goals_cfg.value or {}) if goals_cfg and goals_cfg.value else {}
+    defaults = {'dispatch_seconds':60,'en_route_seconds':120,'on_scene_city_seconds':480,'on_scene_county_seconds':1800}
+    defaults.update(goals)
+    return defaults
+
+def _incident_timers(db, incident):
+    start = incident.call_entry_started_at or incident.created_at
+    milestones = _incident_milestone_events(db, incident.id)
+    goals = _response_goals(db, incident)
+    now = datetime.utcnow()
+    phases = []
+    alerts = []
+    for key, label, code in [('dispatch','Dispatch','AK'),('en_route','En Route','ER'),('on_scene','On Scene','OS'),('transport','Transport','TR')]:
+        target = goals.get(f'{key}_seconds', 0) or 0
+        actual = milestones.get(code)
+        if actual and start:
+            elapsed = (actual - start).total_seconds()
+            status = 'met' if (target == 0 or elapsed <= target) else 'late'
+        elif start:
+            elapsed = (now - start).total_seconds()
+            status = 'pending' if (target == 0 or elapsed <= target) else 'alert'
+        else:
+            elapsed = 0
+            status = 'pending'
+        if status == 'alert':
+            alerts.append(f"{label} target missed ({int(elapsed)}s / {target}s)")
+        phases.append({'phase':key,'label':label,'target_seconds':target,'actual_seconds':int(elapsed) if elapsed else 0,'actual_at':actual.isoformat() if actual else None,'status':status})
+    return {'start_at':start.isoformat() if start else None,'phases':phases,'alerts':alerts,'has_alert':len(alerts)>0}
+
+def _active_incident_alerts(db, agency_id=None):
+    q = db.query(Incident).filter(Incident.status != 'closed')
+    if agency_id:
+        q = q.filter(Incident.agency_id == agency_id)
+    result = []
+    for incident in q.all():
+        timers = _incident_timers(db, incident)
+        if timers['has_alert']:
+            result.append({'incident_id':incident.id,'call_number':incident.call_number,'call_type':incident.call_type,'priority':incident.priority,'alerts':timers['alerts'],'timers':timers})
+    return result
+
 # Endpoints
 
 GEOCODER_TIMEOUT = 5
@@ -2855,6 +2913,17 @@ def ack_dispatch_packet(request: Request, incident_id: int, unit_id: int, db: Se
 def list_incident_acks(incident_id: int, db: Session = Depends(get_db)):
     acks = db.query(IncidentUnitAck).filter_by(incident_id=incident_id).all()
     return [{'unit_id': a.unit_id, 'acknowledged_at': a.acknowledged_at, 'acknowledged_by': a.acknowledged_by} for a in acks]
+
+@app.get('/incidents/{incident_id}/timers')
+def get_incident_timers(incident_id: int, db: Session = Depends(get_db)):
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    return _incident_timers(db, incident)
+
+@app.get('/incidents/alerts')
+def list_incident_alerts(agency_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
+    return _active_incident_alerts(db, agency_id)
 
 @app.post('/incidents/{incident_id}/units/{unit_id}/status')
 def update_unit_status(request: Request, incident_id: int, unit_id: int, body: StatusUpdate, db: Session = Depends(get_db)):
