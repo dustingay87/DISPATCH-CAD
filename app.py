@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Query, Request, UploadFile, File
+from fastapi import FastAPI, Body, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, or_, UniqueConstraint, inspect, text
@@ -14,6 +14,7 @@ import asyncio
 import time
 import hmac
 import hashlib
+import traceback
 import urllib.request
 import urllib.parse
 import socket
@@ -75,9 +76,12 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, index=True)
     hashed_password = Column(String(255))
+    first_name = Column(String(100))
+    last_name = Column(String(100))
     role = Column(String(50), default='responder')
     is_active = Column(Boolean, default=True)
     agency_id = Column(Integer, ForeignKey('agencies.id'))
+    preferences = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Personnel(Base):
@@ -91,6 +95,8 @@ class Personnel(Base):
     phone = Column(String(50))
     email = Column(String(255))
     sms_phone = Column(String(50))
+    provider_level = Column(String(50))
+    photo_url = Column(String(255))
     duty_status = Column(String(50), default='off_duty')
     current_unit_id = Column(Integer, ForeignKey('units.id'), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -129,6 +135,7 @@ class Unit(Base):
     taip_destination_url = Column(Text)
     taip_port = Column(Integer)
     camera_url = Column(String(255))
+    photo_url = Column(String(255))
     last_assigned_at = Column(DateTime)
     in_service_at = Column(DateTime)
     accumulated_call_seconds = Column(Float, default=0)
@@ -340,10 +347,14 @@ class TransportLeg(Base):
     requested_at = Column(DateTime, default=datetime.utcnow)
     en_route_at = Column(DateTime)
     arrived_at = Column(DateTime)
+    departed_scene_at = Column(DateTime)
+    arrived_destination_at = Column(DateTime)
     transfer_completed_at = Column(DateTime)
     cleared_at = Column(DateTime)
     pickup_mileage = Column(Float)
     dropoff_mileage = Column(Float)
+    pickup_address = Column(Text)
+    dropoff_address = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     destination = relationship('Destination')
     unit = relationship('Unit')
@@ -370,6 +381,8 @@ class ScheduledTransport(Base):
     isolation = Column(Boolean, default=False)
     stretcher = Column(Boolean, default=False)
     wheelchair = Column(Boolean, default=False)
+    allergies = Column(String(500))
+    medications = Column(String(500))
     special_equipment = Column(JSON)
     notes = Column(Text)
     status = Column(String(50), default='scheduled')
@@ -430,6 +443,24 @@ class StandingOrder(Base):
     agency = relationship('Agency')
     destination = relationship('Destination')
 
+class IncidentReport(Base):
+    __tablename__ = 'incident_reports'
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey('incidents.id'), nullable=False, index=True)
+    report_number = Column(String(50), unique=True, index=True)
+    status = Column(String(50), default='draft')
+    version = Column(Integer, default=1)
+    summary_json = Column(JSON)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    finalized_at = Column(DateTime)
+    finalized_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    amendment_reason = Column(Text)
+    parent_report_version = Column(Integer, default=0)
+    incident = relationship('Incident', backref='reports')
+    creator = relationship('User', foreign_keys=[created_by])
+
 class PostZone(Base):
     __tablename__ = 'post_zones'
     id = Column(Integer, primary_key=True, index=True)
@@ -484,17 +515,32 @@ class EpcrExport(Base):
     destination = relationship('Destination')
     exported_by = relationship('User')
 
-def _sqlite_type(col):
+def _db_type(col, is_sqlite=True):
     t = col.type
-    if isinstance(t, (Integer, Boolean)):
+    if is_sqlite:
+        if isinstance(t, (Integer, Boolean)):
+            return 'INTEGER'
+        if isinstance(t, Float):
+            return 'REAL'
+        return 'TEXT'
+    if isinstance(t, Boolean):
+        return 'BOOLEAN'
+    if isinstance(t, Integer):
         return 'INTEGER'
     if isinstance(t, Float):
         return 'REAL'
+    if isinstance(t, DateTime):
+        return 'TIMESTAMP'
+    if isinstance(t, Text):
+        return 'TEXT'
+    if isinstance(t, String):
+        return f'VARCHAR({t.length or 255})'
     return 'TEXT'
 
-def ensure_sqlite_columns():
-    if not DATABASE_URL.startswith('sqlite'):
+def ensure_db_columns():
+    if not DATABASE_URL:
         return
+    is_sqlite = DATABASE_URL.startswith('sqlite')
     with engine.connect() as conn:
         inspector = inspect(engine)
         existing_tables = set(inspector.get_table_names())
@@ -506,16 +552,16 @@ def ensure_sqlite_columns():
                 if col.name in existing_cols:
                     continue
                 try:
-                    col_type = _sqlite_type(col)
+                    col_type = _db_type(col, is_sqlite)
                     conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {col_type}'))
                     conn.commit()
                     print(f'Added column {table.name}.{col.name}')
                 except Exception as e:
-                    print(f'SQLite migration warning for {table.name}.{col.name}: {e}')
+                    print(f'DB migration warning for {table.name}.{col.name}: {e}')
 
 def init_sqlite_db():
     Base.metadata.create_all(bind=engine)
-    ensure_sqlite_columns()
+    ensure_db_columns()
 
 print(f'VolCAD using database: {DATABASE_URL}')
 Base.metadata.create_all(bind=engine)
@@ -523,7 +569,7 @@ if DATABASE_URL.startswith('sqlite'):
     db_path = DATABASE_URL.replace('sqlite:///', '').lstrip('./')
     print(f'SQLite file: {os.path.abspath(db_path)}')
     print('WARNING: SQLite data is stored in a local file. Container redeploys will clear it unless the file is on a persistent volume.')
-    ensure_sqlite_columns()
+ensure_db_columns()
 
 app = FastAPI(title='VolCAD Prototype', version='0.1.0')
 
@@ -544,11 +590,14 @@ class UserMe(BaseModel):
     user_id: int
     role: str
     email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     agency_id: Optional[int] = None
     modules: List[str] = []
     selected_module: Optional[str] = None
     personnel_id: Optional[int] = None
     cross_discipline_agencies: List[int] = []
+    preferences: Optional[dict] = None
 
 class UserModuleUpdate(BaseModel):
     module: str
@@ -556,15 +605,20 @@ class UserModuleUpdate(BaseModel):
 class UserCreate(BaseModel):
     email: str
     password: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     role: str = 'responder'
     agency_id: Optional[int] = None
 
 class UserOut(BaseModel):
     id: int
     email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     role: str
     is_active: bool
     agency_id: Optional[int] = None
+    preferences: Optional[dict] = None
     created_at: Optional[datetime] = None
     class Config:
         from_attributes = True
@@ -572,9 +626,12 @@ class UserOut(BaseModel):
 class UserUpdate(BaseModel):
     email: Optional[str] = None
     password: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     role: Optional[str] = None
     agency_id: Optional[int] = None
     is_active: Optional[bool] = None
+    preferences: Optional[dict] = None
 
 class DestinationCreate(BaseModel):
     agency_id: Optional[int] = None
@@ -674,10 +731,14 @@ class TransportLegOut(BaseModel):
     requested_at: Optional[datetime] = None
     en_route_at: Optional[datetime] = None
     arrived_at: Optional[datetime] = None
+    departed_scene_at: Optional[datetime] = None
+    arrived_destination_at: Optional[datetime] = None
     transfer_completed_at: Optional[datetime] = None
     cleared_at: Optional[datetime] = None
     pickup_mileage: Optional[float] = None
     dropoff_mileage: Optional[float] = None
+    pickup_address: Optional[str] = None
+    dropoff_address: Optional[str] = None
     created_at: Optional[datetime] = None
     destination: Optional[DestinationOut] = None
     class Config:
@@ -716,6 +777,8 @@ class ScheduledTransportCreate(BaseModel):
     isolation: Optional[bool] = False
     stretcher: Optional[bool] = False
     wheelchair: Optional[bool] = False
+    allergies: Optional[str] = None
+    medications: Optional[str] = None
     special_equipment: Optional[dict] = None
     notes: Optional[str] = None
 
@@ -737,6 +800,8 @@ class ScheduledTransportUpdate(BaseModel):
     isolation: Optional[bool] = None
     stretcher: Optional[bool] = None
     wheelchair: Optional[bool] = None
+    allergies: Optional[str] = None
+    medications: Optional[str] = None
     special_equipment: Optional[dict] = None
     notes: Optional[str] = None
     status: Optional[str] = None
@@ -763,6 +828,8 @@ class ScheduledTransportOut(BaseModel):
     isolation: Optional[bool] = False
     stretcher: Optional[bool] = False
     wheelchair: Optional[bool] = False
+    allergies: Optional[str] = None
+    medications: Optional[str] = None
     special_equipment: Optional[dict] = None
     notes: Optional[str] = None
     status: Optional[str] = 'scheduled'
@@ -1012,9 +1079,17 @@ def verify_session(token):
     return {'user_id': int(uid), 'role': role, 'exp': int(exp)}
 
 def get_current_user(request: Request):
-    if INSECURE_DEV:
+    session = request.cookies.get('session')
+    if INSECURE_DEV and not session:
+        db = SessionLocal()
+        try:
+            u = db.query(User).filter(User.role == 'admin').first()
+            if u:
+                return {'user_id': u.id, 'role': u.role, 'email': u.email, 'agency_id': u.agency_id}
+        finally:
+            db.close()
         return {'user_id': 0, 'role': 'admin', 'email': 'dev@example.com', 'agency_id': None}
-    payload = verify_session(request.cookies.get('session'))
+    payload = verify_session(session)
     if not payload:
         raise HTTPException(status_code=401, detail='Not authenticated')
     return payload
@@ -1046,7 +1121,7 @@ def seed_default_admin():
         if db.query(User).count() == 0:
             email = os.getenv('ADMIN_EMAIL', 'dustin@dispatchtodiscipleship.net')
             password = os.getenv('ADMIN_PASSWORD', 'Warrior/202601!')
-            db.add(User(email=email, hashed_password=hash_password(password), role='admin', is_active=True))
+            db.add(User(email=email, first_name='Admin', last_name='User', hashed_password=hash_password(password), role='admin', is_active=True))
             db.commit()
     finally:
         db.close()
@@ -1077,6 +1152,8 @@ async def auth_middleware(request: Request, call_next):
     if request.url.path.startswith('/static/'):
         return _security_headers(await call_next(request))
     if request.url.path in ('/login', '/logout', '/docs', '/openapi.json', '/taip/ingest'):
+        return _security_headers(await call_next(request))
+    if INSECURE_DEV:
         return _security_headers(await call_next(request))
     # Page-level role guards
     PAGE_ROLES = {
@@ -1155,7 +1232,7 @@ def me(request: Request, db: Session = Depends(get_db)):
         p = db.query(Personnel).filter(Personnel.user_id == u.id).first()
         if p:
             personnel_id = p.id
-    return {'user_id': user['user_id'], 'email': u.email if u else None, 'role': user['role'], 'agency_id': u.agency_id if u else None, 'modules': modules, 'selected_module': selected, 'personnel_id': personnel_id, 'cross_discipline_agencies': cross_ids}
+    return {'user_id': user['user_id'], 'email': u.email if u else None, 'first_name': u.first_name if u else None, 'last_name': u.last_name if u else None, 'role': user['role'], 'agency_id': u.agency_id if u else None, 'modules': modules, 'selected_module': selected, 'personnel_id': personnel_id, 'cross_discipline_agencies': cross_ids, 'preferences': u.preferences if u else None}
 
 @app.put('/me/module')
 def set_user_module(body: UserModuleUpdate, request: Request, db: Session = Depends(get_db)):
@@ -1181,6 +1258,17 @@ def set_user_module(body: UserModuleUpdate, request: Request, db: Session = Depe
     db.commit()
     return {'selected_module': body.module}
 
+@app.put('/me/preferences')
+def set_user_preferences(body: UserUpdate, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request)
+    u = db.query(User).get(user['user_id'])
+    if not u:
+        raise HTTPException(status_code=404, detail='User not found')
+    if body.preferences is not None:
+        u.preferences = body.preferences
+    db.commit(); db.refresh(u)
+    return u
+
 @app.get('/login')
 def login_page():
     return FileResponse('static/login.html')
@@ -1204,27 +1292,27 @@ def dashboard_v6(request: Request):
 
 @app.get('/dispatch')
 def dispatch_page():
-    return FileResponse('static/dispatch.html')
+    return FileResponse('static/dispatch.html', headers={'Cache-Control':'no-store, no-cache, must-revalidate, max-age=0'})
 
 @app.get('/dashboard_v5')
 def dashboard_v5():
-    return FileResponse('static/dashboard_v5.html')
+    return FileResponse('static/dashboard_v5.html', headers={'Cache-Control':'no-store, no-cache, must-revalidate, max-age=0'})
 
 @app.get('/console')
 def console():
-    return FileResponse('static/dispatch.html')
+    return FileResponse('static/dispatch.html', headers={'Cache-Control':'no-store, no-cache, must-revalidate, max-age=0'})
 
 @app.get('/police')
 def police_console():
-    return FileResponse('static/dispatch.html')
+    return FileResponse('static/dispatch.html', headers={'Cache-Control':'no-store, no-cache, must-revalidate, max-age=0'})
 
 @app.get('/fire')
 def fire_console():
-    return FileResponse('static/dispatch.html')
+    return FileResponse('static/dispatch.html', headers={'Cache-Control':'no-store, no-cache, must-revalidate, max-age=0'})
 
 @app.get('/ems')
 def ems_console():
-    return FileResponse('static/dispatch.html')
+    return FileResponse('static/dispatch.html', headers={'Cache-Control':'no-store, no-cache, must-revalidate, max-age=0'})
 
 @app.get('/units-screen')
 def units_screen():
@@ -1374,7 +1462,7 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
             'dispositions': ['Extinguished','Controlled','Under Control','False Alarm','No Fire','Cancelled']
         },
         'ems': {
-            'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'AP','label':'At Patient'},{'code':'TR','label':'Transport'},{'code':'TH','label':'Transport to HEMS'},{'code':'AD','label':'Arrived at Destination'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
             'modules': ['ems'],
             'unit_types': ['ambulance','medic','supervisor','air','rescue'],
             'call_types': [
@@ -1469,6 +1557,7 @@ class UnitOut(BaseModel):
     call_sign: str
     unit_type: str
     current_status: str
+    current_incident_id: Optional[int] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
     heading: Optional[float] = None
@@ -1482,6 +1571,7 @@ class UnitOut(BaseModel):
     taip_id: Optional[str] = None
     taip_destination_url: Optional[str] = None
     taip_port: Optional[int] = None
+    photo_url: Optional[str] = None
 
     @computed_field
     @property
@@ -1512,6 +1602,8 @@ class UnitUpdate(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     capabilities: Optional[dict] = None
+    camera_url: Optional[str] = None
+    photo_url: Optional[str] = None
     is_active: Optional[bool] = None
 
 class PersonnelCreate(BaseModel):
@@ -1522,6 +1614,8 @@ class PersonnelCreate(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     sms_phone: Optional[str] = None
+    provider_level: Optional[str] = None
+    photo_url: Optional[str] = None
     current_unit_id: Optional[int] = None
     duty_status: str = 'off_duty'
 
@@ -1538,6 +1632,8 @@ class PersonnelUpdate(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     sms_phone: Optional[str] = None
+    provider_level: Optional[str] = None
+    photo_url: Optional[str] = None
     current_unit_id: Optional[int] = None
     duty_status: Optional[str] = None
 
@@ -1567,14 +1663,19 @@ class IncidentOut(IncidentCreate):
         from_attributes = True
 
 class IncidentUpdate(BaseModel):
+    agency_id: Optional[int] = None
     call_type: Optional[str] = None
     priority: Optional[int] = None
     status: Optional[str] = None
+    call_status: Optional[str] = None
     location_text: Optional[str] = None
     narrative: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
+    callback: Optional[str] = None
+    caller_name: Optional[str] = None
     extra: Optional[dict] = None
+    call_entry_started_at: Optional[datetime] = None
 
 class IncidentPersonnelCreate(BaseModel):
     personnel_id: int
@@ -1657,6 +1758,7 @@ class StatusUpdate(BaseModel):
     disposition: Optional[str] = None
     passenger_count: Optional[int] = None
     destination_id: Optional[int] = None
+    destination_name: Optional[str] = None
     mileage: Optional[float] = None
     unit_id: Optional[int] = None
 
@@ -1671,9 +1773,23 @@ class UnitStatus(BaseModel):
     reason: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
+    destination_id: Optional[int] = None
+    destination_name: Optional[str] = None
+    mileage: Optional[float] = None
 
 class PersonnelAssign(BaseModel):
     unit_id: Optional[int] = None
+
+class MDTStart(BaseModel):
+    unit_id: int
+    personnel_ids: List[int]
+    status_code: str
+    provider_levels: Optional[dict] = None
+
+class UnitStaff(BaseModel):
+    personnel_ids: List[int]
+    duty_status: Optional[str] = 'on_duty'
+    status_code: Optional[str] = None
 
 class AlertCrew(BaseModel):
     message: Optional[str] = None
@@ -1890,18 +2006,23 @@ def _taip_stale_state(last_seen_at: Optional[datetime]):
     age = (datetime.utcnow() - last_seen_at).total_seconds()
     return age > TAIP_STALE_SECONDS, age > TAIP_OFFLINE_SECONDS
 
-_CALL_ACTIVE_STATUSES = {'AK','ER','OS','TR','ED','WATER','EXT','OVER','TC','ARR','CT','BK'}
-_ASSIGNABLE_STATUSES = {'AQ','AFR','POSTING','STAGED','AT_STATION','AVAILABLE_ON_RADIO'}
-_OUT_OF_SERVICE_STATUSES = {'OOS','LUN','MAINT','OFF_DUTY','MEAL'}
+# Active unit status codes keep a unit assigned to an incident.
+_CALL_ACTIVE_STATUSES = {'AK','ER','OS','AP','TR','TRP','ED','HEMS','TH','AD','DECEASED','WATER','EXT','OVER','TC','ARR','CT','BK','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'}
+_ASSIGNABLE_STATUSES = {'AQ','AFR','POSTING','STAGED','AT_STATION','AVAILABLE_ON_RADIO','IN_SERVICE','ON_DUTY'}
+_OUT_OF_SERVICE_STATUSES = {'OOS','LUN','MAINT','OFF_DUTY','MEAL','off_duty'}
 
+# Map a unit status code to a high-level assignment phase.
 def map_status(code: str) -> str:
-    return {
-        'AQ': 'assigned', 'AK': 'assigned',
-        'ER': 'en_route', 'OS': 'on_scene',
-        'TR': 'transport', 'ED': 'transport',
-        'CAN': 'clear', 'NPF': 'clear', 'DEL': 'clear',
-        'AFR': 'clear', 'OOS': 'clear', 'LUN': 'clear', 'MAINT': 'clear'
-    }.get(code, code)
+    on_scene = {'OS','AP','AD','WATER','EXT','OVER','TC','ARR','CT','BK','HEMS','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'}
+    if code in ('AK','dispatched'):
+        return 'assigned'
+    if code in ('ER','en_route'):
+        return 'en_route'
+    if code in on_scene:
+        return 'on_scene'
+    if code in ('TR','TRP','HEMS','TH','ED','transport'):
+        return 'transport'
+    return 'clear'
 
 def refresh_incident_status(db: Session, incident):
     """Set incident status based on the most advanced status of its currently assigned units."""
@@ -1914,9 +2035,10 @@ def refresh_incident_status(db: Session, incident):
         new_status = 'cleared' if (was_dispatched and incident.status not in ('closed',)) else 'open'
     else:
         statuses = [u.current_status for u in units]
-        if any(s in ('OS','WATER','EXT','OVER','TC','ARR','CT','BK') for s in statuses):
+        on_scene = {'OS','AP','AD','WATER','EXT','OVER','TC','ARR','CT','BK','HEMS','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'}
+        if any(s in on_scene for s in statuses):
             new_status = 'on_scene'
-        elif any(s in ('ER','TR','ED') for s in statuses):
+        elif any(s in ('ER','TR','ED','transport') for s in statuses):
             new_status = 'en_route'
         elif any(s in ('AK','dispatched') for s in statuses):
             new_status = 'dispatched'
@@ -1929,13 +2051,14 @@ def refresh_incident_status(db: Session, incident):
 def _incident_milestone_events(db, incident_id):
     rows = db.query(StatusEvent).filter(StatusEvent.incident_id == incident_id).order_by(StatusEvent.created_at).all()
     first = {}
+    on_scene = {'OS','on_scene','AP','WATER','EXT','OVER','HEMS','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'}
     for ev in rows:
         code = ev.status_code
         if code in ('AK','dispatched'):
             first.setdefault('AK', ev.created_at)
         if code in ('ER','en_route'):
             first.setdefault('ER', ev.created_at)
-        if code in ('OS','on_scene','WATER','EXT','OVER'):
+        if code in on_scene:
             first.setdefault('OS', ev.created_at)
         if code in ('TR','transport','ED'):
             first.setdefault('TR', ev.created_at)
@@ -2051,36 +2174,73 @@ def _point_in_ring(lat, lng, ring):
 def _point_in_geojson(lat, lng, geojson):
     if not geojson or lat is None or lng is None:
         return False
-    g = geojson
-    if 'geometry' in g:
-        g = g['geometry']
-    t = g.get('type')
-    coords = g.get('coordinates')
-    if t == 'Polygon' and coords:
-        for ring in coords:
-            if _point_in_ring(lat, lng, ring):
-                return True
-        return False
-    if t == 'MultiPolygon' and coords:
-        for poly in coords:
-            for ring in poly:
+    try:
+        g = geojson
+        if isinstance(g, str):
+            g = json.loads(g)
+        if not isinstance(g, dict):
+            return False
+        if 'geometry' in g:
+            g = g['geometry']
+            if not isinstance(g, dict):
+                return False
+        t = g.get('type')
+        coords = g.get('coordinates')
+        if t == 'Polygon' and coords:
+            for ring in coords:
                 if _point_in_ring(lat, lng, ring):
                     return True
-        return False
+            return False
+        if t == 'MultiPolygon' and coords:
+            for poly in coords:
+                for ring in poly:
+                    if _point_in_ring(lat, lng, ring):
+                        return True
+            return False
+    except Exception as e:
+        print('point_in_geojson error:', e)
     return False
 
 def _find_zone_for_point(db, lat, lng, agency_id=None):
-    q = db.query(PostZone).filter(PostZone.is_active == True)
-    if agency_id:
-        q = q.filter(or_(PostZone.agency_id == agency_id, PostZone.agency_id == None))
-    for z in q.all():
-        if _point_in_geojson(lat, lng, z.geojson):
-            return z
-    return None
+    try:
+        q = db.query(PostZone).filter(PostZone.is_active == True)
+        if agency_id:
+            q = q.filter(or_(PostZone.agency_id == agency_id, PostZone.agency_id == None))
+        for z in q.all():
+            try:
+                if _point_in_geojson(lat, lng, z.geojson):
+                    return z
+            except Exception as e:
+                print(f'Zone {z.id} geometry error:', e)
+                continue
+        return None
+    except Exception as e:
+        print('find_zone_for_point error:', e)
+        return None
+
+def _resolve_destination_id(db, body, agency_id):
+    dest_id = body.destination_id
+    if not dest_id and body.destination_name:
+        d = Destination(agency_id=agency_id, name=body.destination_name.strip(), category='other', is_active=True)
+        db.add(d); db.flush(); db.refresh(d)
+        dest_id = d.id
+    return dest_id
 
 def _cross_streets_around(db, lat, lng):
     # Placeholder: cross streets require road network data.
     return None
+
+def _load_extra(extra):
+    if extra is None:
+        return {}
+    if isinstance(extra, dict):
+        return dict(extra)
+    if isinstance(extra, str):
+        try:
+            return json.loads(extra) or {}
+        except Exception:
+            return {}
+    return {}
 
 def _validate_incident_location(db, incident, force=False):
     loc = db.query(IncidentLocation).filter_by(incident_id=incident.id).first()
@@ -2089,7 +2249,7 @@ def _validate_incident_location(db, incident, force=False):
         db.add(loc)
     if not force and loc.verification_status == 'verified' and loc.latitude is not None and loc.longitude is not None:
         return loc
-    extra = incident.extra or {}
+    extra = _load_extra(incident.extra)
     g = _geocode_structured(incident.location_text) if incident.location_text else None
     if g:
         loc.standardized_address = g.get('display_name')
@@ -2788,7 +2948,7 @@ def fire_report(incident_id: int, db: Session = Depends(get_db)):
             'first_dispatched': first_event(['AK','dispatched']),
             'first_en_route': first_event(['ER','en_route']),
             'first_on_scene': first_event(['OS','on_scene']),
-            'first_transport': first_event(['TR','ED']),
+            'first_transport': first_event(['TR','TH','ED','TRP','HEMS']),
             'first_cleared': first_event(['CAN','clear']),
         },
         'units': [{
@@ -2817,37 +2977,486 @@ def fire_report(incident_id: int, db: Session = Depends(get_db)):
     }
     return report
 
-@app.put('/incidents/{incident_id}', response_model=IncidentOut)
-def update_incident(request: Request, incident_id: int, body: IncidentUpdate, db: Session = Depends(get_db)):
+def _unit_status_time(status_events, codes):
+    for e in status_events:
+        if e.status_code in codes:
+            return e.created_at.isoformat() if e.created_at else None
+    return None
+
+def _status_label(code):
+    return {
+        'AQ':'Available','AFR':'Available for Response','OS':'On Scene','ER':'En Route','TR':'Transport','TRP':'Transport','ED':'En Route to Destination','TH':'Transport to HEMS','AD':'Arrived at Destination',
+        'DEL':'Delivered','NPF':'No Patient Found','CAN':'Cancelled','LUN':'Lunch','MAINT':'Out for Maintenance','OOS':'Out of Service','OFF_DUTY':'Off Duty','off_duty':'Off Duty','IN_SERVICE':'In Service','ON_DUTY':'On Duty',
+        'AK':'Dispatched','dispatched':'Dispatched','open':'Open','closed':'Closed','en_route':'En Route','on_scene':'On Scene',
+        'TC':'Traffic Control','CT':'Citation','ARR':'Arrest','BK':'Booking','WATER':'Water on Fire','EXT':'Extinguished','OVER':'Overhaul'
+    }.get(code, code or '')
+
+def _redact_summary(summary, profile='full'):
+    if profile == 'full' or not summary:
+        return summary
+    out = json.loads(json.dumps(summary))
+    if profile in ('operational','billing','public'):
+        ci = out.get('call_info') or {}
+        if profile in ('operational','public'):
+            ci.pop('caller_name', None)
+            ci.pop('callback', None)
+        if profile in ('billing','public'):
+            ci.pop('narrative', None)
+        out['call_info'] = ci
+    if profile in ('operational','public'):
+        for u in out.get('units', []):
+            u['crew'] = []
+    if profile == 'public':
+        out['timeline'] = []
+        loc = out.get('location') or {}
+        loc.pop('latitude', None)
+        loc.pop('longitude', None)
+        loc.pop('original_address', None)
+        out['location'] = loc
+    if profile == 'billing':
+        out['timeline'] = []
+    return out
+
+def _source_name(user, default='System'):
+    if not user:
+        return default
+    name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+    return name or user.email or default
+
+def _build_after_call_summary(db, incident):
+    agency = db.query(Agency).get(incident.agency_id) if incident.agency_id else None
+    loc = db.query(IncidentLocation).filter_by(incident_id=incident.id).first()
+    all_status_events = db.query(StatusEvent).filter_by(incident_id=incident.id).order_by(StatusEvent.created_at.asc()).all()
+    call_logs = db.query(CallLog).filter_by(incident_id=incident.id).order_by(CallLog.timestamp.asc()).all()
+    messages = db.query(DispatchMessage).filter_by(incident_id=incident.id).order_by(DispatchMessage.sent_at.asc()).all()
+    events = db.query(Event).filter_by(entity_type='incident', entity_id=incident.id).order_by(Event.timestamp.asc()).all()
+
+    timeline = []
+    for e in all_status_events:
+        unit = db.query(Unit).get(e.unit_id)
+        timeline.append({'at': e.created_at.isoformat() if e.created_at else None, 'type': 'status', 'unit': unit.call_sign if unit else None, 'event': _status_label(e.status_code), 'notes': e.reason, 'source': 'MDT' if unit else 'CAD'})
+    for l in call_logs:
+        user = db.query(User).get(l.user_id) if l.user_id else None
+        timeline.append({'at': l.timestamp.isoformat() if l.timestamp else None, 'type': 'log', 'unit': None, 'event': l.log_type, 'notes': l.message, 'source': _source_name(user, 'CAD')})
+    for m in messages:
+        unit = db.query(Unit).get(m.unit_id) if m.unit_id else None
+        src = m.channel.upper() if m.channel and m.channel.lower() != 'mdt' else 'MDT'
+        if unit and m.channel and m.channel.lower() == 'mdt':
+            src = f"MDT ({unit.call_sign})"
+        timeline.append({'at': m.sent_at.isoformat() if m.sent_at else None, 'type': 'message', 'unit': unit.call_sign if unit else None, 'event': m.method, 'notes': m.message_text, 'source': src})
+    for e in events:
+        user = db.query(User).get(e.user_id) if e.user_id else None
+        timeline.append({'at': e.timestamp.isoformat() if e.timestamp else None, 'type': 'event', 'unit': None, 'event': e.event_type, 'notes': json.dumps(e.data) if e.data else None, 'source': _source_name(user, 'System')})
+    timeline.sort(key=lambda x: x['at'] or '')
+
+    units_summary = []
+    incident_units = db.query(IncidentUnit).filter_by(incident_id=incident.id).all()
+    for iu in incident_units:
+        unit = iu.unit
+        if not unit:
+            continue
+        unit_status_events = [e for e in all_status_events if e.unit_id == unit.id]
+        assigned_at = iu.assigned_at.isoformat() if iu.assigned_at else None
+        dispatched_at = _unit_status_time(unit_status_events, ['AK','dispatched'])
+        en_route_at = _unit_status_time(unit_status_events, ['ER','en_route'])
+        arrived_at = _unit_status_time(unit_status_events, ['OS','on_scene','AP','WATER','EXT','OVER'])
+        transport_at = _unit_status_time(unit_status_events, ['TR','ED','HEMS','TRP','TH'])
+        dest_arrived_at = _unit_status_time(unit_status_events, ['AD','DEL','delivered','at_destination'])
+        clear_at = iu.cleared_at.isoformat() if iu.cleared_at else _unit_status_time(unit_status_events, ['AQ','AFR','Available','CAN','NPF'])
+        miles = db.query(MileageReading).filter_by(incident_id=incident.id, unit_id=unit.id).order_by(MileageReading.recorded_at.asc()).all()
+        mileage = {}
+        if miles:
+            mileage['beginning'] = miles[0].mileage
+            mileage['ending'] = miles[-1].mileage
+        scene_reading = next((m for m in miles if m.status_code in ('OS','on_scene')), None)
+        dest_reading = next((m for m in miles if m.status_code in ('AD','arrived_at_destination','DEL','delivered','at_destination')), None)
+        leg = db.query(TransportLeg).filter_by(incident_id=incident.id, unit_id=unit.id).first()
+        if scene_reading:
+            mileage['scene'] = scene_reading.mileage
+        if dest_reading:
+            mileage['destination'] = dest_reading.mileage
+        if 'scene' in mileage and 'destination' in mileage:
+            mileage['total'] = round(mileage['destination'] - mileage['scene'], 1)
+        if leg:
+            if leg.pickup_mileage is not None and 'scene' not in mileage:
+                mileage['scene'] = leg.pickup_mileage
+            if leg.dropoff_mileage is not None and 'destination' not in mileage:
+                mileage['destination'] = leg.dropoff_mileage
+            if 'scene' in mileage and 'destination' in mileage and 'total' not in mileage:
+                mileage['total'] = round(mileage['destination'] - mileage['scene'], 1)
+            if leg.destination:
+                mileage['destination_name'] = leg.destination.name
+                mileage['destination_address'] = leg.destination.address
+        crew = db.query(Personnel).filter(Personnel.current_unit_id == unit.id).all()
+        units_summary.append({
+            'unit_id': unit.id,
+            'call_sign': unit.call_sign,
+            'unit_type': unit.unit_type,
+            'discipline': (agency.agency_type if agency else 'unknown').lower(),
+            'agency': agency.name if agency else None,
+            'assigned_at': assigned_at,
+            'dispatched_at': dispatched_at,
+            'en_route_at': en_route_at,
+            'arrived_at': arrived_at,
+            'transport_at': transport_at,
+            'destination_arrived_at': dest_arrived_at,
+            'cleared_at': clear_at,
+            'mileage': mileage,
+            'crew': [{'id': c.id, 'name': f"{c.first_name or ''} {c.last_name or ''}".strip(), 'cert': ''} for c in crew],
+            'disposition': iu.disposition
+        })
+
+    header = {
+        'incident_id': incident.id,
+        'incident_number': incident.incident_number,
+        'call_number': incident.call_number,
+        'call_type': incident.call_type,
+        'priority': incident.priority,
+        'discipline': agency.agency_type if agency else 'unknown',
+        'status': incident.status,
+        'report_generated_at': datetime.utcnow().isoformat(),
+        'call_received_at': incident.created_at.isoformat() if incident.created_at else None,
+        'closed_at': incident.closed_at.isoformat() if incident.closed_at else None,
+        'incident_date': incident.created_at.date().isoformat() if incident.created_at else None,
+        'jurisdiction': loc.jurisdiction.name if loc and loc.jurisdiction else (agency.name if agency else None),
+        'primary_agency': agency.name if agency else None,
+        'reporting_agency': agency.name if agency else None
+    }
+    location_info = {
+        'original_address': loc.raw_address if loc else incident.location_text,
+        'validated_address': loc.standardized_address if loc else None,
+        'city': loc.city if loc else None,
+        'state': loc.state if loc else None,
+        'postal_code': loc.postal_code if loc else None,
+        'latitude': loc.latitude if loc else incident.lat,
+        'longitude': loc.longitude if loc else incident.lng,
+        'cross_streets': loc.cross_streets if loc else None,
+        'zone': loc.zone.name if loc and loc.zone else (incident.extra.get('zone_name') if incident.extra else None),
+        'verification_status': loc.verification_status if loc else 'unverified'
+    }
+    call_info = {
+        'narrative': incident.narrative,
+        'caller_name': incident.caller_name,
+        'callback': incident.callback,
+        'response_mode': (incident.extra or {}).get('response_mode'),
+        'call_status': (incident.extra or {}).get('call_status')
+    }
+    return {'header': header, 'call_info': call_info, 'location': location_info, 'units': units_summary, 'timeline': timeline}
+
+def _ensure_incident_report(db, incident, user):
+    report = db.query(IncidentReport).filter_by(incident_id=incident.id).order_by(IncidentReport.version.desc()).first()
+    if not report:
+        report = IncidentReport(incident_id=incident.id, report_number=f"RPT-{incident.id}-{1}", status='draft', version=1, summary_json=_build_after_call_summary(db, incident), created_by=user.get('user_id'))
+        db.add(report)
+    else:
+        report.summary_json = _build_after_call_summary(db, incident)
+        report.updated_at = datetime.utcnow()
+    return report
+
+@app.get('/incidents/{incident_id}/report')
+def get_after_call_report(request: Request, incident_id: int, profile: str = Query('full'), db: Session = Depends(get_db)):
     user = check_role(request, CALL_TAKER_ROLES)
-    if body.status == 'closed' or body.status == 'open':
-        check_role(request, DISPATCHER_ROLES)
     incident = db.query(Incident).get(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail='Incident not found')
-    changes = body.model_dump(exclude_unset=True)
-    for k, v in changes.items():
-        setattr(incident, k, v)
-    if 'location_text' in changes:
-        _validate_incident_location(db, incident, force=True)
-    if body.status == 'closed' and not incident.closed_at:
-        incident.closed_at = datetime.utcnow()
-        for unit in db.query(Unit).filter(Unit.current_incident_id == incident.id).all():
-            iu = db.query(IncidentUnit).filter_by(incident_id=incident.id, unit_id=unit.id, cleared_at=None).first()
-            if iu:
-                iu.cleared_at = incident.closed_at
-                iu.assignment_status = 'cleared'
-                if iu.assigned_at:
-                    duration = (incident.closed_at - iu.assigned_at).total_seconds()
-                    unit.accumulated_call_seconds = (unit.accumulated_call_seconds or 0) + duration
-            agency = db.query(Agency).get(unit.agency_id) if unit.agency_id else None
-            unit.current_status = 'AFR' if (agency and agency.agency_type == 'fire') else 'AQ'
-            unit.current_incident_id = None
-            db.add(StatusEvent(unit_id=unit.id, incident_id=incident.id, status_code=unit.current_status, reason='Call closed'))
-    _log_event(db, 'incident_updated', 'incident', incident.id, user_id=user.get('user_id'), data=changes, agency_id=incident.agency_id)
-    db.commit()
-    db.refresh(incident)
-    return incident
+    report = db.query(IncidentReport).filter_by(incident_id=incident.id).order_by(IncidentReport.version.desc()).first()
+    if not report:
+        report = _ensure_incident_report(db, incident, user)
+        db.commit(); db.refresh(report)
+    summary = report.summary_json or {}
+    summary['report'] = {'status': report.status, 'version': report.version, 'report_id': report.id, 'report_number': report.report_number, 'finalized_at': report.finalized_at.isoformat() if report.finalized_at else None, 'amendment_reason': report.amendment_reason, 'created_at': report.created_at.isoformat()}
+    return _redact_summary(summary, profile)
+
+@app.get('/incidents/{incident_id}/report/print')
+def print_after_call_report(incident_id: int, db: Session = Depends(get_db)):
+    return FileResponse('static/after_call_summary.html')
+
+@app.get('/incidents/{incident_id}/report/status')
+def get_report_status(request: Request, incident_id: int, db: Session = Depends(get_db)):
+    check_role(request, CALL_TAKER_ROLES)
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    report = db.query(IncidentReport).filter_by(incident_id=incident.id).order_by(IncidentReport.version.desc()).first()
+    if not report:
+        report = _ensure_incident_report(db, incident, {'user_id': None})
+        db.commit(); db.refresh(report)
+    return {'status': report.status, 'version': report.version, 'report_id': report.id, 'report_number': report.report_number, 'finalized_at': report.finalized_at.isoformat() if report.finalized_at else None, 'amendment_reason': report.amendment_reason, 'created_at': report.created_at.isoformat()}
+
+@app.get('/incidents/{incident_id}/report/versions')
+def get_report_versions(request: Request, incident_id: int, db: Session = Depends(get_db)):
+    check_role(request, CALL_TAKER_ROLES)
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    reports = db.query(IncidentReport).filter_by(incident_id=incident.id).order_by(IncidentReport.version.desc()).all()
+    return [{'version': r.version, 'status': r.status, 'report_number': r.report_number, 'created_at': r.created_at.isoformat(), 'finalized_at': r.finalized_at.isoformat() if r.finalized_at else None, 'amendment_reason': r.amendment_reason} for r in reports]
+
+@app.put('/incidents/{incident_id}/report/finalize')
+def finalize_report(request: Request, incident_id: int, db: Session = Depends(get_db)):
+    user = check_role(request, DISPATCHER_ROLES)
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    report = db.query(IncidentReport).filter_by(incident_id=incident.id).order_by(IncidentReport.version.desc()).first()
+    if not report:
+        report = _ensure_incident_report(db, incident, user)
+    if report.status == 'finalized':
+        raise HTTPException(status_code=400, detail='Report is already finalized. Use amend to make changes.')
+    report.status = 'finalized'
+    report.finalized_at = datetime.utcnow()
+    report.finalized_by = user.get('user_id')
+    db.commit(); db.refresh(report)
+    return {'status': report.status, 'version': report.version}
+
+@app.put('/incidents/{incident_id}/report/ready-for-review')
+def ready_for_review_report(request: Request, incident_id: int, db: Session = Depends(get_db)):
+    user = check_role(request, CALL_TAKER_ROLES)
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    report = db.query(IncidentReport).filter_by(incident_id=incident.id).order_by(IncidentReport.version.desc()).first()
+    if not report:
+        report = _ensure_incident_report(db, incident, user)
+    if report.status == 'finalized':
+        raise HTTPException(status_code=400, detail='Report is finalized.')
+    report.status = 'ready_for_review'
+    db.commit(); db.refresh(report)
+    return {'status': report.status, 'version': report.version}
+
+@app.post('/incidents/{incident_id}/report/amend')
+def amend_report(request: Request, incident_id: int, body: dict = Body(...), db: Session = Depends(get_db)):
+    user = check_role(request, DISPATCHER_ROLES)
+    reason = body.get('reason') or ''
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    latest = db.query(IncidentReport).filter_by(incident_id=incident.id).order_by(IncidentReport.version.desc()).first()
+    if not latest:
+        latest = _ensure_incident_report(db, incident, user)
+    parent_version = latest.version
+    new_version = parent_version + 1
+    new_report = IncidentReport(
+        incident_id=incident.id,
+        report_number=f"RPT-{incident.id}-{new_version}",
+        status='draft',
+        version=new_version,
+        parent_report_version=parent_version,
+        amendment_reason=reason,
+        summary_json=_build_after_call_summary(db, incident),
+        created_by=user.get('user_id')
+    )
+    db.add(new_report); db.commit(); db.refresh(new_report)
+    return {'status': new_report.status, 'version': new_report.version, 'parent_version': parent_version}
+
+@app.put('/incidents/{incident_id}/report/return-for-correction')
+def return_report_for_correction(request: Request, incident_id: int, body: dict = Body(...), db: Session = Depends(get_db)):
+    user = check_role(request, DISPATCHER_ROLES)
+    reason = body.get('reason') or ''
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    report = db.query(IncidentReport).filter_by(incident_id=incident.id).order_by(IncidentReport.version.desc()).first()
+    if not report:
+        raise HTTPException(status_code=404, detail='No report to return')
+    report.status = 'returned_for_correction'
+    report.amendment_reason = reason
+    db.commit(); db.refresh(report)
+    return {'status': report.status, 'version': report.version}
+
+def _build_supplement(db, incident, discipline):
+    base = _build_after_call_summary(db, incident)
+    if discipline == 'ems':
+        ems_base = base.copy()
+        legs = db.query(TransportLeg).filter_by(incident_id=incident.id).all()
+        mileage = db.query(MileageReading).filter_by(incident_id=incident.id).order_by(MileageReading.recorded_at.asc()).all()
+        ems_base['transport_legs'] = [{
+            'leg_id': l.id,
+            'unit_id': l.unit_id,
+            'pickup_address': l.pickup_address,
+            'pickup_mileage': l.pickup_mileage,
+            'dropoff_address': l.dropoff_address,
+            'dropoff_mileage': l.dropoff_mileage,
+            'departed_scene_at': l.departed_scene_at.isoformat() if l.departed_scene_at else None,
+            'arrived_destination_at': l.arrived_destination_at.isoformat() if l.arrived_destination_at else None,
+            'destination_name': l.destination.name if l.destination else None,
+            'destination_agency_type': l.destination.agency_type if l.destination else None
+        } for l in legs]
+        ems_base['mileage_readings'] = [{
+            'unit_id': m.unit_id,
+            'status_code': m.status_code,
+            'mileage': m.mileage,
+            'recorded_at': m.recorded_at.isoformat() if m.recorded_at else None
+        } for m in mileage]
+        epcr = db.query(EpcrExport).filter_by(incident_id=incident.id).order_by(EpcrExport.created_at.desc()).first()
+        ems_base['epcr'] = {
+            'export_id': epcr.id,
+            'nemsis_status': epcr.status,
+            'xml_payload': epcr.xml_payload,
+            'created_at': epcr.created_at.isoformat()
+        } if epcr else None
+        ems_base['patient_narrative'] = (incident.extra or {}).get('patient_narrative') or incident.narrative
+        return ems_base
+    if discipline == 'fire':
+        fire = base.copy()
+        units = db.query(IncidentUnit).filter_by(incident_id=incident.id).all()
+        events = db.query(StatusEvent).filter_by(incident_id=incident.id).order_by(StatusEvent.created_at.asc()).all()
+        fire['neris'] = {
+            'neris_version': '1.0-draft',
+            'submission_status': 'local-draft',
+            'incident_type_mapping': (incident.extra or {}).get('neris_incident_type'),
+            'alarm_level': (incident.extra or {}).get('alarm_level'),
+            'fire_origin_detected': any(e.status_code in ('WATER','EXT','OVER') for e in events),
+            'units': [{
+                'unit_id': u.unit.id if u.unit else None,
+                'call_sign': u.unit.call_sign if u.unit else None,
+                'arrived_at': _unit_status_time([e for e in events if e.unit_id == (u.unit.id if u.unit else None)], ['OS','on_scene','WATER','EXT','OVER']),
+                'cleared_at': u.cleared_at.isoformat() if u.cleared_at else None
+            } for u in units],
+            'property_use': (incident.extra or {}).get('property_use'),
+            'fire_origin': (incident.extra or {}).get('fire_origin'),
+            'flame_description': (incident.extra or {}).get('flame_description')
+        }
+        fire['nfirs_historical_readonly'] = {
+            'note': 'NFIRS is decommissioned. Historical NFIRS records are read-only; current fire reporting is NERIS-native.',
+            'legacy_incident_number': incident.incident_number,
+            'legacy_module_reference': None
+        }
+        return fire
+    if discipline == 'law':
+        law = base.copy()
+        law['enforcement'] = {
+            'citations': (incident.extra or {}).get('citations') or [],
+            'arrests': (incident.extra or {}).get('arrests') or [],
+            'warnings': (incident.extra or {}).get('warnings') or [],
+            'case_number_assigned': (incident.extra or {}).get('case_number'),
+            'officer_summary': (incident.extra or {}).get('officer_summary') or incident.narrative
+        }
+        return law
+    return base
+
+@app.get('/incidents/{incident_id}/supplement/{discipline}')
+def get_supplement_report(request: Request, incident_id: int, discipline: str, profile: str = Query('full'), db: Session = Depends(get_db)):
+    check_role(request, CALL_TAKER_ROLES)
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    if discipline not in ('ems','fire','law'):
+        raise HTTPException(status_code=400, detail='Invalid discipline')
+    return _redact_summary(_build_supplement(db, incident, discipline), profile)
+
+@app.get('/incidents/{incident_id}/supplement/{discipline}/view')
+def supplement_view(request: Request, incident_id: int, discipline: str, db: Session = Depends(get_db)):
+    check_role(request, CALL_TAKER_ROLES)
+    if discipline not in ('ems','fire','law'):
+        raise HTTPException(status_code=400, detail='Invalid discipline')
+    return FileResponse('static/supplement.html')
+
+@app.get('/incidents/{incident_id}/report/export')
+def export_report(request: Request, incident_id: int, format: str = 'json', profile: str = Query('full'), db: Session = Depends(get_db)):
+    check_role(request, CALL_TAKER_ROLES)
+    incident = db.query(Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail='Incident not found')
+    report = db.query(IncidentReport).filter_by(incident_id=incident.id).order_by(IncidentReport.version.desc()).first()
+    if not report:
+        report = _ensure_incident_report(db, incident, {'user_id': None})
+        db.commit(); db.refresh(report)
+    if format == 'json':
+        return Response(json.dumps(_redact_summary(report.summary_json or {}, profile)), media_type='application/json', headers={'Content-Disposition': f'attachment; filename="report-{incident_id}.json"'})
+    if format == 'html':
+        return FileResponse('static/after_call_summary.html')
+    if format == 'pdf':
+        try:
+            from fpdf import FPDF
+            summary = _redact_summary(report.summary_json or {}, profile)
+            pdf = FPDF()
+            pdf.add_page(); pdf.set_font('Arial', 'B', 14)
+            h = summary.get('header', {})
+            pdf.cell(0, 10, 'After-Call Summary', ln=True)
+            pdf.set_font('Arial', '', 11)
+            pdf.cell(0, 8, f"Incident #: {h.get('incident_number','-')}", ln=True)
+            pdf.cell(0, 8, f"Call #: {h.get('call_number','-')}", ln=True)
+            pdf.cell(0, 8, f"Call Type: {h.get('call_type','-')}", ln=True)
+            pdf.cell(0, 8, f"Location: {(summary.get('location') or {}).get('validated_address') or (summary.get('location') or {}).get('original_address','-')}", ln=True)
+            pdf.ln(4)
+            pdf.set_font('Arial', 'B', 12)
+            pdf.cell(0, 10, 'Units', ln=True)
+            pdf.set_font('Arial', '', 10)
+            for u in summary.get('units', []):
+                pdf.cell(0, 6, f"{u.get('call_sign','')}  ({u.get('unit_type','')})  Assigned: {u.get('assigned_at','-')}  Cleared: {u.get('cleared_at','-')}", ln=True)
+            pdf.ln(4)
+            pdf.set_font('Arial', 'B', 12)
+            pdf.cell(0, 10, 'Narrative', ln=True)
+            pdf.set_font('Arial', '', 10)
+            narrative = (summary.get('call_info') or {}).get('narrative') or 'No narrative'
+            for line in narrative.split('\n')[:20]:
+                pdf.cell(0, 5, line, ln=True)
+            import io
+            buf = io.BytesIO(); pdf.output(buf); buf.seek(0)
+            return Response(buf.read(), media_type='application/pdf', headers={'Content-Disposition': f'attachment; filename="report-{incident_id}.pdf"'})
+        except ImportError:
+            raise HTTPException(status_code=501, detail='PDF generation requires fpdf2. Install: pip install fpdf2')
+    raise HTTPException(status_code=400, detail='Unsupported format')
+
+@app.put('/incidents/{incident_id}', response_model=IncidentOut)
+def update_incident(request: Request, incident_id: int, body: IncidentUpdate, db: Session = Depends(get_db)):
+    try:
+        user = check_role(request, CALL_TAKER_ROLES)
+        if body.status == 'closed':
+            check_role(request, DISPATCHER_ROLES)
+        incident = db.query(Incident).get(incident_id)
+        if not incident:
+            raise HTTPException(status_code=404, detail='Incident not found')
+        changes = body.model_dump(exclude_unset=True)
+        old_location_text = incident.location_text
+        for k, v in changes.items():
+            if k == 'agency_id' and v is None:
+                continue
+            if k == 'extra' and v:
+                extra = _load_extra(incident.extra)
+                for ek, ev in v.items():
+                    if ev is not None:
+                        extra[ek] = ev
+                setattr(incident, 'extra', extra)
+                continue
+            if k == 'call_status' and v is not None:
+                extra = _load_extra(incident.extra)
+                extra['call_status'] = v
+                setattr(incident, 'extra', extra)
+                continue
+            if k == 'call_status':
+                continue
+            setattr(incident, k, v)
+        if 'location_text' in changes and changes['location_text'] != old_location_text:
+            try:
+                _validate_incident_location(db, incident, force=True)
+            except Exception as e:
+                print('validate incident location error:', e)
+        if body.status == 'closed' and not incident.closed_at:
+            incident.closed_at = datetime.utcnow()
+            for unit in db.query(Unit).filter(Unit.current_incident_id == incident.id).all():
+                iu = db.query(IncidentUnit).filter_by(incident_id=incident.id, unit_id=unit.id, cleared_at=None).first()
+                if iu:
+                    iu.cleared_at = incident.closed_at
+                    iu.assignment_status = 'cleared'
+                    if iu.assigned_at:
+                        duration = (incident.closed_at - iu.assigned_at).total_seconds()
+                        unit.accumulated_call_seconds = (unit.accumulated_call_seconds or 0) + duration
+                agency = db.query(Agency).get(unit.agency_id) if unit.agency_id else None
+                unit.current_status = 'AFR' if (agency and agency.agency_type == 'fire') else 'AQ'
+                unit.current_incident_id = None
+                db.add(StatusEvent(unit_id=unit.id, incident_id=incident.id, status_code=unit.current_status, reason='Call closed'))
+            _ensure_incident_report(db, incident, user)
+        _log_event(db, 'incident_updated', 'incident', incident.id, user_id=user.get('user_id'), data=changes, agency_id=incident.agency_id)
+        db.commit()
+        db.refresh(incident)
+        return incident
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get('/incidents/{incident_id}/location')
 def get_incident_location(incident_id: int, db: Session = Depends(get_db)):
@@ -2884,30 +3493,100 @@ def validate_incident_location_endpoint(incident_id: int, db: Session = Depends(
     loc = db.query(IncidentLocation).filter_by(incident_id=incident_id).first()
     return get_incident_location(incident_id, db)
 
-def _dispatch_one_unit(db, incident, unit, user, notes=None):
-    existing = db.query(IncidentUnit).filter_by(incident_id=incident.id, unit_id=unit.id).first()
+def _dispatch_one_unit(db, incident, unit, user, notes=None, reassign=False):
+    now = datetime.utcnow()
+    # Re-dispatch to the same incident is only allowed if the previous assignment was cleared,
+    # unless we are promoting an existing stacked assignment or reassigning to this incident.
+    existing = db.query(IncidentUnit).filter_by(incident_id=incident.id, unit_id=unit.id).filter(IncidentUnit.assignment_status != 'cleared').first()
     if existing:
-        raise HTTPException(status_code=400, detail='Unit already dispatched to incident')
+        if not reassign:
+            raise HTTPException(status_code=400, detail='Unit already assigned to incident')
+        if existing.assignment_status == 'stacked' or (existing.assignment_status not in ('cleared','stacked') and unit.current_incident_id != incident.id):
+            # Promote this record to the active assignment and clear any other active assignment
+            active = db.query(IncidentUnit).filter_by(unit_id=unit.id).filter(IncidentUnit.assignment_status.notin_(['cleared','stacked'])).order_by(IncidentUnit.assigned_at.desc()).first()
+            if active and active.id != existing.id:
+                active.assignment_status = 'cleared'
+                active.cleared_at = now
+                old_incident = db.query(Incident).get(active.incident_id)
+                if old_incident:
+                    refresh_incident_status(db, old_incident)
+            existing.assignment_status = 'assigned'
+            existing.assigned_at = now
+            unit.current_incident_id = incident.id
+            unit.last_assigned_at = now
+            unit.current_status = 'AK'
+            db.add(existing); db.flush()
+            refresh_incident_status(db, incident)
+            _log_event(db, 'unit_dispatched', 'incident', incident.id, user_id=user.get('user_id'), data={'unit_id': unit.id, 'notes': notes}, agency_id=incident.agency_id)
+            db.add(StatusEvent(unit_id=unit.id, incident_id=incident.id, status_code='AK', reason='Dispatched to incident'))
+            return existing
+        # Already actively assigned to this incident
+        return existing
+    # Check if the unit is currently on an active call (not stacked, not cleared)
+    active = db.query(IncidentUnit).filter_by(unit_id=unit.id).filter(IncidentUnit.assignment_status.notin_(['cleared','stacked'])).order_by(IncidentUnit.assigned_at.desc()).first()
+    if active and active.incident_id != incident.id:
+        if reassign:
+            # Clear the previous active assignment and move the unit to the new call
+            active.assignment_status = 'cleared'
+            active.cleared_at = now
+            old_incident = db.query(Incident).get(active.incident_id)
+            if old_incident:
+                refresh_incident_status(db, old_incident)
+        else:
+            # Stack the unit onto the new incident without changing current assignment
+            iu = IncidentUnit(incident_id=incident.id, unit_id=unit.id, notes=notes, assignment_status='stacked')
+            db.add(iu); db.flush()
+            _log_event(db, 'unit_stacked', 'incident', incident.id, user_id=user.get('user_id'), data={'unit_id': unit.id, 'notes': notes}, agency_id=incident.agency_id)
+            return iu
     iu = IncidentUnit(incident_id=incident.id, unit_id=unit.id, notes=notes)
     unit.current_incident_id = incident.id
-    unit.last_assigned_at = datetime.utcnow()
+    unit.last_assigned_at = now
     unit.current_status = 'AK'
     db.add(iu)
     db.flush()
     refresh_incident_status(db, incident)
     _log_event(db, 'unit_dispatched', 'incident', incident.id, user_id=user.get('user_id'), data={'unit_id': unit.id, 'notes': notes}, agency_id=incident.agency_id)
     db.add(StatusEvent(unit_id=unit.id, incident_id=incident.id, status_code='AK', reason='Dispatched to incident'))
+    # Notify crew by SMS/email and create an MDT message
+    crew = db.query(Personnel).filter(Personnel.current_unit_id == unit.id).all()
+    if crew:
+        msg = f"DISPATCH: {incident.call_number or incident.incident_number} - {incident.call_type} at {incident.location_text or 'Unknown'}"
+        _record_alert(db, incident.id, unit.id, msg, crew)
+        db.add(DispatchMessage(incident_id=incident.id, unit_id=unit.id, message_text=msg, method='mdt', channel='mdt', sent_at=datetime.utcnow()))
     return iu
 
+def _advance_stacked_call(db, unit, user):
+    stacked = db.query(IncidentUnit).filter_by(unit_id=unit.id, assignment_status='stacked').order_by(IncidentUnit.assigned_at.asc()).first()
+    if not stacked:
+        return None
+    next_incident = db.query(Incident).get(stacked.incident_id)
+    if not next_incident or next_incident.status == 'closed':
+        stacked.assignment_status = 'cleared'
+        stacked.cleared_at = datetime.utcnow()
+        return None
+    stacked.assignment_status = 'en_route'
+    unit.current_incident_id = next_incident.id
+    unit.current_status = 'ER'
+    unit.last_assigned_at = datetime.utcnow()
+    refresh_incident_status(db, next_incident)
+    _log_event(db, 'unit_en_route', 'incident', next_incident.id, user_id=user.get('user_id'), data={'unit_id': unit.id, 'reason': 'Cleared previous call; advancing to stacked call'}, agency_id=next_incident.agency_id)
+    db.add(StatusEvent(unit_id=unit.id, incident_id=next_incident.id, status_code='ER', reason='Cleared previous call; en route to stacked call'))
+    crew = db.query(Personnel).filter(Personnel.current_unit_id == unit.id).all()
+    if crew:
+        msg = f"DISPATCH: {next_incident.call_number or next_incident.incident_number} - {next_incident.call_type} at {next_incident.location_text or 'Unknown'}"
+        _record_alert(db, next_incident.id, unit.id, msg, crew)
+        db.add(DispatchMessage(incident_id=next_incident.id, unit_id=unit.id, message_text=msg, method='mdt', channel='mdt', sent_at=datetime.utcnow()))
+    return next_incident.id
+
 @app.post('/incidents/{incident_id}/dispatch/{unit_id}')
-def dispatch_unit(request: Request, incident_id: int, unit_id: int, notes: Optional[str] = None, db: Session = Depends(get_db)):
+def dispatch_unit(request: Request, incident_id: int, unit_id: int, notes: Optional[str] = None, reassign: bool = Query(False), db: Session = Depends(get_db)):
     check_role(request, DISPATCHER_ROLES)
     incident = db.query(Incident).get(incident_id)
     unit = db.query(Unit).get(unit_id)
     if not incident or not unit:
         raise HTTPException(status_code=404, detail='Incident or unit not found')
     user = get_current_user(request)
-    iu = _dispatch_one_unit(db, incident, unit, user, notes)
+    iu = _dispatch_one_unit(db, incident, unit, user, notes, reassign=reassign)
     db.commit()
     db.refresh(iu)
     return {
@@ -2924,7 +3603,7 @@ def dispatch_recommended(request: Request, incident_id: int, db: Session = Depen
     if not incident:
         raise HTTPException(status_code=404, detail='Incident not found')
     user = get_current_user(request)
-    profile = _get_response_profile(db, incident)
+    profile = _get_response_profile(db, incident.agency_id, incident.call_type)
     slots = _profile_slots(profile)
     max_units = profile.get('max_units') if profile and not slots else None
     recs = recommend_units(incident_id=incident_id, limit=25, db=db)
@@ -2998,7 +3677,8 @@ def get_dispatch_packet(incident_id: int, unit_id: int, db: Session = Depends(ge
         'assigned_units': [{'id': u.id, 'call_sign': u.call_sign, 'unit_type': u.unit_type} for _, u in assigned],
         'resource_status': _incident_resource_status(db, incident),
         'acknowledged_at': ack.acknowledged_at.isoformat() if ack else None,
-        'requires_ack': not ack
+        'requires_ack': not ack,
+        'extra': incident.extra
     }
     return packet
 
@@ -3039,6 +3719,8 @@ def update_unit_status(request: Request, incident_id: int, unit_id: int, body: S
     iu = db.query(IncidentUnit).filter_by(incident_id=incident_id, unit_id=unit_id).first()
     if not iu:
         raise HTTPException(status_code=404, detail='Unit not assigned to incident')
+    if body.status_code in ('OS','AD') and body.mileage is None:
+        raise HTTPException(status_code=400, detail=f'Mileage is required for {_status_label(body.status_code)}')
     unit = db.query(Unit).get(unit_id)
     iu.assignment_status = map_status(body.status_code)
     if body.disposition is not None:
@@ -3055,15 +3737,16 @@ def update_unit_status(request: Request, incident_id: int, unit_id: int, body: S
         iu.cleared_at = datetime.utcnow()
         iu.assignment_status = 'cleared'
         unit.current_incident_id = None
-        unit.current_status = 'AQ' if body.status_code == 'CAN' else body.status_code
+        unit.current_status = 'AQ' if body.status_code in ('CAN','NPF') else body.status_code
+        _advance_stacked_call(db, unit, get_current_user(request))
     incident = db.query(Incident).get(incident_id)
     refresh_incident_status(db, incident)
     # Transport leg lifecycle
     if incident:
         open_leg = db.query(TransportLeg).filter_by(incident_id=incident.id, unit_id=unit_id).filter(TransportLeg.status != 'cleared').order_by(TransportLeg.created_at.desc()).first()
-        if body.status_code in ('TR','ED'):
+        if body.status_code in ('TR','TRP','HEMS','ED','TH'):
             if not open_leg:
-                dest_id = body.destination_id
+                dest_id = _resolve_destination_id(db, body, incident.agency_id)
                 if not dest_id:
                     latest = db.query(IncidentDestination).filter_by(incident_id=incident.id).order_by(IncidentDestination.created_at.desc()).first()
                     dest_id = latest.destination_id if latest else None
@@ -3073,12 +3756,31 @@ def update_unit_status(request: Request, incident_id: int, unit_id: int, body: S
                 open_leg.status = 'en_route'
                 if not open_leg.en_route_at:
                     open_leg.en_route_at = datetime.utcnow()
+                new_dest = _resolve_destination_id(db, body, incident.agency_id)
+                if new_dest:
+                    open_leg.destination_id = new_dest
             if body.mileage is not None and open_leg.pickup_mileage is None:
                 open_leg.pickup_mileage = body.mileage
-        elif body.status_code == 'OS' and open_leg and open_leg.status == 'en_route':
-            open_leg.status = 'arrived'
+            if open_leg.arrived_at and not open_leg.departed_scene_at:
+                open_leg.departed_scene_at = datetime.utcnow()
+        elif body.status_code == 'OS' and open_leg:
+            if body.mileage is None:
+                raise HTTPException(status_code=400, detail='Mileage is required for On Scene arrival')
+            if open_leg.status == 'en_route':
+                open_leg.status = 'arrived'
             if not open_leg.arrived_at:
                 open_leg.arrived_at = datetime.utcnow()
+            if open_leg.pickup_mileage is None:
+                open_leg.pickup_mileage = body.mileage
+        elif body.status_code == 'AD' and open_leg:
+            if body.mileage is None:
+                raise HTTPException(status_code=400, detail='Mileage is required for Arrived at Destination')
+            if open_leg.status in ('en_route','arrived'):
+                open_leg.status = 'arrived_destination'
+            if not open_leg.arrived_destination_at:
+                open_leg.arrived_destination_at = datetime.utcnow()
+            if open_leg.dropoff_mileage is None:
+                open_leg.dropoff_mileage = body.mileage
         elif body.status_code not in _CALL_ACTIVE_STATUSES and open_leg:
             open_leg.status = 'cleared'
             if not open_leg.cleared_at:
@@ -3094,7 +3796,9 @@ def update_unit_status(request: Request, incident_id: int, unit_id: int, body: S
         lat=body.lat,
         lng=body.lng
     ))
-    _log_event(db, 'unit_status_changed', 'incident', incident_id, user_id=user.get('user_id'), data={'unit_id': unit_id, 'status_code': body.status_code, 'disposition': body.disposition, 'lat': body.lat, 'lng': body.lng}, agency_id=incident.agency_id)
+    if body.mileage is not None and incident_id:
+        db.add(MileageReading(incident_id=incident_id, unit_id=unit_id, status_code=body.status_code, mileage=round(float(body.mileage), 1)))
+    _log_event(db, 'unit_status_changed', 'incident', incident_id, user_id=user.get('user_id'), data={'unit_id': unit_id, 'status_code': body.status_code, 'disposition': body.disposition, 'lat': body.lat, 'lng': body.lng, 'mileage': body.mileage}, agency_id=incident.agency_id)
     db.commit()
     return {'incident_id': incident_id, 'unit_id': unit_id, 'status': body.status_code}
 
@@ -3536,6 +4240,8 @@ def set_unit_status(request: Request, unit_id: int, body: UnitStatus, db: Sessio
     unit = db.query(Unit).get(unit_id)
     if not unit:
         raise HTTPException(status_code=404, detail='Unit not found')
+    if body.status_code in ('OS','AD') and body.mileage is None and unit.current_incident_id:
+        raise HTTPException(status_code=400, detail=f'Mileage is required for {_status_label(body.status_code)}')
     unit.current_status = body.status_code
     if body.lat is not None: unit.lat = body.lat
     if body.lng is not None: unit.lng = body.lng
@@ -3555,12 +4261,154 @@ def set_unit_status(request: Request, unit_id: int, body: UnitStatus, db: Sessio
                     iu.assignment_status = 'cleared'
                     unit.current_incident_id = None
                     unit.current_status = 'AQ' if body.status_code == 'CAN' else body.status_code
+                    _advance_stacked_call(db, unit, get_current_user(request))
             refresh_incident_status(db, incident)
+            # Transport leg lifecycle
+            open_leg = db.query(TransportLeg).filter_by(incident_id=incident.id, unit_id=unit_id).filter(TransportLeg.status != 'cleared').order_by(TransportLeg.created_at.desc()).first()
+            if body.status_code in ('TR','ED','TH','TRP','HEMS'):
+                if not open_leg:
+                    dest_id = _resolve_destination_id(db, body, incident.agency_id)
+                    if not dest_id:
+                        latest = db.query(IncidentDestination).filter_by(incident_id=incident.id).order_by(IncidentDestination.created_at.desc()).first()
+                        dest_id = latest.destination_id if latest else None
+                    open_leg = TransportLeg(incident_id=incident.id, unit_id=unit_id, destination_id=dest_id, status='en_route', en_route_at=datetime.utcnow())
+                    db.add(open_leg); db.flush()
+                else:
+                    open_leg.status = 'en_route'
+                    if not open_leg.en_route_at:
+                        open_leg.en_route_at = datetime.utcnow()
+                    new_dest = _resolve_destination_id(db, body, incident.agency_id)
+                    if new_dest:
+                        open_leg.destination_id = new_dest
+                if body.mileage is not None and open_leg.pickup_mileage is None:
+                    open_leg.pickup_mileage = body.mileage
+                if open_leg.arrived_at and not open_leg.departed_scene_at:
+                    open_leg.departed_scene_at = datetime.utcnow()
+            elif body.status_code == 'OS' and open_leg:
+                if body.mileage is None:
+                    raise HTTPException(status_code=400, detail='Mileage is required for On Scene arrival')
+                if open_leg.status == 'en_route':
+                    open_leg.status = 'arrived'
+                if not open_leg.arrived_at:
+                    open_leg.arrived_at = datetime.utcnow()
+                if open_leg.pickup_mileage is None:
+                    open_leg.pickup_mileage = body.mileage
+            elif body.status_code == 'AD' and open_leg:
+                if body.mileage is None:
+                    raise HTTPException(status_code=400, detail='Mileage is required for Arrived at Destination')
+                if open_leg.status in ('en_route','arrived'):
+                    open_leg.status = 'arrived_destination'
+                if not open_leg.arrived_destination_at:
+                    open_leg.arrived_destination_at = datetime.utcnow()
+                if open_leg.dropoff_mileage is None:
+                    open_leg.dropoff_mileage = body.mileage
+            elif body.status_code not in _CALL_ACTIVE_STATUSES and open_leg:
+                open_leg.status = 'cleared'
+                if not open_leg.cleared_at:
+                    open_leg.cleared_at = datetime.utcnow()
+                if body.mileage is not None and open_leg.dropoff_mileage is None:
+                    open_leg.dropoff_mileage = body.mileage
             incident_id = incident.id
+    if body.mileage is not None and incident_id:
+        db.add(MileageReading(incident_id=incident_id, unit_id=unit_id, status_code=body.status_code, mileage=round(float(body.mileage), 1)))
+    if body.status_code in _ASSIGNABLE_STATUSES and not unit.in_service_at:
+        unit.in_service_at = datetime.utcnow()
+    elif body.status_code in _OUT_OF_SERVICE_STATUSES:
+        unit.in_service_at = None
     db.add(StatusEvent(unit_id=unit_id, incident_id=incident_id, status_code=body.status_code, reason=body.reason, lat=body.lat, lng=body.lng))
     db.commit()
     db.refresh(unit)
     return unit
+
+@app.post('/mdt/start', response_model=UnitOut)
+def mdt_start(request: Request, body: MDTStart, db: Session = Depends(get_db)):
+    user = get_current_user(request)
+    unit = db.query(Unit).get(body.unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    u = db.query(User).get(user['user_id'])
+    is_admin = u and u.role in ('admin','super_admin')
+    if not is_admin and unit.agency_id != user.get('agency_id'):
+        raise HTTPException(status_code=403, detail='Unit not in your agency')
+    # assign selected personnel to unit
+    for pid in body.personnel_ids:
+        p = db.query(Personnel).get(pid)
+        if not p:
+            continue
+        if not is_admin and p.agency_id != user.get('agency_id'):
+            continue
+        p.current_unit_id = body.unit_id
+        p.duty_status = 'on_duty'
+        if body.provider_levels and str(pid) in body.provider_levels:
+            p.provider_level = body.provider_levels[str(pid)]
+        elif body.provider_levels and str(pid) in (body.provider_levels or {}):
+            p.provider_level = body.provider_levels.get(pid)
+    # set unit status (IN_SERVICE, ON_DUTY, AQ, etc)
+    unit.current_status = body.status_code
+    if body.status_code in _ASSIGNABLE_STATUSES and not unit.in_service_at:
+        unit.in_service_at = datetime.utcnow()
+    elif body.status_code in _OUT_OF_SERVICE_STATUSES:
+        unit.in_service_at = None
+    db.add(StatusEvent(unit_id=unit.id, status_code=body.status_code, reason='MDT start'))
+    db.commit(); db.refresh(unit)
+    return unit
+
+@app.post('/units/{unit_id}/staff', response_model=UnitOut)
+def set_unit_staff(request: Request, unit_id: int, body: UnitStaff, db: Session = Depends(get_db)):
+    user = get_current_user(request)
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    u = db.query(User).get(user['user_id'])
+    if not (u and u.role in ('admin','super_admin','dispatcher')) and unit.agency_id != user.get('agency_id'):
+        raise HTTPException(status_code=403, detail='Not authorized')
+    # clear existing crew from this unit if desired? keep simple: only set for listed ids
+    for pid in body.personnel_ids:
+        p = db.query(Personnel).get(pid)
+        if p:
+            p.current_unit_id = unit_id
+            p.duty_status = body.duty_status or 'on_duty'
+    if body.status_code:
+        unit.current_status = body.status_code
+        if body.status_code in _ASSIGNABLE_STATUSES and not unit.in_service_at:
+            unit.in_service_at = datetime.utcnow()
+        elif body.status_code in _OUT_OF_SERVICE_STATUSES:
+            unit.in_service_at = None
+        db.add(StatusEvent(unit_id=unit.id, status_code=body.status_code, reason='Dispatcher crew assign'))
+    db.commit(); db.refresh(unit)
+    return unit
+
+@app.post('/units/{unit_id}/photo')
+def upload_unit_photo(unit_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    unit = db.query(Unit).get(unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    import os, shutil
+    upload_dir = 'static/uploads'
+    os.makedirs(upload_dir, exist_ok=True)
+    ext = os.path.splitext(file.filename)[1] or '.jpg'
+    path = f'{upload_dir}/unit_{unit_id}{ext}'
+    with open(path, 'wb') as out:
+        shutil.copyfileobj(file.file, out)
+    unit.photo_url = f'/static/uploads/unit_{unit_id}{ext}'
+    db.commit(); db.refresh(unit)
+    return {'photo_url': unit.photo_url}
+
+@app.post('/personnel/{personnel_id}/photo')
+def upload_personnel_photo(personnel_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    p = db.query(Personnel).get(personnel_id)
+    if not p:
+        raise HTTPException(status_code=404, detail='Personnel not found')
+    import os, shutil
+    upload_dir = 'static/uploads'
+    os.makedirs(upload_dir, exist_ok=True)
+    ext = os.path.splitext(file.filename)[1] or '.jpg'
+    path = f'{upload_dir}/personnel_{personnel_id}{ext}'
+    with open(path, 'wb') as out:
+        shutil.copyfileobj(file.file, out)
+    p.photo_url = f'/static/uploads/personnel_{personnel_id}{ext}'
+    db.commit(); db.refresh(p)
+    return {'photo_url': p.photo_url}
 
 @app.post('/units/{unit_id}/location', response_model=UnitOut)
 def update_unit_location(unit_id: int, body: LocationUpdate, db: Session = Depends(get_db)):
@@ -3717,7 +4565,7 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
             'dispositions': ['Extinguished','Controlled','Under Control','False Alarm','No Fire','Cancelled']
         },
         'ems': {
-            'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'TR','label':'Transport'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
+            'statuses': [{'code':'AQ','label':'Available'},{'code':'OS','label':'On Scene'},{'code':'ER','label':'En Route'},{'code':'AP','label':'At Patient'},{'code':'TR','label':'Transport'},{'code':'TH','label':'Transport to HEMS'},{'code':'AD','label':'Arrived at Destination'},{'code':'CAN','label':'Cancelled'},{'code':'LUN','label':'Lunch'},{'code':'OOS','label':'Out of Service'},{'code':'MAINT','label':'Maintenance'}],
             'modules': ['ems'],
             'unit_types': ['ambulance','medic','supervisor','air','rescue'],
             'call_types': [
@@ -3760,7 +4608,8 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
     def ensure_unit(call_sign, agency_id, unit_type, lat, lng, taip_id, capabilities=None):
         u = db.query(Unit).filter(Unit.call_sign == call_sign).first()
         if u: return u
-        u = Unit(name=call_sign, call_sign=call_sign, agency_id=agency_id, unit_type=unit_type, capabilities=capabilities, lat=lat, lng=lng, taip_id=taip_id, in_service_at=datetime.utcnow(), current_status='AQ', current_incident_id=None, accumulated_call_seconds=0)
+        now = datetime.utcnow()
+        u = Unit(name=call_sign, call_sign=call_sign, agency_id=agency_id, unit_type=unit_type, capabilities=capabilities, lat=lat, lng=lng, taip_id=taip_id, in_service_at=now, last_seen_at=now, current_status='AQ', current_incident_id=None, accumulated_call_seconds=0)
         db.add(u); db.flush(); return u
     u1 = ensure_unit('A12', police.id, 'patrol', CENTER[0]-0.008, CENTER[1]+0.012, 'TAIP-A12', {'service_level':'patrol','equipment':['lightbar','patrol']})
     u2 = ensure_unit('E1', fire.id, 'engine', CENTER[0]+0.012, CENTER[1]-0.012, 'TAIP-E1', {'apparatus':'engine','water':1000,'equipment':['hose','ladder']})
@@ -3859,7 +4708,7 @@ def list_users(current_user: dict = Depends(require_admin), db: Session = Depend
 def create_user(body: UserCreate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status_code=400, detail='Email already exists')
-    u = User(email=body.email, hashed_password=hash_password(body.password), role=body.role, agency_id=body.agency_id, is_active=True)
+    u = User(email=body.email, hashed_password=hash_password(body.password), first_name=body.first_name, last_name=body.last_name, role=body.role, agency_id=body.agency_id, is_active=True)
     db.add(u); db.commit(); db.refresh(u)
     _log_event(db, 'user_created', 'system', 0, user_id=current_user.get('user_id'), data={'new_user': u.id, 'role': u.role}, agency_id=body.agency_id)
     return u
@@ -4448,7 +5297,7 @@ def incident_mileage_summary(incident_id: int, current_user: dict = Depends(get_
             'en_route_at': leg.en_route_at.isoformat() if leg.en_route_at else None,
             'arrived_at': leg.arrived_at.isoformat() if leg.arrived_at else None,
             'cleared_at': leg.cleared_at.isoformat() if leg.cleared_at else None,
-            'turnaround_seconds': int((leg.cleared_at - leg.arrived_at).total_seconds()) if leg.cleared_at and leg.arrived_at else None
+            'turnaround_seconds': int((leg.cleared_at - (leg.arrived_destination_at or leg.arrived_at)).total_seconds()) if leg.cleared_at and (leg.arrived_destination_at or leg.arrived_at) else None
         })
     readings_summary = [{'unit_id': r.unit_id, 'call_sign': unit_map.get(r.unit_id), 'status_code': r.status_code, 'mileage': r.mileage, 'recorded_at': r.recorded_at.isoformat() if r.recorded_at else None} for r in readings]
     return {'incident_id': incident_id, 'total_trip_miles': round(total_miles, 1), 'legs': leg_summaries, 'readings': readings_summary}
@@ -4472,7 +5321,7 @@ def transport_legs_summary(current_user: dict = Depends(get_current_user), db: S
             'call_sign': unit_map.get(leg.unit_id),
             'destination': dest_map.get(leg.destination_id),
             'trip_miles': round(miles,1) if miles is not None else None,
-            'turnaround_seconds': int((leg.cleared_at - leg.arrived_at).total_seconds()) if leg.cleared_at and leg.arrived_at else None,
+            'turnaround_seconds': int((leg.cleared_at - (leg.arrived_destination_at or leg.arrived_at)).total_seconds()) if leg.cleared_at and (leg.arrived_destination_at or leg.arrived_at) else None,
             'cleared_at': leg.cleared_at.isoformat() if leg.cleared_at else None
         })
     return rows
@@ -4490,8 +5339,8 @@ def reports_summary(days: int = 7, current_user: dict = Depends(get_current_user
     for leg in completed_legs:
         if leg.pickup_mileage is not None and leg.dropoff_mileage is not None:
             total_miles += max(0, leg.dropoff_mileage - leg.pickup_mileage)
-        if leg.arrived_at and leg.cleared_at:
-            total_turnaround += int((leg.cleared_at - leg.arrived_at).total_seconds())
+        if leg.cleared_at and (leg.arrived_destination_at or leg.arrived_at):
+            total_turnaround += int((leg.cleared_at - (leg.arrived_destination_at or leg.arrived_at)).total_seconds())
     by_call_type = {}
     for i in incidents:
         ct = i.call_type or 'Unknown'
@@ -4608,7 +5457,18 @@ def taip_verify_page():
 for _fwd in (ScheduledTransportOut, UnitPostingOut, EpcrExportOut):
     _fwd.model_rebuild()
 
-# Startup: geocode any agencies without lat/lng and start TAIP listeners
+def _init_unit_last_seen():
+    db = SessionLocal()
+    try:
+        for u in db.query(Unit).filter(Unit.last_seen_at == None).filter(Unit.lat != None, Unit.lng != None).all():
+            u.last_seen_at = datetime.utcnow()
+            db.add(u)
+        db.commit()
+    finally:
+        db.close()
+
+# Startup: geocode any agencies without lat/lng, init missing unit last_seen times, and start TAIP listeners
+_init_unit_last_seen()
 geocode_missing_agencies()
 start_taip_udp_listener()
 start_taip_tcp_listener()

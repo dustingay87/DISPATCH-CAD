@@ -3,10 +3,20 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D Console</title>
+<title>D2D Unified Response - Console</title>
+<link rel='icon' href='/static/d2d-logo.svg' type='image/svg+xml'>
 <script src='https://cdn.tailwindcss.com'></script>
+<link rel='stylesheet' href='/static/branding.css'>
 <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
 <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' crossorigin=''></script>
+<script>
+function showJSError(err){
+  const el = document.getElementById('callList') || document.getElementById('main') || document.body;
+  if(el) el.insertAdjacentHTML('afterbegin', "<div class='p-2 m-1 text-red-400 bg-red-900/20 border border-red-700 rounded text-xs' id='jsError'>JS error: " + (err.message||err) + "</div>");
+}
+window.onerror = function(msg, src, line, col, err){ showJSError(err||msg); };
+window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason); });
+</script>
 <style>
   * { box-sizing:border-box; }
   html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
@@ -18,6 +28,10 @@
   .unit-er { background:rgba(234,179,8,0.18); border-left:5px solid #eab308; }
   .unit-aq { background:rgba(34,197,94,0.18); border-left:5px solid #22c55e; }
   .unit-oth { background:rgba(100,116,139,0.18); border-left:5px solid #64748b; }
+  [draggable='true'] { cursor:grab; }
+  tr.dragging { opacity:0.5; }
+  tr.drop-target { outline:2px dashed #22c55e; outline-offset:-2px; background:rgba(34,197,94,0.10); }
+  #incidentPanel.drop-target { outline:3px dashed #22c55e; outline-offset:-3px; background:rgba(34,197,94,0.10); }
   .card { background:#1e293b; border:1px solid #334155; border-radius:0.25rem; overflow:hidden; display:flex; flex-direction:column; }
   .card-head { background:#0f172a; padding:0.25rem 0.5rem; font-weight:600; border-bottom:1px solid #334155; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.03em; }
   .card-body { padding:0.25rem; overflow:auto; flex:1; }
@@ -41,9 +55,13 @@
   ::-webkit-scrollbar-thumb { background:#475569; border-radius:3px; }
 </style>
 </head>
-<body class='bg-slate-900 text-slate-200 text-xs h-screen flex flex-col'>
-  <header class='h-12 bg-slate-950 border-b border-slate-700 flex items-center px-2 gap-2 shrink-0'>
-    <div class='font-bold text-lg tracking-wide text-white'>D2D <span class='text-slate-500 font-normal text-xs'><span id='consoleLabel'>Console</span></span></div>
+<body class='bg-slate-900 text-slate-200 text-xs h-screen flex flex-col d2d-font-body'>
+  <header class='h-12 d2d-header flex items-center px-2 gap-2 shrink-0'>
+    <div class='flex items-center gap-2'>
+      <img src='/static/d2d-logo.svg' class='h-8 w-8' alt='D2D'>
+      <span class='d2d-logo-text text-white text-lg'>D2D Unified Response</span>
+      <span class='text-slate-400 font-normal text-xs' id='consoleLabel'>Console</span>
+    </div>
     <select id='disciplineSelect' class='bg-slate-800 border border-slate-600 rounded px-1 py-1 text-xs'><option value='all'>All Disciplines</option><option value='police'>Police</option><option value='fire'>Fire</option><option value='ems'>EMS</option></select>
     <div class='text-slate-400 font-mono' id='clock'>--:--:--</div>
     <label class='flex items-center space-x-1'><input id='liveToggle' type='checkbox' checked class='accent-blue-500'> <span>Live</span></label>
@@ -58,7 +76,13 @@
   <main id='main' class='flex-1 grid p-1 overflow-hidden' style='grid-template-columns:var(--col1,25%) 4px var(--col2,45%) 4px var(--col3,30%);'>
     <aside class='flex flex-col gap-1 min-h-0'>
       <div class='card flex-1 min-h-0'>
-        <div class='card-head flex justify-between'><span>Active Calls</span><span id='callCount' class='text-slate-400'>0</span></div>
+        <div class='card-head flex justify-between items-center'>
+          <div class='flex gap-1'>
+            <button id='tabActive' class='px-2 py-0.5 rounded text-xs bg-blue-600 text-white' onclick='state.showClosed=false; document.getElementById("tabActive").classList.add("bg-blue-600","text-white"); document.getElementById("tabClosed").classList.remove("bg-blue-600","text-white"); renderCalls();'>Active</button>
+            <button id='tabClosed' class='px-2 py-0.5 rounded text-xs bg-slate-700 text-slate-300' onclick='state.showClosed=true; document.getElementById("tabClosed").classList.add("bg-blue-600","text-white"); document.getElementById("tabActive").classList.remove("bg-blue-600","text-white"); renderCalls();'>Closed</button>
+          </div>
+          <span id='callCount' class='text-slate-400'>0</span>
+        </div>
         <div id='callFilters' class='p-1 flex flex-wrap gap-1 border-b border-slate-700 text-[10px]'></div>
         <div id='callList' class='card-body'></div>
       </div>
@@ -107,7 +131,7 @@
   </footer>
 <script>
 const DEFAULT_CENTER = [39.9612,-82.9988];
-let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, configs:{}, postZones:[], selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false, mapLayers:[], destinations:{}, lastCallsHtml:null, lastUnitsHtml:null };
+let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, configs:{}, postZones:[], selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false, mapLayers:[], destinations:{}, lastCallsHtml:null, lastUnitsHtml:null, showClosed:false };
 const QUICK_STAMPS = {
   police: ['Shots Fired','Object Thrown','Taser Deployed','Suspect in Custody','Officer Needs Assistance','Code 4','Suspect Fleeing'],
   fire: ['Entry Made','Smoke Showing','Fire Knocked Down','Primary Search Complete','Secondary Search Complete','Ventilation Complete','Water on Fire','All Clear'],
@@ -128,11 +152,12 @@ let map, layers;
 const LAYOUT_KEY='d2d_dispatch_layout';
 
 function loadLayout(){
-  try{ const raw=localStorage.getItem(LAYOUT_KEY); if(raw){ const l=JSON.parse(raw); applyLayout(l); return l; } }catch(e){}
+  try{ const raw=localStorage.getItem(LAYOUT_KEY); if(raw){ return JSON.parse(raw); } }catch(e){}
   return {col1:'25%',col2:'45%',col3:'30%',rowTop:'55%',rowBottom:'45%',footer:'9rem',locked:false};
 }
 function saveLayout(l){
   localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
+  api('/me/preferences', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({preferences:{layout:l}})}).catch(()=>{});
 }
 function applyLayout(l){
   const main=document.getElementById('main');
@@ -208,8 +233,9 @@ function setupResizers(){
     document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
   });
 }
-function initLayout(){
-  const l=loadLayout();
+async function initLayout(){
+  let l = loadLayout();
+  try { const me = await api('/me'); if(me.preferences && me.preferences.layout){ l = me.preferences.layout; } } catch(e){}
   applyLayout(l);
   setupResizers();
   document.getElementById('lockLayout').addEventListener('change', e=>{
@@ -226,8 +252,87 @@ function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60);
 function elapsed(iso){ return (Date.now()-toMs(iso))/1000; }
 function priorityTarget(p){ return {1:180,2:420,3:720,4:1200}[Math.min(Math.max(p||2,1),4)] || 420; }
 function slaClass(sec,target){ return sec>target ? 'text-red-400 font-bold' : 'text-slate-400'; }
-function unitClass(st){ if(st==='OS') return 'unit-os'; if(st==='ER'||st==='TR'||st==='DEL') return 'unit-er'; if(st==='AQ') return 'unit-aq'; return 'unit-oth'; }
-function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',ED:'En Route to Destination',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',cleared:'Cleared',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul'}; return M[code]||code; }
+function unitClass(st){
+  const onScene = ['OS','AP','AD','WATER','EXT','OVER','TC','ARR','CT','BK','HEMS','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'];
+  const enRoute = ['ER','TR','TH','TRP','ED','transport'];
+  if(onScene.includes(st)) return 'unit-os';
+  if(enRoute.includes(st)) return 'unit-er';
+  if(st==='AQ' || st==='AFR') return 'unit-aq';
+  return 'unit-oth';
+}
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transporting',TH:'Transporting to HEMS',AD:'Arrived at Destination',TRP:'Transporting Prisoner',ED:'En Route to Destination',CAN:'Cancelled',NPF:'No Transport',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Out for Maintenance',OFF_DUTY:'Off Duty',IN_SERVICE:'In Service',ON_DUTY:'On Duty',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',intake:'Intake',cleared:'Cleared',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul',AP:'At Patient',HEMS:'Transfer to HEMS',DECEASED:'PT Deceased',INVEST:'Officer Investigating',REPORT:'Taking Report',SEARCH:'Searching for Suspect',WORK_TRAFFIC:'Working Traffic',PA:'Public Assist',CLEARED:'Cleared',REPORT_TAKEN:'Report Taken',FIRE_ATTACK:'Fire Attack',NO_FIRE:'No Fire Found',EXTRICATION:'Extrication'}; return M[code]||code; }
+const AVAILABLE_STATUS_OPTIONS = [
+  {code:'IN_SERVICE', label:'In Service'},
+  {code:'ON_DUTY', label:'On Duty'},
+  {code:'AQ', label:'Available'},
+  {code:'OFF_DUTY', label:'Off Duty'},
+  {code:'MAINT', label:'Out for Maintenance'},
+  {code:'OOS', label:'Out of Service'},
+  {code:'LUN', label:'Lunch'}
+];
+const UNIT_STATUS_OPTIONS = {
+  police: [
+    {code:'AQ', label:'Available'},
+    {code:'AK', label:'Dispatched'},
+    {code:'ER', label:'Enroute'},
+    {code:'OS', label:'On Scene'},
+    {code:'TRP', label:'Transporting Prisoner'},
+    {code:'CAN', label:'Cancelled'}
+  ].concat(AVAILABLE_STATUS_OPTIONS),
+  fire: [
+    {code:'AQ', label:'Available'},
+    {code:'AK', label:'Dispatched'},
+    {code:'ER', label:'EnRoute'},
+    {code:'OS', label:'On Scene'},
+    {code:'WATER', label:'Water on Fire'},
+    {code:'EXT', label:'Fire Extinguished'},
+    {code:'OVER', label:'Overhaul'},
+    {code:'CAN', label:'Cancelled'}
+  ].concat(AVAILABLE_STATUS_OPTIONS),
+  ems: [
+    {code:'AQ', label:'Available'},
+    {code:'AK', label:'Dispatched'},
+    {code:'ER', label:'En route'},
+    {code:'OS', label:'On Scene'},
+    {code:'AP', label:'At Patient'},
+    {code:'TR', label:'Transporting'},
+    {code:'TH', label:'Transporting to HEMS'},
+    {code:'AD', label:'Arrived at Destination'},
+    {code:'NPF', label:'No Transport'},
+    {code:'CAN', label:'Cancelled'},
+    {code:'HEMS', label:'Transfer to HEMS'},
+    {code:'DECEASED', label:'PT DECEASED'}
+  ].concat(AVAILABLE_STATUS_OPTIONS)
+};
+const CALL_STATUS_OPTIONS = {
+  police: [
+    {code:'INVEST', label:'Officer Investigating'},
+    {code:'REPORT', label:'Taking Report'},
+    {code:'SEARCH', label:'Searching for Suspect'},
+    {code:'WORK_TRAFFIC', label:'Working Traffic'},
+    {code:'PA', label:'Public Assist'},
+    {code:'CLEARED', label:'Cleared'},
+    {code:'REPORT_TAKEN', label:'Report Taken'},
+    {code:'TRP', label:'Transporting'}
+  ],
+  fire: [
+    {code:'FIRE_ATTACK', label:'Fire Attack'},
+    {code:'EXT', label:'Fire Extinguished'},
+    {code:'OVER', label:'Overhaul'},
+    {code:'NO_FIRE', label:'NO Fire Found'},
+    {code:'PA', label:'Public Assist'},
+    {code:'EXTRICATION', label:'Extrication'},
+    {code:'TC', label:'Traffic Control'}
+  ],
+  ems: [...UNIT_STATUS_OPTIONS.ems]
+};
+function statusLabelByType(type, code){
+  const list = (UNIT_STATUS_OPTIONS[type] || []).concat(CALL_STATUS_OPTIONS[type] || []);
+  const match = list.find(s=>s.code === code);
+  return match ? match.label : statusLabel(code);
+}
+function isTransportStatus(code){ return ['TR','TH','ED','DEL','HEMS','TRP','transport'].includes(code); }
+function needsMileage(code){ return ['OS','TR','TH','ED','DEL','AD','HEMS','TRP'].includes(code); }
 function serviceAreaColor(type){ if(type==='primary') return '#22c55e'; if(type==='secondary') return '#3b82f6'; if(type==='mutual') return '#eab308'; return '#64748b'; }
 function matchesDiscipline(t){ return DISCIPLINE==='all' || t===DISCIPLINE; }
 function log(msg){ state.logs.unshift(`${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${msg}`); if(state.logs.length>100) state.logs.pop(); renderLog(); }
@@ -236,6 +341,8 @@ function initMap(){
   map = L.map('map');
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'&copy; OpenStreetMap' }).addTo(map);
   layers = { units:L.layerGroup().addTo(map), incidents:L.layerGroup().addTo(map), trails:L.layerGroup().addTo(map), critical:L.layerGroup().addTo(map), serviceAreas:L.layerGroup().addTo(map) };
+  state.mapMarkers = {units:{}, incidents:{}, critical:{}, serviceAreas:[]};
+  state.mapFitDone = false;
   const legend = L.control({position:'bottomright'});
   legend.onAdd = function(){
     const d = L.DomUtil.create('div','legend');
@@ -264,23 +371,87 @@ function renderLog(){ const el=document.getElementById('eventLog'); el.innerHTML
 
 function renderCallFilters(){
   const el = document.getElementById('callFilters'); if(!el) return;
+  if(state.showClosed){ el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
   const zones = [...new Set(state.postZones.map(z=>z.name).filter(Boolean))].sort();
   const html = `<select id='cfPriority' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All Pri</option><option value='1'>P1</option><option value='2'>P2</option><option value='3'>P3</option><option value='4'>P4</option></select>
-    <select id='cfStatus' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All Status</option><option value='open'>Open</option><option value='dispatched'>Dispatched</option><option value='en_route'>En Route</option><option value='on_scene'>On Scene</option><option value='cleared'>Cleared</option></select>
+    <select id='cfStatus' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All Status</option><option value='open'>Open</option><option value='intake'>Intake</option><option value='dispatched'>Dispatched</option><option value='en_route'>En Route</option><option value='on_scene'>On Scene</option><option value='cleared'>Cleared</option></select>
     <select id='cfAssigned' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All</option><option value='assigned'>Assigned</option><option value='unassigned'>Unassigned</option></select>
     ${zones.length ? `<select id='cfZone' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All Zones</option>${zones.map(z=>`<option value='${z}'>${z}</option>`).join('')}</select>` : ''}
     <input id='cfSearch' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px] flex-1 min-w-[4rem]' oninput='applyCallFilters()' placeholder='Search'>`;
   if(state.lastCallFiltersHtml !== html){ state.lastCallFiltersHtml = html; el.innerHTML = html; }
 }
 function applyCallFilters(){ renderCalls(); }
+function getCallStatusLabel(incident, type){
+  const cs = incident.extra && incident.extra.call_status;
+  if(cs){
+    const list = CALL_STATUS_OPTIONS[type] || [];
+    const match = list.find(s=>s.code === cs);
+    if(match) return match.label;
+    return statusLabel(cs);
+  }
+  return statusLabel(incident.status);
+}
+function callStatusOptions(type, selected=''){
+  const list = CALL_STATUS_OPTIONS[type] || [];
+  return `<option value=''>Set call status...</option>` + list.map(s=>`<option value='${s.code}' ${s.code===selected?'selected':''}>${s.label}</option>`).join('');
+}
+async function setCallStatus(incidentId){
+  const sel = document.getElementById(`callStatus_${incidentId}`); if(!sel) return;
+  const code = sel.value; if(!code) return;
+  const type = sel.dataset.discipline || 'ems';
+  try {
+    await api(`/incidents/${incidentId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({call_status: code})});
+    const list = CALL_STATUS_OPTIONS[type] || [];
+    const label = (list.find(s=>s.code===code)||{}).label || statusLabel(code);
+    log(`Call status set to ${label}`);
+    await load();
+  } catch(e){ log('Call status error: '+e.message); }
+}
+function updateTabStyles(){
+  const a = document.getElementById('tabActive');
+  const c = document.getElementById('tabClosed');
+  if(!a || !c) return;
+  if(state.showClosed){
+    c.classList.add('bg-blue-600','text-white'); c.classList.remove('bg-slate-700','text-slate-300');
+    a.classList.add('bg-slate-700','text-slate-300'); a.classList.remove('bg-blue-600','text-white');
+  } else {
+    a.classList.add('bg-blue-600','text-white'); a.classList.remove('bg-slate-700','text-slate-300');
+    c.classList.add('bg-slate-700','text-slate-300'); c.classList.remove('bg-blue-600','text-white');
+  }
+}
+
+function renderClosedCalls(){
+  const am = state.agencyMap;
+  const list = (state.incidents||[]).filter(i=>i.status==='closed' && matchesDiscipline((am[i.agency_id]||{}).agency_type)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  document.getElementById('callCount').textContent = list.length;
+  const html = list.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Agency</th><th>Closed</th><th></th></tr></thead><tbody>` + list.map(i=>{
+    const a = am[i.agency_id] || {};
+    return `<tr class='priority-${Math.min(Math.max(i.priority||2,1),4)} hover:bg-slate-800' onclick='window.open("/history?incident_id=${i.id}","_blank")'>
+      <td class='font-bold'>${i.call_number||i.incident_number}</td>
+      <td>${i.call_type}</td>
+      <td class='text-center'>P${i.priority}</td>
+      <td>${a.name||'-'}</td>
+      <td>${fmtTime(i.closed_at)}</td>
+      <td class='space-x-1'>
+        <button class='bg-slate-700 hover:bg-slate-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation(); window.open("/history?incident_id=${i.id}","_blank")'>Review</button>
+        <button class='bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation(); window.open("/static/after_call_summary.html?incident_id=${i.id}","_blank")'>Print</button>
+      </td>
+    </tr>`;
+  }).join('') + '</tbody></table>' : '<div class="p-2 text-slate-500">No closed calls</div>';
+  const el = document.getElementById('callList');
+  if(state.lastCallsHtml !== html){ state.lastCallsHtml = html; el.innerHTML = html; }
+}
+
 function renderCalls(){
+  if(state.showClosed){ renderClosedCalls(); updateTabStyles(); return; }
   const priority = document.getElementById('cfPriority')?.value || 'all';
   const status = document.getElementById('cfStatus')?.value || 'all';
   const assigned = document.getElementById('cfAssigned')?.value || 'all';
   const zone = document.getElementById('cfZone')?.value || 'all';
   const search = (document.getElementById('cfSearch')?.value || '').toLowerCase();
   const active = state.incidents.filter(i=>{
-    if(i.status==='closed' || i.status==='intake') return false;
+    if(i.status==='closed') return false;
     if(!matchesDiscipline((state.agencyMap[i.agency_id]||{}).agency_type)) return false;
     if(priority!=='all' && String(i.priority||2)!==priority) return false;
     if(status!=='all' && i.status!==status) return false;
@@ -288,7 +459,7 @@ function renderCalls(){
     if(assigned==='unassigned' && state.units.some(u=>u.current_incident_id===i.id)) return false;
     if(zone!=='all' && (i.extra?.zone_name||'')!==zone) return false;
     if(search){
-      const text = `${i.call_number||''} ${i.incident_number||''} ${i.call_type||''} ${i.location_text||''} ${i.caller_name||''}`.toLowerCase();
+      const text = `${i.call_number||''} ${i.incident_number||''} ${i.call_type||''} ${i.location_text||''} ${i.caller_name||''} ${getCallStatusLabel(i,(state.agencyMap[i.agency_id]||{}).agency_type)}`.toLowerCase();
       if(!text.includes(search)) return false;
     }
     return true;
@@ -296,18 +467,19 @@ function renderCalls(){
   document.getElementById('callCount').textContent = active.length;
   const html = active.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Status</th><th>Pickup</th><th>Zone</th><th>Dest</th><th>Units</th><th>Age</th><th>SLA</th></tr></thead><tbody>` + active.map(i=>{
     const a=state.agencyMap[i.agency_id]||{};
+    const type = a.agency_type;
     const target=priorityTarget(i.priority);
-    const assigned=state.units.filter(u=>u.current_incident_id===i.id).map(u=>u.call_sign).join(', ')||'-'; 
+    const assigned=state.units.filter(u=>u.current_incident_id===i.id).map(u=>`${u.call_sign}<span class='text-slate-500 text-[10px]'>(${statusLabelByType(type,u.current_status)})</span>`).join(', ')||'-'; 
     const cls = state.selectedIncident===i.id ? 'selected' : '';
     const unv = i.extra?.verification_status==='unverified' ? ` <span class='text-red-400 font-bold' title='UNVERIFIED LOCATION'>!</span>` : '';
     const ageSec = elapsed(i.created_at);
     const ageCls = ageSec > target ? 'text-red-400 font-bold' : '';
     const dest = i.extra?.destination_name || '-';
-    return `<tr class='priority-${Math.min(Math.max(i.priority||2,1),4)} ${cls}' onclick='selectIncident(${i.id})'>
+    return `<tr class='priority-${Math.min(Math.max(i.priority||2,1),4)} ${cls}' onclick='selectIncident(${i.id})' ondragover='callDragOver(event,${i.id})' ondragleave='callDragLeave(event)' ondrop='callDrop(event,${i.id})'>
       <td class='font-bold' title='${i.incident_number||''}'>${i.call_number||i.incident_number}</td>
       <td>${i.call_type}</td>
       <td class='text-center'>P${i.priority}</td>
-      <td>${statusLabel(i.status)}</td>
+      <td>${getCallStatusLabel(i, type)}</td>
       <td title='${i.location_text||''}'>${i.location_text||'-'}${unv}</td>
       <td>${i.extra?.zone_name||'-'}</td>
       <td>${dest}</td>
@@ -315,13 +487,29 @@ function renderCalls(){
       <td class='timer ${ageCls}' data-iso='${i.created_at}' data-fallback='-' title='Received ${fmtTime(i.created_at)}'>-</td>
       <td class='timer' data-timer='sla' data-iso='${i.created_at}' data-target='${target}'>--:--:--</td>
     </tr>`;
-  }).join('') + '</tbody></table>' : '<div class=\'p-2 text-slate-500\'>No active calls</div>';
+  }).join('') + '</tbody></table>' : `<div class='p-2 text-slate-500'>No active calls (total ${state.incidents.length}, discipline ${DISCIPLINE})<br><span class='text-slate-400 text-[10px]'>Check status/zone filters</span></div>`;
   const el = document.getElementById('callList');
   if(state.lastCallsHtml !== html){ state.lastCallsHtml = html; el.innerHTML = html; updateTimers(); }
+  updateTabStyles();
 }
 
 function findFirstEvent(events, codes){ return (events||[]).filter(e=>codes.includes(e.status_code)).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at))[0]?.created_at || null; }
 function milestoneText(iso, target, start){ const sec = iso ? elapsed(iso) : elapsed(start); const cls = iso ? (sec>target?'text-red-400 font-bold':'text-green-400') : 'text-yellow-400'; return `<span class='${cls}'>${fmtDur(sec)}</span> / ${fmtDur(target)}`; }
+function buildIncidentTimeline(timeline){
+  const entries = [];
+  (timeline.events||[]).forEach(e=>{
+    entries.push({t: e.created_at, html: `<span class='font-semibold'>${statusLabel(e.status_code)}</span> ${e.reason?escapeHtml(e.reason):''}`});
+  });
+  (timeline.logs||[]).forEach(l=>{
+    entries.push({t: l.timestamp, html: `<span class='text-blue-300'>${l.log_type==='note'?'Note':'Log'}</span>: ${escapeHtml(l.message||'')}`});
+  });
+  (timeline.messages||[]).forEach(m=>{
+    const to = m.unit_id ? (state.units.find(u=>u.id===m.unit_id)?.call_sign || m.unit_id) : 'ALL';
+    entries.push({t: m.sent_at, html: `<span class='text-emerald-300'>Msg to ${to}</span>: ${escapeHtml(m.message_text||'')}`});
+  });
+  entries.sort((a,b)=>new Date(b.t)-new Date(a.t));
+  return entries.slice(0,15).map(e=>`<div class='text-slate-300'>${fmtTime(e.t)} ${e.html}</div>`).join('') || '<div class=\'text-slate-500\'>No events</div>';
+}
 function isUserInteracting(){ const a=document.activeElement; if(!a||a===document.body) return false; return ['INPUT','SELECT','TEXTAREA','BUTTON'].includes(a.tagName) || a.closest('#incidentPanel,#unitList,#callList')!==null; }
 function savePanelForm(panelId){
   const panel=document.getElementById(panelId); if(!panel) return {};
@@ -341,6 +529,30 @@ function restorePanelForm(panelId, formState){
     else if(el.tagName==='SELECT'){ el.value=val; if(!el.value&&Array.from(el.options).some(o=>o.value===val)) el.value=val; }
     else el.value=val;
   });
+}
+
+function fmtDisciplineValue(v){
+  if(v===true) return 'Yes';
+  if(v===false) return 'No';
+  if(v==null || v==='') return '-';
+  return v;
+}
+
+const DISCIPLINE_FIELD_LABELS = {
+  police: { crime_type:'Crime Type', weapon:'Weapon', in_progress:'In Progress', suspect_count:'# Suspects', victim_count:'# Victims', suspect_desc:'Suspect Description', safety_notes:'Officer Safety Notes' },
+  fire: { smoke_color:'Smoke Color', structure_type:'Structure Type', occupancy:'Occupancy', visible_flames:'Visible Flames', hazmat:'Hazmat', exposures:'Exposures' },
+  ems: { chief_complaint:'Chief Complaint', patient_age:'Patient Age', patient_sex:'Patient Sex', consciousness:'Consciousness', breathing:'Breathing', bleeding:'Bleeding', allergies:'Allergies', medications:'Medications' }
+};
+
+function renderDisciplineFieldsPanel(incident, discipline){
+  const df = incident.extra && incident.extra.discipline_fields;
+  if(!df || !Object.keys(df).length) return '';
+  const map = DISCIPLINE_FIELD_LABELS[discipline] || {};
+  const rows = Object.entries(df).map(([k,v])=>{
+    const label = map[k] || k.replace(/_/g,' ').replace(/\b\w/g, c=>c.toUpperCase());
+    return `<div class='flex flex-col'><span class='text-[10px] text-slate-500 uppercase'>${label}</span><span class='text-xs text-slate-200'>${fmtDisciplineValue(v)}</span></div>`;
+  }).join('');
+  return `<div class='border-t border-slate-700 pt-2'><div class='text-xs font-semibold text-slate-400 mb-1'>Call Details</div><div class='grid grid-cols-2 md:grid-cols-3 gap-2'>${rows}</div></div>`;
 }
 
 async function selectIncident(id){
@@ -364,9 +576,11 @@ async function selectIncident(id){
   const start = i.call_entry_started_at || i.created_at;
   const dispatchedAt = findFirstEvent(timeline.events, ['AK','dispatched']);
   const enRouteAt = findFirstEvent(timeline.events, ['ER','en_route']);
-  const onSceneAt = findFirstEvent(timeline.events, ['OS','on_scene']);
-  const transportAt = findFirstEvent(timeline.events, ['TR','ED']);
+  const onSceneAt = findFirstEvent(timeline.events, ['OS','on_scene','AP','AD','WATER','EXT','OVER','HEMS','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE']);
+  const transportAt = findFirstEvent(timeline.events, ['TR','TH','ED','AD','HEMS','TRP']);
+  const assignedSummary = assigned.length ? assigned.map(u=>`<span class='inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs text-slate-200 ${unitClass(u.current_status)}' title='${statusLabelByType(discipline,u.current_status)}'>${u.call_sign}</span>`).join(' ') : '<span class="text-slate-500">none</span>';
   const narrative = (i.narrative||'').replace(/\n/g,'<br>');
+  const disciplineFieldsHtml = renderDisciplineFieldsPanel(i, discipline);
   const quickStampLabels = QUICK_STAMPS[discipline] || QUICK_STAMPS.fire;
   const quickStamps = quickStampLabels.map(l=>`<button type='button' class='px-2 py-0.5 bg-slate-700 hover:bg-slate-600 rounded text-xs' onclick='insertQuickStamp(${JSON.stringify(l).replace(/'/g,"&#39;")})'>${l}</button>`).join('');
   const showPersonnel = features.personnel !== false;
@@ -376,10 +590,11 @@ async function selectIncident(id){
   document.getElementById('incidentPanel').innerHTML = `
     <div class='card-head'>${i.call_number||i.incident_number} <span class='text-slate-400'>${i.call_type}</span></div>
     <div class='p-2 space-y-2'>
+      <div class='text-xs text-slate-300 flex flex-wrap gap-2 items-center'><span class='text-slate-500'>Units:</span> ${assignedSummary}</div>
       <div class='flex flex-wrap gap-4 text-xs text-slate-400'>
         <span>Agency: <b class='text-white'>${a.name||'-'}</b></span>
         <span>Priority: <b class='text-white'>P${i.priority}</b></span>
-        <span>Status: <b class='text-white'>${statusLabel(i.status)}</b></span>
+        <span class='flex items-center gap-1'>Call Status: <select id='callStatus_${i.id}' data-discipline='${discipline}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onchange='setCallStatus(${i.id})'>${callStatusOptions(discipline, i.extra && i.extra.call_status)}</select> <span class='text-[10px] text-slate-500'>(status: ${statusLabel(i.status)})</span></span>
         <span>Call Entry: <b class='text-white'>${fmtTime(start)}</b></span>
       </div>
       <div class='flex flex-wrap gap-4 text-xs text-slate-400'>
@@ -395,11 +610,13 @@ async function selectIncident(id){
       </div>
       <div class='text-xs text-slate-400'>Caller: <b class='text-white'>${i.caller_name||'-'} ${i.callback||''}</b></div>
       <div class='text-xs bg-slate-900 p-1 rounded max-h-24 overflow-auto' id='incNarrative'>${narrative || 'No narrative'}</div>
+      ${disciplineFieldsHtml}
       <div class='flex gap-2 flex-wrap'>
         <select id='dispUnit' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value=''>Unit</option>${availOpts}</select>
         <button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='dispatchSelected()'>Dispatch</button>
         <button class='bg-green-700 hover:bg-green-600 px-2 py-0.5 rounded text-xs' onclick='dispatchRecommendedAll(${i.id})'>Dispatch All Needed</button>
         <button class='bg-red-800 hover:bg-red-700 px-2 py-0.5 rounded text-xs' onclick='closeSelected()'>Close</button>
+        <a target='_blank' href='/static/after_call_summary.html?incident_id=${i.id}' class='bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded text-xs no-underline text-white'>View Report</a>
         ${fireReportBtn}
       </div>
       <div class='border-t border-slate-700 pt-2'>
@@ -410,8 +627,9 @@ async function selectIncident(id){
             const ack = ackSet.has(u.id) ? `<span class='text-[10px] text-green-400 ml-1' title='Acknowledged'>ACK</span>` : '';
             return `<div class='flex flex-wrap gap-2 items-center text-xs'>
               <span class='font-bold text-white'>${u.call_sign}${ack}</span>
-              <select id='incUStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onchange='handleIncidentUnitStatusChange(${i.id},${u.id})'>${unitStatusOptions(a.agency_type, i.agency_id, u.current_status)}</select>
-              <select id='incUDest_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden'>${destOpts}</select>
+              <select id='incUStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onchange='handleIncidentUnitStatusChange(${i.id},${u.id})'>${unitStatusOptions(discipline, i.agency_id, u.current_status)}</select>
+              <select id='incUDest_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden' onchange='incidentUnitStatusChanged(${i.id},${u.id})'>${getTransportDestinationOptions(i.agency_id, a.agency_type)}</select>
+              <input id='incUDestOther_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-24 hidden' placeholder='Destination name'>
               <input id='incUMile_${u.id}' type='number' step='0.1' class='${mileageClass} bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-20 hidden' placeholder='Miles'>
               <button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='setIncidentUnitStatus(${i.id},${u.id})'>Set</button>
             </div>`;
@@ -424,26 +642,15 @@ async function selectIncident(id){
       </div>
       <div class='border-t border-slate-700 pt-2'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Quick Notes</div>
-        <div class='flex flex-wrap gap-1 mb-1'>${quickStamps}</div>
-        <textarea id='incNote' rows='2' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-full' placeholder='Add note with timestamp...'></textarea>
-        <button class='mt-1 bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='addIncidentNote(${i.id})'>Add Note</button>
-      </div>
-      <div class='border-t border-slate-700 pt-2 ${showPersonnel?"":"hidden"}' id='personnelPanel'>
-        <div class='text-xs font-semibold text-slate-400 mb-1'>Responding Personnel (${a.agency_type==='fire'?'fire':''})</div>
-        <div id='personnelList' class='space-y-1 text-xs'>Loading...</div>
-        <div class='flex gap-2 mt-1'>
-          <select id='addPersonnelSel' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value=''>Select</option>${personnelOpts}</select>
-          <input id='addPersonnelVehicle' type='text' value='Personal vehicle' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-28' placeholder='Vehicle'>
-          <button class='bg-green-700 hover:bg-green-600 px-2 py-0.5 rounded text-xs' onclick='addRespondingPersonnel(${i.id})'>Add</button>
-        </div>
+        <div id='quickNotes' class='text-xs text-slate-300'>${(i.notes||'').replace(/\n/g,'<br>') || 'None'}</div>
       </div>
       <div class='border-t border-slate-700 pt-2'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Response Timers</div>
         <div id='timerPanel' class='text-xs text-slate-300'>Loading...</div>
       </div>
       <div class='border-t border-slate-700 pt-2'>
-        <div class='text-xs font-semibold text-slate-400 mb-1'>Timeline</div>
-        <div class='space-y-1 text-xs'>${(timeline.events||[]).slice(0,6).map(e=>`<div class='text-slate-300'>${fmtTime(e.created_at)} ${statusLabel(e.status_code)} ${e.reason||''}</div>`).join('') || '<div class=\'text-slate-500\'>No events</div>'}</div>
+        <div class='text-xs font-semibold text-slate-400 mb-1'>Event Log</div>
+        <div class='space-y-1 text-xs' id='incidentTimeline'>${buildIncidentTimeline(timeline)}</div>
       </div>
       <div class='border-t border-slate-700 pt-2'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Recommended Units</div>
@@ -471,6 +678,12 @@ async function selectIncident(id){
   if(features.mileage){ await loadMileage(i.id); }
   if(showPersonnel){ await loadIncidentPersonnel(i.id); }
   renderMap();
+  if(i && prevSelected !== id){
+    const ag = state.agencyMap[i.agency_id]||{};
+    const lat = i.lat!=null ? i.lat : ag.lat;
+    const lng = i.lng!=null ? i.lng : ag.lng;
+    if(lat!=null && lng!=null && map) map.setView([lat,lng], 16, {animate:false});
+  }
 }
 
 async function loadRecommendations(id){
@@ -634,18 +847,36 @@ async function loadDestinations(agencyId){
     state.destinationsList[agencyId] = list;
   } catch(e){}
 }
+async function loadAllDestinations(){
+  try {
+    const list = await api('/destinations');
+    if(!state.destinationsList) state.destinationsList = {};
+    list.forEach(d=>{ if(!state.destinationsList[d.agency_id]) state.destinationsList[d.agency_id]=[]; state.destinationsList[d.agency_id].push(d); });
+  } catch(e){ console.log('loadAllDestinations error', e); }
+}
 function getDestinationOptions(agencyId){
   const list = (state.destinationsList && state.destinationsList[agencyId]) || [];
-  return `<option value=''>Select destination...</option>` + list.map(d=>`<option value='${d.id}'>${d.name}${d.category ? ' ('+d.category+')' : ''}</option>`).join('');
+  return `<option value=''>Select destination...</option>` + list.map(d=>{
+    const details = [d.details?.door_code ? 'Door: '+d.details.door_code : '', d.details?.phone ? 'Phone: '+d.details.phone : '', d.address].filter(Boolean).join(' | ');
+    return `<option value='${d.id}' title='${escapeHtml(details)}'>${d.name}${d.category ? ' ('+d.category+')' : ''}${details ? ' - '+escapeHtml(details) : ''}</option>`;
+  }).join('');
+}
+function getTransportDestinationOptions(agencyId, agencyType){
+  let opts = getDestinationOptions(agencyId);
+  if(agencyType === 'police') opts += `<option value='other'>Other</option>`;
+  return opts;
 }
 
 function incidentUnitStatusChanged(incidentId, unitId){
   const status = document.getElementById(`incUStat_${unitId}`).value;
-  const needsDest = status === 'TR' || status === 'ED' || status === 'DEL';
+  const needsDest = isTransportStatus(status);
+  const needsMile = needsMileage(status);
   const dest = document.getElementById(`incUDest_${unitId}`);
+  const other = document.getElementById(`incUDestOther_${unitId}`);
   const mile = document.getElementById(`incUMile_${unitId}`);
   if(dest) dest.classList.toggle('hidden', !needsDest);
-  if(mile) mile.classList.toggle('hidden', !needsDest);
+  if(other) other.classList.toggle('hidden', !(needsDest && dest && dest.value==='other'));
+  if(mile) mile.classList.toggle('hidden', !needsMile);
 }
 
 function handleIncidentUnitStatusChange(incidentId, unitId){
@@ -656,15 +887,30 @@ function handleIncidentUnitStatusChange(incidentId, unitId){
 async function setIncidentUnitStatus(incidentId, unitId, silent=false){
   const s = document.getElementById(`incUStat_${unitId}`).value; if(!s) return;
   const destEl = document.getElementById(`incUDest_${unitId}`);
+  const otherEl = document.getElementById(`incUDestOther_${unitId}`);
   const mileEl = document.getElementById(`incUMile_${unitId}`);
-  const needsDest = s === 'TR' || s === 'ED' || s === 'DEL';
+  const needsDest = isTransportStatus(s);
+  const needsMile = needsMileage(s);
   const body = {status_code: s};
-  if(needsDest && destEl && destEl.value) body.destination_id = parseInt(destEl.value);
-  if(needsDest && mileEl && mileEl.value) body.mileage = parseFloat(mileEl.value);
-  if(needsDest && !body.destination_id){ if(!silent) alert('Select a destination for transport status'); return; }
+  if(needsDest && destEl && destEl.value){
+    if(destEl.value === 'other'){
+      const name = otherEl ? otherEl.value.trim() : '';
+      if(!name){ if(!silent) alert('Enter destination name for Other'); return; }
+      body.destination_name = name;
+    } else {
+      body.destination_id = parseInt(destEl.value);
+    }
+  }
+  if(needsMile){
+    if(mileEl && mileEl.value) body.mileage = parseFloat(mileEl.value);
+    else { if(!silent) alert('Enter mileage for this status'); return; }
+  }
+  if(needsDest && !body.destination_id && !body.destination_name){ if(!silent) alert('Select or enter a destination for transport status'); return; }
   try {
+    const u = state.units.find(x=>x.id===unitId) || {};
+    const a = state.agencyMap[u.agency_id] || {};
     await api(`/incidents/${incidentId}/units/${unitId}/status`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    log(`Unit ${(state.units.find(u=>u.id===unitId)||{}).call_sign} set to ${statusLabel(s)}`);
+    log(`Unit ${u.call_sign} set to ${statusLabelByType(a.agency_type, s)}`);
     await load();
   } catch(e){ log('Status error: '+e.message); }
 }
@@ -676,11 +922,14 @@ function insertQuickStamp(label){
   ta.value += (ta.value ? '\n' : '') + line;
 }
 
+function escapeHtml(str){ return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 async function addIncidentNote(incidentId){
   const ta = document.getElementById('incNote'); if(!ta || !ta.value.trim()) return;
+  const text = ta.value.trim();
   try {
-    await api(`/incidents/${incidentId}/notes`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({note: ta.value.trim()})});
-    log('Note added');
+    await api(`/incidents/${incidentId}/notes`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({note: text})});
+    const displayNote = escapeHtml(text.substring(0,120) + (text.length>120?'...':''));
+    log('Note: ' + displayNote);
     ta.value = '';
     await load();
     selectIncident(incidentId);
@@ -744,6 +993,40 @@ window.dispatchRecommendedAll = async function(incidentId){
   if(!incidentId) return;
   try { const res = await api(`/incidents/${incidentId}/dispatch-recommended`, {method:'POST'}); log(`Dispatched ${res.dispatched.length} units`); await load(); } catch(e){ log('Bulk dispatch error: '+e.message); }
 }
+
+let dragUnitId = null;
+function unitDragStart(e, unitId){
+  dragUnitId = unitId;
+  e.dataTransfer.setData('text/plain', unitId);
+  e.dataTransfer.effectAllowed = 'move';
+  e.currentTarget.classList.add('dragging');
+}
+function unitDragEnd(e){
+  dragUnitId = null;
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('tr.drop-target').forEach(r=>r.classList.remove('drop-target'));
+}
+function callDragOver(e, incidentId){
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drop-target');
+}
+function callDragLeave(e){
+  e.currentTarget.classList.remove('drop-target');
+}
+async function callDrop(e, incidentId){
+  e.preventDefault();
+  e.currentTarget.classList.remove('drop-target');
+  const unitId = e.dataTransfer.getData('text/plain');
+  if(!unitId || !incidentId) return;
+  try {
+    const res = await api(`/incidents/${incidentId}/dispatch/${unitId}?reassign=1`, {method:'POST'});
+    log(`Dispatched unit to call ${incidentId}`);
+    await selectIncident(incidentId);
+    await load();
+  } catch(err){ log('Drag dispatch error: '+err.message); }
+}
+
 async function closeSelected(){
   if(!state.selectedIncident) return;
   try { await api(`/incidents/${state.selectedIncident}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:'closed'})}); log(`Closed ${state.selectedIncident}`); state.selectedIncident=null; await load(); } catch(e){ log('Close error: '+e.message); }
@@ -755,7 +1038,7 @@ function renderUnits(){
   const rows = filtered.map(u=>{
     const a=state.agencyMap[u.agency_id]||{};
     const inc = u.current_incident_id ? (state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id) : '-';
-    const onCall = ['OS','ER','TR','AK','dispatched','LUN','OOS','MAINT','DEL','NPF'].includes(u.current_status);
+    const onCall = ['OS','ER','TR','TH','AD','AK','dispatched','LUN','OOS','MAINT','DEL','NPF','HEMS'].includes(u.current_status);
     const availIso = u.current_status==='AQ' ? (u.last_assigned_at || u.in_service_at) : '';
     const sceneIso = u.current_status==='OS' ? u.last_assigned_at : '';
     const callAcc = u.accumulated_call_seconds || 0;
@@ -763,22 +1046,65 @@ function renderUnits(){
     const shiftIso = u.in_service_at || '';
     const staleClass = u.offline ? 'bg-slate-900 text-slate-500' : u.stale ? 'bg-orange-950 text-orange-400' : '';
     const staleText = u.offline ? ' (Offline)' : u.stale ? ' (Stale)' : '';
-    return `<tr class='${unitClass(u.current_status)} ${state.selectedUnit===u.id?'selected':''}' onclick='selectUnit(${u.id})'>
+    const dispatchable = u.current_incident_id || ['AQ','AFR','POSTING','STAGED','AT_STATION','AVAILABLE_ON_RADIO','IN_SERVICE','ON_DUTY'].includes(u.current_status);
+    const canDrag = dispatchable && !u.offline;
+    const crew = state.personnel.filter(p=>p.current_unit_id===u.id);
+    const crewHtml = crew.length ? `<div class='flex -space-x-1 overflow-hidden'>${crew.map(p=>p.photo_url ? `<img src='${p.photo_url}' class='inline-block h-5 w-5 rounded-full ring-1 ring-slate-700' title='${p.first_name||''} ${p.last_name||''}${p.provider_level?' ('+p.provider_level+')':''}'>` : `<div class='inline-block h-5 w-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center ring-1 ring-slate-700' title='${p.first_name||''} ${p.last_name||''}${p.provider_level?' ('+p.provider_level+')':''}'>${(p.first_name?.[0]||'')}${(p.last_name?.[0]||'')}</div>`).join('')}</div>` : '-';
+    return `<tr class='${unitClass(u.current_status)} ${state.selectedUnit===u.id?'selected':''}' ${canDrag ? "draggable='true' ondragstart='unitDragStart(event,\"" + u.id + "\")' ondragend='unitDragEnd(event)'" : ''} onclick='selectUnit(${u.id})'>
       <td class='font-bold'>${u.call_sign}</td>
       <td>${a.agency_type ? a.agency_type.toUpperCase() : '-'}</td>
-      <td class='${staleClass}'>${statusLabel(u.current_status)}${staleText}</td>
+      <td class='${staleClass}'>${statusLabelByType(a.agency_type,u.current_status)}${staleText}</td>
+      <td class='text-xs'>${crewHtml}</td>
       <td>${inc}</td>
       <td class='timer' data-fallback='-' data-iso='${availIso||''}'>-</td>
       <td class='timer' data-fallback='-' data-iso='${sceneIso||''}'>-</td>
       <td class='timer' data-fallback='-' data-acc='${callAcc}' data-iso='${callIso||''}'>-</td>
       <td class='timer' data-fallback='-' data-iso='${shiftIso||''}'>-</td>
-      <td onclick='event.stopPropagation()'><select id='uStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onclick='event.stopPropagation()' onchange='event.stopPropagation()'>${unitStatusOptions(a.agency_type, a.id, u.current_status)}</select><button class='ml-1 bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();setUnitStatus(${u.id})'>Set</button></td>
+      <td onclick='event.stopPropagation()'><select id='uStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitStatusChanged(${u.id})'>${unitStatusOptions(a.agency_type, a.id, u.current_status)}</select><select id='uDest_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 hidden' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitStatusChanged(${u.id})'>${getTransportDestinationOptions(a.id, a.agency_type)}</select><input id='uDestOther_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-24 hidden' placeholder='Destination' onclick='event.stopPropagation()'><input id='uMile_${u.id}' type='number' step='0.1' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-16 hidden' placeholder='Miles' onclick='event.stopPropagation()'><button class='ml-1 bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();setUnitStatus(${u.id})'>Set</button><button class='ml-1 bg-indigo-700 hover:bg-indigo-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();openCrewModal(${u.id})'>Crew</button></td>
     </tr>`;
   }).join('');
-  const html = rows ? `<table class='tbl'><thead><tr><th>Unit</th><th>Type</th><th>Status</th><th>Call</th><th>Avail</th><th>Scene</th><th>Call T</th><th>Shift</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class=\'p-2 text-slate-500\'>No units</div>';
+  const html = rows ? `<table class='tbl'><thead><tr><th>Unit</th><th>Type</th><th>Status</th><th>Crew</th><th>Call</th><th>Avail</th><th>Scene</th><th>Call T</th><th>Shift</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class=\'p-2 text-slate-500\'>No units</div>';
   const el = document.getElementById('unitList');
   if(state.lastUnitsHtml !== html){ state.lastUnitsHtml = html; el.innerHTML = html; updateTimers(); }
 }
+
+window.closeCrewModal = function(){
+  document.getElementById('crewModal').classList.add('hidden');
+  document.getElementById('crewModal').classList.remove('flex');
+};
+window.openCrewModal = function(unitId){
+  const unit = state.units.find(u=>u.id===unitId);
+  const agency = state.agencyMap[unit?.agency_id] || {};
+  const type = agency.agency_type || 'fire';
+  state.crewModalUnit = unitId;
+  document.getElementById('crewModalTitle').textContent = `Assign Crew to ${unit?.call_sign || 'Unit'}`;
+  const assignedIds = new Set((state.personnel||[]).filter(p=>p.current_unit_id===unitId).map(p=>p.id));
+  const opts = (state.personnel||[]).filter(p=>p.agency_id===unit.agency_id).map(p=>{
+    const checked = assignedIds.has(p.id) ? 'checked' : '';
+    const photo = p.photo_url ? `<img src='${p.photo_url}' class='h-8 w-8 rounded-full object-cover border border-slate-600' alt=''>` : `<div class='h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center text-xs'>${(p.first_name?.[0]||'')}${(p.last_name?.[0]||'')}</div>`;
+    const badge = p.provider_level ? `<span class='ml-2 px-1.5 rounded bg-cyan-900 text-cyan-200 text-[10px]'>${p.provider_level}</span>` : '';
+    return `<label class='flex items-center gap-2 bg-slate-900 p-2 rounded cursor-pointer'><input type='checkbox' class='crew-check w-4 h-4 accent-blue-500' value='${p.id}' ${checked}>${photo}<div class='flex-1'><div class='text-sm font-semibold'>${p.first_name||''} ${p.last_name||''}</div><div class='text-[10px] text-slate-400'>${p.duty_status||'off_duty'}${badge}</div></div></label>`;
+  }).join('');
+  document.getElementById('crewListContainer').innerHTML = opts || '<div class="text-slate-500 text-sm">No personnel for this agency</div>';
+  document.getElementById('crewDutyStatus').value = 'on_duty';
+  document.getElementById('crewUnitStatus').value = '';
+  document.getElementById('crewModal').classList.remove('hidden');
+  document.getElementById('crewModal').classList.add('flex');
+};
+window.saveCrew = async function(){
+  if(!state.crewModalUnit) return;
+  const checked = [...document.querySelectorAll('#crewListContainer .crew-check:checked')].map(cb=>parseInt(cb.value));
+  const dutyStatus = document.getElementById('crewDutyStatus').value;
+  const unitStatus = document.getElementById('crewUnitStatus').value;
+  const body = {personnel_ids: checked, duty_status: dutyStatus};
+  if(unitStatus) body.status_code = unitStatus;
+  try {
+    await api(`/units/${state.crewModalUnit}/staff`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    closeCrewModal();
+    await load();
+    log(`Crew updated for unit ${state.crewModalUnit}`);
+  } catch(e){ alert('Crew update error: '+e.message); }
+};
 
 function updateTimers(){
   // SLA / elapsed timers on active calls
@@ -805,30 +1131,69 @@ function updateTimers(){
 }
 
 function unitStatusOptions(type, agencyId, selectedCode=''){
-  // Build options from customer config if available, otherwise defaults.
   const cfg = (state.configs && state.configs[agencyId]) || {};
   const custom = cfg.statuses;
   const features = getAgencyFeatures(agencyId);
   const showTransport = features.transport !== false;
-  let codes;
+  let list = [];
   if(custom && custom.length){
-    codes = custom.map(s=>s.code);
+    list = custom.map(s=>typeof s === 'string' ? {code:s, label:statusLabel(s)} : s);
   } else {
-    const police = ['AQ','AK','ER','OS','TR','CAN','LUN','AFR'];
-    const fire = showTransport
-      ? ['AQ','AK','ER','OS','WATER','EXT','OVER','TR','CAN','LUN','OOS','AFR','MAINT']
-      : ['AQ','AK','ER','OS','WATER','EXT','OVER','CAN','LUN','OOS','AFR','MAINT'];
-    const ems = showTransport
-      ? ['AQ','AK','ER','OS','TR','DEL','CAN','NPF','AFR']
-      : ['AQ','AK','ER','OS','CAN','NPF','AFR'];
-    codes = {police,fire,ems}[type]||['AQ','AK','ER','OS','CAN'];
+    list = UNIT_STATUS_OPTIONS[type] || UNIT_STATUS_OPTIONS.ems;
   }
   if(!showTransport){
-    codes = codes.filter(c=>!['TR','ED','DEL'].includes(c));
+    list = list.filter(s=>!isTransportStatus(s.code));
   }
-  return `<option value=''>Set...</option>` + codes.map(c=>`<option value='${c}' ${c===selectedCode?'selected':''}>${statusLabel(c)}</option>`).join('');
+  // Ensure EMS units always have the Arrived at Destination option
+  if((type==='ems' || !UNIT_STATUS_OPTIONS[type]) && !list.find(s=>s.code==='AD')){
+    list.push({code:'AD', label:'Arrived at Destination'});
+  }
+  return `<option value=''>Set...</option>` + list.map(s=>`<option value='${s.code}' ${s.code===selectedCode?'selected':''}>${s.label}</option>`).join('');
 }
-window.setUnitStatus = async function(unitId){ const s = document.getElementById('uStat_'+unitId).value; if(!s) return; const u=state.units.find(x=>x.id===unitId); const inc=state.incidents.find(i=>i.id===u.current_incident_id); const path=inc ? `/incidents/${inc.id}/units/${unitId}/status` : `/units/${unitId}/status`; try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status_code:s})}); log(`Unit ${u.call_sign} set to ${statusLabel(s)}`); await load(); } catch(e){ log('Status error: '+e.message); } };
+function unitStatusChanged(unitId){
+  const s = document.getElementById('uStat_'+unitId).value;
+  const needsDest = isTransportStatus(s);
+  const needsMile = needsMileage(s);
+  const dest = document.getElementById('uDest_'+unitId);
+  const other = document.getElementById('uDestOther_'+unitId);
+  const mile = document.getElementById('uMile_'+unitId);
+  if(dest) dest.classList.toggle('hidden', !needsDest);
+  if(other) other.classList.toggle('hidden', !(needsDest && dest && dest.value==='other'));
+  if(mile) mile.classList.toggle('hidden', !needsMile);
+}
+window.setUnitStatus = async function(unitId){
+  const s = document.getElementById('uStat_'+unitId).value; if(!s) return;
+  const u=state.units.find(x=>x.id===unitId);
+  const a=state.agencyMap[u.agency_id]||{};
+  const inc=state.incidents.find(i=>i.id===u.current_incident_id);
+  const path=inc ? `/incidents/${inc.id}/units/${unitId}/status` : `/units/${unitId}/status`;
+  const needsDest = isTransportStatus(s);
+  const needsMile = needsMileage(s);
+  const body = {status_code: s};
+  if(needsDest){
+    const destEl = document.getElementById('uDest_'+unitId);
+    const otherEl = document.getElementById('uDestOther_'+unitId);
+    if(destEl && destEl.value){
+      if(destEl.value === 'other'){
+        const name = otherEl ? otherEl.value.trim() : '';
+        if(!name){ alert('Enter destination name'); return; }
+        body.destination_name = name;
+      } else {
+        body.destination_id = parseInt(destEl.value);
+      }
+    }
+    if(!body.destination_id && !body.destination_name){
+      if(a.agency_type === 'police'){ if(!confirm('No destination selected. Continue without destination?')) return; }
+      else { alert('Select a destination for transport'); return; }
+    }
+  }
+  if(needsMile){
+    const mileEl = document.getElementById('uMile_'+unitId);
+    if(mileEl && mileEl.value) body.mileage = parseFloat(mileEl.value);
+    else { alert('Enter mileage for this status'); return; }
+  }
+  try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); log(`Unit ${u.call_sign} set to ${statusLabelByType(a.agency_type, s)}`); await load(); } catch(e){ log('Status error: '+e.message); }
+};
 
 async function selectUnit(id){ state.selectedUnit=id; await loadTrails(id); renderUnits(); renderMap(); }
 
@@ -842,44 +1207,94 @@ async function loadTrails(unitId){
 
 function renderMap(){
   if(!map) initMap();
-  layers.units.clearLayers(); layers.incidents.clearLayers(); layers.trails.clearLayers(); layers.critical.clearLayers(); layers.serviceAreas.clearLayers();
+  if(!state.mapMarkers) state.mapMarkers = {units:{}, incidents:{}, critical:{}, serviceAreas:[]};
+  if(!state.mapFitDone) state.mapFitDone = false;
   let bounds=L.latLngBounds([]);
-  const a=state.incidents.find(i=>i.id===state.selectedIncident);
-  // Service areas
-  (state.postZones || []).forEach(z=>{
-    if(!z.geojson) return;
-    try{
-      const c = z.color || serviceAreaColor(z.zone_type);
-      const gj = L.geoJSON(z.geojson, {style:{color:c, fillColor:c, fillOpacity:0.1, weight:2}}).addTo(layers.serviceAreas);
-      gj.bindPopup(`<b>${z.name}</b><br>${z.zone_type}`);
-      if(gj.getBounds && gj.getBounds().isValid()) bounds.extend(gj.getBounds());
-    }catch(e){}
-  });
+  const selectedIncident=state.selectedIncident;
+  const a=state.incidents.find(i=>i.id===selectedIncident);
+  // Service areas - draw once and keep
+  if(!state.mapMarkers.serviceAreas.length){
+    (state.postZones || []).forEach(z=>{
+      if(!z.geojson) return;
+      try{
+        const c = z.color || serviceAreaColor(z.zone_type);
+        const gj = L.geoJSON(z.geojson, {style:{color:c, fillColor:c, fillOpacity:0.1, weight:2}}).addTo(layers.serviceAreas);
+        gj.bindPopup(`<b>${z.name}</b><br>${z.zone_type}`);
+        if(gj.getBounds && gj.getBounds().isValid()) bounds.extend(gj.getBounds());
+      }catch(e){}
+    });
+  }
   function unitColor(u){
     if(u.offline) return '#334155';
     if(u.stale) return '#f97316';
     return u.current_status==='OS' ? '#ef4444' : u.current_status==='AQ' ? '#22c55e' : '#eab308';
   }
+  // Update or create unit markers without clearing the whole layer
+  if(!state.mapMarkers.units) state.mapMarkers.units={};
+  const seenUnitIds=new Set();
   state.units.forEach(u=>{
     if(u.lat==null || u.lng==null) return;
-    const col = unitColor(u);
-    const m = L.circleMarker([u.lat,u.lng],{radius:6,color:col,fillColor:col,fillOpacity:0.9,weight:2}).addTo(layers.units);
+    seenUnitIds.add(u.id);
+    const col=unitColor(u);
     const last=u.last_seen_at?new Date(u.last_seen_at).toLocaleTimeString():'unknown';
     const stateLabel=u.offline?'Offline':u.stale?'Stale':statusLabel(u.current_status);
-    m.bindPopup(`<b>${u.call_sign}</b><br>${stateLabel}<br><span class='text-slate-400'>Last seen: ${last}</span><br>${u.speed!=null?u.speed+' mph • ':''}${u.heading!=null?u.heading+'°<br>':''}${state.agencyMap[u.agency_id]?.name||''}`);
-    if(state.selectedUnit===u.id) m.openPopup();
+    const content=`<b>${u.call_sign}</b><br>${stateLabel}<br><span class='text-slate-400'>Last seen: ${last}</span><br>${u.speed!=null?u.speed+' mph • ':''}${u.heading!=null?u.heading+'°<br>':''}${state.agencyMap[u.agency_id]?.name||''}`;
+    let m=state.mapMarkers.units[u.id];
+    if(m){
+      m.setLatLng([u.lat,u.lng]);
+      m.setStyle({color:col, fillColor:col, fillOpacity:0.9, weight:2});
+      m.setPopupContent(content);
+    } else {
+      m=L.circleMarker([u.lat,u.lng],{radius:6,color:col,fillColor:col,fillOpacity:0.9,weight:2}).addTo(layers.units);
+      m.bindPopup(content);
+      state.mapMarkers.units[u.id]=m;
+    }
+    if(state.selectedUnit===u.id){ m.openPopup(); } else { m.closePopup(); }
     bounds.extend([u.lat,u.lng]);
   });
+  // Remove unit markers that are no longer present
+  Object.keys(state.mapMarkers.units).forEach(kid=>{
+    const id=parseInt(kid);
+    if(!seenUnitIds.has(id)){
+      layers.units.removeLayer(state.mapMarkers.units[id]);
+      delete state.mapMarkers.units[id];
+    }
+  });
+  // Update or create incident markers without clearing the whole layer
+  if(!state.mapMarkers.incidents) state.mapMarkers.incidents={};
+  const seenIncIds=new Set();
   state.incidents.forEach(i=>{
     const ag = state.agencyMap[i.agency_id]||{};
-    const lat = i.lat!=null ? i.lat : (i.id===state.selectedIncident ? ag.lat : null);
-    const lng = i.lng!=null ? i.lng : (i.id===state.selectedIncident ? ag.lng : null);
+    const lat = i.lat!=null ? i.lat : (i.id===selectedIncident ? ag.lat : null);
+    const lng = i.lng!=null ? i.lng : (i.id===selectedIncident ? ag.lng : null);
     if(lat==null || lng==null) return;
+    seenIncIds.add(i.id);
     const col = i.status==='closed' ? '#64748b' : i.priority===1 ? '#ef4444' : i.priority===2 ? '#f97316' : '#eab308';
-    const m = L.circleMarker([lat,lng],{radius:8,color:col,fillColor:col,fillOpacity:0.6,weight:2}).addTo(layers.incidents);
-    m.bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${i.location_text||''}${(i.lat==null)?'<br><span class="text-slate-400">(agency location)</span>':''}`);
+    const isSel = i.id===selectedIncident;
+    const content=`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${i.location_text||''}${(i.lat==null)?'<br><span class="text-slate-400">(agency location)</span>':''}`;
+    let m=state.mapMarkers.incidents[i.id];
+    if(m){
+      m.setLatLng([lat,lng]);
+      m.setStyle({color:col, fillColor:col, fillOpacity:isSel?0.9:0.6, radius:isSel?12:8, weight:2});
+      m.setPopupContent(content);
+    } else {
+      m=L.circleMarker([lat,lng],{radius:isSel?12:8,color:col,fillColor:col,fillOpacity:isSel?0.9:0.6,weight:2}).addTo(layers.incidents);
+      m.bindPopup(content);
+      state.mapMarkers.incidents[i.id]=m;
+    }
+    if(isSel){ m.openPopup(); } else { m.closePopup(); }
     bounds.extend([lat,lng]);
   });
+  // Remove incident markers that are no longer present
+  Object.keys(state.mapMarkers.incidents).forEach(kid=>{
+    const id=parseInt(kid);
+    if(!seenIncIds.has(id)){
+      layers.incidents.removeLayer(state.mapMarkers.incidents[id]);
+      delete state.mapMarkers.incidents[id];
+    }
+  });
+  // Trails - clear and redraw because the polyline is cheap to recreate
+  layers.trails.clearLayers();
   if(state.showTrails && state.selectedUnit && state.trails[state.selectedUnit] && state.trails[state.selectedUnit].length){
     const pts = state.trails[state.selectedUnit].map(p=>[p.lat,p.lng]);
     L.polyline(pts,{color:'#3b82f6', opacity:0.7, weight:2}).addTo(layers.trails);
@@ -887,6 +1302,8 @@ function renderMap(){
     const last = pts[pts.length-1];
     L.circleMarker(last,{radius:4, color:'#3b82f6', fillColor:'#3b82f6', fillOpacity:1}).addTo(layers.trails);
   }
+  // Critical layers - clear and redraw on each render to honor toggle
+  layers.critical.clearLayers();
   if(state.showCritical){
     state.mapLayers.filter(c=>c.lat!=null && c.lng!=null).forEach(c=>{
       const col = c.type==='hydrant' ? '#0ea5e9' : c.type==='hospital' ? '#ef4444' : '#22c55e';
@@ -895,36 +1312,31 @@ function renderMap(){
       bounds.extend([c.lat,c.lng]);
     });
   }
-  if(bounds.isValid()){
-    map.fitBounds(bounds,{padding:[20,20],maxZoom:16});
-  } else if(a && a.lat!=null && a.lng!=null){
-    map.setView([a.lat,a.lng], 14);
-  } else {
-    // Fall back to primary/secondary service area if defined
-    let zoneBounds = L.latLngBounds([]);
-    (state.postZones || []).forEach(z=>{
-      if(!z.geojson) return;
-      try{
-        const gl = L.geoJSON(z.geojson);
-        if(gl.getBounds && gl.getBounds().isValid()) zoneBounds.extend(gl.getBounds());
-      }catch(e){}
-    });
-    if(zoneBounds.isValid()){
-      map.fitBounds(zoneBounds,{padding:[20,20],maxZoom:14});
+  // Fit bounds only on the first render (initial load)
+  if(!state.mapFitDone){
+    if(bounds.isValid()){
+      map.fitBounds(bounds,{padding:[20,20],maxZoom:16});
+    } else if(a && a.lat!=null && a.lng!=null){
+      map.setView([a.lat,a.lng], 14);
     } else {
-      const am = state.agencies.find(ag=>ag.id===state.units[0]?.agency_id) || state.agencies[0];
-      if(am && am.lat!=null && am.lng!=null) map.setView([am.lat,am.lng], 11);
-      else map.setView(DEFAULT_CENTER, 11);
+      // Fall back to primary/secondary service area if defined
+      let zoneBounds = L.latLngBounds([]);
+      (state.postZones || []).forEach(z=>{
+        if(!z.geojson) return;
+        try{
+          const gl = L.geoJSON(z.geojson);
+          if(gl.getBounds && gl.getBounds().isValid()) zoneBounds.extend(gl.getBounds());
+        }catch(e){}
+      });
+      if(zoneBounds.isValid()){
+        map.fitBounds(zoneBounds,{padding:[20,20],maxZoom:14});
+      } else {
+        const am = state.agencies.find(ag=>ag.id===state.units[0]?.agency_id) || state.agencies[0];
+        if(am && am.lat!=null && am.lng!=null) map.setView([am.lat,am.lng], 11);
+        else map.setView(DEFAULT_CENTER, 11);
+      }
     }
-  }
-  if(a){
-    const ag = state.agencyMap[a.agency_id]||{};
-    const lat = a.lat!=null ? a.lat : ag.lat;
-    const lng = a.lng!=null ? a.lng : ag.lng;
-    if(lat!=null && lng!=null){
-      map.setView([lat,lng], 16, {animate:false});
-      layers.incidents.getLayers().forEach(m=>{ if(m.getPopup().getContent().includes(a.call_number||a.incident_number)){ m.openPopup(); m.setStyle({radius:12, fillOpacity:0.9}); } });
-    }
+    state.mapFitDone = true;
   }
 }
 
@@ -961,7 +1373,7 @@ async function loadConfigs(){
 
 async function load(){
   try {
-    const [agencies, units, incidents, messages, configs, postZones, personnel] = await Promise.all([api('/agencies'), api('/units'), api('/incidents'), api('/messages'), loadConfigs(), api('/post-zones'), api('/personnel')]);
+    const [agencies, units, incidents, messages, configs, postZones, personnel, _dests] = await Promise.all([api('/agencies'), api('/units'), api('/incidents'), api('/messages'), loadConfigs(), api('/post-zones'), api('/personnel'), loadAllDestinations()]);
     state.agencies = agencies; state.units = units; state.incidents = incidents; state.messages = messages; state.configs = configs; state.postZones = postZones; state.personnel = personnel;
     state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
     const mapConfig = await api('/config?category=map_layers');
@@ -984,7 +1396,7 @@ async function load(){
     renderCallFilters(); renderCalls(); renderUnits(); renderMap(); renderMessages();
     if(state.selectedIncident){ selectIncident(state.selectedIncident); }
     await loadAlerts();
-  } catch(e){ log('Load error: '+e.message); }
+  } catch(e){ log('Load error: '+e.message); const el=document.getElementById('callList'); if(el) el.innerHTML = '<div class="p-2 text-red-400">Load error: '+(e.message||e)+'</div>'; }
 }
 
 function updateClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
@@ -1024,13 +1436,12 @@ function startStream(){
   es.onerror = () => { es.close(); setTimeout(startStream, 5000); };
 }
 
-initLayout();
-initMap();
-load();
-startStream();
-updateClock(); setInterval(updateClock,1000);
-
 (async function(){
+  await initLayout();
+  initMap();
+  await load();
+  startStream();
+  updateClock(); setInterval(updateClock,1000);
   try {
     const me = await api('/me');
     if(me.role !== 'dispatcher'){
@@ -1038,10 +1449,79 @@ updateClock(); setInterval(updateClock,1000);
       if(dash) dash.classList.remove('hidden');
     }
   } catch(e){}
+  window.addEventListener('resize', ()=>{ if(map) map.invalidateSize(); });
+  setInterval(()=>{ if(document.getElementById('liveToggle').checked && !isUserInteracting()) load(); },10000);
+  setInterval(updateTimers,1000);
+  // Allow dragging a unit onto the selected incident workspace
+  const incidentPanel = document.getElementById('incidentPanel');
+  if(incidentPanel){
+    let dropCount = 0;
+    incidentPanel.addEventListener('dragenter', e=>{
+      e.preventDefault();
+      if(++dropCount === 1) incidentPanel.classList.add('drop-target');
+    });
+    incidentPanel.addEventListener('dragleave', e=>{
+      if(--dropCount <= 0){ dropCount = 0; incidentPanel.classList.remove('drop-target'); }
+    });
+    incidentPanel.addEventListener('dragover', e=>{
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    });
+    incidentPanel.addEventListener('drop', async e=>{
+      e.preventDefault();
+      dropCount = 0;
+      incidentPanel.classList.remove('drop-target');
+      const unitId = e.dataTransfer.getData('text/plain');
+      const incidentId = state.selectedIncident;
+      if(!unitId || !incidentId) return;
+      try {
+        await api(`/incidents/${incidentId}/dispatch/${unitId}?reassign=1`, {method:'POST'});
+        log(`Dispatched unit to call ${incidentId}`);
+        await selectIncident(incidentId);
+        await load();
+      } catch(err){ log('Panel dispatch error: '+err.message); }
+    });
+  }
 })();
-window.addEventListener('resize', ()=>{ if(map) map.invalidateSize(); });
-setInterval(()=>{ if(document.getElementById('liveToggle').checked && !isUserInteracting()) load(); },10000);
-setInterval(updateTimers,1000);
 </script>
+
+<div id='crewModal' class='fixed inset-0 bg-slate-950/80 hidden items-center justify-center z-50' onclick='if(event.target===this) closeCrewModal()'>
+  <div class='bg-slate-800 border border-slate-600 rounded-lg p-4 w-full max-w-2xl max-h-[85vh] flex flex-col'>
+    <div class='flex justify-between items-center mb-2'>
+      <h3 class='font-bold' id='crewModalTitle'>Assign Crew</h3>
+      <button class='text-slate-400 hover:text-white' onclick='closeCrewModal()'>&times;</button>
+    </div>
+    <div class='overflow-y-auto flex-1'>
+      <p class='text-xs text-slate-400 mb-2'>Select crew and set their duty status. Optionally set unit status.</p>
+      <div class='grid grid-cols-2 gap-2 mb-3'>
+        <div>
+          <label class='text-xs text-slate-300 block mb-1'>Crew Duty Status</label>
+          <select id='crewDutyStatus' class='w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm'>
+            <option value='on_duty'>On Duty</option>
+            <option value='in_service'>In Service</option>
+            <option value='off_duty'>Off Duty</option>
+            <option value='available'>Available</option>
+          </select>
+        </div>
+        <div>
+          <label class='text-xs text-slate-300 block mb-1'>Unit Status</label>
+          <select id='crewUnitStatus' class='w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm'>
+            <option value=''>No change</option>
+            <option value='IN_SERVICE'>In Service</option>
+            <option value='ON_DUTY'>On Duty</option>
+            <option value='AQ'>Available</option>
+            <option value='OFF_DUTY'>Off Duty</option>
+          </select>
+        </div>
+      </div>
+      <div id='crewListContainer' class='space-y-1 max-h-64 overflow-y-auto'></div>
+    </div>
+    <div class='mt-3 flex justify-end gap-2'>
+      <button class='bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-sm' onclick='closeCrewModal()'>Cancel</button>
+      <button class='bg-blue-700 hover:bg-blue-600 px-3 py-1 rounded text-sm' onclick='saveCrew()'>Save</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

@@ -85,7 +85,10 @@ th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
           <input id='dLat' placeholder='Lat' type='number' step='any'>
           <input id='dLng' placeholder='Lng' type='number' step='any'>
           <input id='dCategory' placeholder='Category'>
-          <div class='flex gap-2'>
+          <input id='dDoor' placeholder='Door Code'>
+          <input id='dPhone' placeholder='Phone'>
+          <textarea id='dNotes' placeholder='Notes' rows='2' class='sm:col-span-3'></textarea>
+          <div class='flex gap-2 sm:col-span-3'>
             <button id='dSubmit' class='btn btn-primary text-white flex-1'>Add Location</button>
             <button type='button' id='dCancel' class='btn bg-slate-700 hover:bg-slate-600 text-white hidden' onclick='resetDestForm()'>Cancel</button>
           </div>
@@ -255,7 +258,7 @@ document.getElementById('unitTypeForm').addEventListener('submit', async e=>{
 
 async function loadDestinations(){
   const list = await api(`/destinations?agency_id=${state.agency_id}`);
-  document.getElementById('destList').innerHTML = list.length ? `<table><thead><tr><th>Name</th><th>Address</th><th>Category</th><th></th></tr></thead><tbody>${list.map(d=>`<tr><td>${d.name}</td><td>${d.address||'-'}</td><td>${d.category||'-'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editDestination(${JSON.stringify(d).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deleteDestination(${d.id})'>Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No saved locations.</div>';
+  document.getElementById('destList').innerHTML = list.length ? `<table><thead><tr><th>Name</th><th>Address</th><th>Category</th><th>Phone</th><th>Door</th><th>Notes</th><th></th></tr></thead><tbody>${list.map(d=>{ const det=d.details||{}; return `<tr><td>${d.name}</td><td>${d.address||'-'}</td><td>${d.category||'-'}</td><td>${det.phone||'-'}</td><td>${det.door_code||'-'}</td><td>${det.notes||'-'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editDestination(${JSON.stringify(d).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deleteDestination(${d.id})'>Delete</button></td></tr>`}).join('')}</tbody></table>` : '<div class="text-slate-500">No saved locations.</div>';
 }
 
 function resetDestForm(){
@@ -266,12 +269,16 @@ function resetDestForm(){
 }
 
 function editDestination(d){
+  const details = d.details || {};
   document.getElementById('dId').value=d.id;
   document.getElementById('dName').value=d.name;
   document.getElementById('dAddress').value=d.address||'';
   document.getElementById('dLat').value=d.lat||'';
   document.getElementById('dLng').value=d.lng||'';
   document.getElementById('dCategory').value=d.category||'';
+  document.getElementById('dDoor').value=details.door_code||'';
+  document.getElementById('dPhone').value=details.phone||'';
+  document.getElementById('dNotes').value=details.notes||'';
   document.getElementById('destFormTitle').textContent='Edit Location';
   document.getElementById('dSubmit').textContent='Update Location';
   document.getElementById('dCancel').classList.remove('hidden');
@@ -290,7 +297,12 @@ document.getElementById('destForm').addEventListener('submit', async e=>{
     address: document.getElementById('dAddress').value,
     lat: parseFloat(document.getElementById('dLat').value) || null,
     lng: parseFloat(document.getElementById('dLng').value) || null,
-    category: document.getElementById('dCategory').value
+    category: document.getElementById('dCategory').value,
+    details: {
+      door_code: document.getElementById('dDoor').value || null,
+      phone: document.getElementById('dPhone').value || null,
+      notes: document.getElementById('dNotes').value || null
+    }
   };
   const id = document.getElementById('dId').value;
   try {

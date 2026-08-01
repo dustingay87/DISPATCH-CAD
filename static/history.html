@@ -3,12 +3,14 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D Call History</title>
+<title>D2D Unified Response - Call History</title>
+<link rel='icon' href='/static/d2d-logo.svg' type='image/svg+xml'>
 <script src='https://cdn.tailwindcss.com'></script>
+<link rel='stylesheet' href='/static/branding.css'>
 <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
 <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' crossorigin=''></script>
 <style>
-  html,body { height:100%; margin:0; font-family: ui-sans-serif, system-ui, sans-serif; }
+  html,body { height:100%; margin:0; font-family: 'Inter', system-ui, sans-serif; }
   .priority-1 { border-left:6px solid #ef4444; }
   .priority-2 { border-left:6px solid #f97316; }
   .priority-3 { border-left:6px solid #eab308; }
@@ -19,9 +21,13 @@
   #map { height:300px; background:#0f172a; border-radius:0.5rem; }
 </style>
 </head>
-<body class='bg-slate-900 text-slate-200 h-screen flex flex-col'>
-  <header class='h-16 bg-slate-950 border-b border-slate-700 flex items-center justify-between px-4 shrink-0'>
-    <div class='text-xl font-bold text-white'>D2D <span class='text-slate-500 font-normal text-base ml-2'>Call History</span></div>
+<body class='bg-slate-900 text-slate-200 h-screen flex flex-col d2d-font-body'>
+  <header class='h-16 d2d-header flex items-center justify-between px-4 shrink-0'>
+    <div class='flex items-center gap-2'>
+      <img src='/static/d2d-logo.svg' class='h-8 w-8' alt='D2D'>
+      <span class='text-xl d2d-logo-text text-white'>D2D Unified Response</span>
+      <span class='text-slate-400 font-normal text-base ml-2'>Call History</span>
+    </div>
     <a href='/' class='bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded'>Console</a>
   </header>
   <div class='flex-1 flex overflow-hidden'>
@@ -104,6 +110,18 @@ function renderResults(incidents){
 }
 function priorityClass(p){ return `priority-${Math.min(Math.max(p||2,1),4)}`; }
 
+function renderExtraDetail(extra, discipline){
+  if(!extra || typeof extra !== 'object') return '';
+  const labels = { crime_type:'Crime Type', weapon:'Weapon', in_progress:'In Progress', suspect_count:'# Suspects', victim_count:'# Victims', suspect_desc:'Suspect Description', safety_notes:'Officer Safety Notes', smoke_color:'Smoke Color', structure_type:'Structure Type', occupancy:'Occupancy', visible_flames:'Visible Flames', hazmat:'Hazmat', exposures:'Exposures', chief_complaint:'Chief Complaint', patient_age:'Patient Age', patient_sex:'Patient Sex', consciousness:'Consciousness', breathing:'Breathing', bleeding:'Bleeding', allergies:'Allergies', medications:'Medications' };
+  const df = extra.discipline_fields;
+  let dfHtml = '';
+  if(df && Object.keys(df).length){
+    dfHtml = `<div class='col-span-3'><span class='text-slate-400 font-semibold text-sm'>Call Details</span><div class='grid grid-cols-3 gap-2 mt-1'>${Object.entries(df).map(([k,v])=>`<div><span class='text-slate-400 capitalize'>${labels[k]||k.replace(/_/g,' ')}:</span> ${v===true?'Yes':v===false?'No':v||'-'}</div>`).join('')}</div></div>`;
+  }
+  const other = Object.entries(extra).filter(([k])=>k!=='discipline_fields').map(([k,v])=>`<div><span class='text-slate-400 capitalize'>${k.replace(/_/g,' ')}:</span> ${v==null?'-':v}</div>`).join('');
+  return (dfHtml || other) ? `<div class='mt-4 grid grid-cols-3 gap-2 text-sm bg-slate-900/50 p-2 rounded'>${dfHtml}${other}</div>` : '';
+}
+
 async function loadDetail(id){
   state.selected=id;
   try {
@@ -111,7 +129,8 @@ async function loadDetail(id){
     const am=agencyMap();
     const i = incident;
     state.selectedIncident = i;
-    const extra = (i.extra && typeof i.extra==='object') ? Object.entries(i.extra).map(([k,v])=>`<div><span class='text-slate-400 capitalize'>${k}:</span> ${v}</div>`).join('') : '';
+    const discipline = am[i.agency_id]?.agency_type || 'fire';
+    const extra = renderExtraDetail(i.extra, discipline);
     const timelineHtml = buildTimeline(timeline);
     document.getElementById('detail').innerHTML = `
       <div class='bg-slate-800 rounded p-4 ${priorityClass(i.priority)}'>
@@ -120,7 +139,10 @@ async function loadDetail(id){
             <div class='text-3xl font-bold text-white'>${i.call_number||i.incident_number}</div>
             <div class='text-xl text-slate-200'>${i.call_type}</div>
           </div>
-          <div class='text-3xl font-bold'>P${i.priority}</div>
+          <div class='flex gap-2 items-start'>
+            <a target='_blank' href='/static/after_call_summary.html?incident_id=${i.id}' class='bg-blue-700 hover:bg-blue-600 px-3 py-1 rounded text-sm text-white no-underline'>Print Report</a>
+            <div class='text-3xl font-bold'>P${i.priority}</div>
+          </div>
         </div>
         <div class='grid grid-cols-3 gap-4 mt-4 text-sm'>
           <div><span class='text-slate-400'>Status:</span> ${i.status}</div>
@@ -232,6 +254,9 @@ async function loadAgencies(){
 
 function init(){
   loadAgencies();
+  const params = new URLSearchParams(window.location.search);
+  const incidentId = params.get('incident_id');
+  if(incidentId){ document.getElementById('statusFilter').value = 'closed'; }
   document.getElementById('discTabs').addEventListener('click', e=>{
     if(!e.target.classList.contains('tab')) return;
     document.querySelectorAll('#discTabs .tab').forEach(t=>t.classList.remove('active'));
@@ -241,7 +266,10 @@ function init(){
   });
   document.getElementById('agencyFilter').addEventListener('change', search);
   document.getElementById('searchBtn').addEventListener('click', search);
-  search();
+  (async()=>{
+    await search();
+    if(incidentId){ await loadDetail(parseInt(incidentId)); }
+  })();
 }
 
 init();

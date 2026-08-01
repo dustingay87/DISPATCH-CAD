@@ -76,6 +76,157 @@
           <label class='text-xs text-slate-400 uppercase'>Narrative</label>
           <textarea id='narrative' rows='4' placeholder='Initial details...'></textarea>
         </div>
+        <div class='md:col-span-2' id='disciplineFieldsBox'>
+          <label class='text-xs text-slate-400 uppercase block mb-2'>Call Details</label>
+          <div id='policeFields' class='hidden grid grid-cols-1 md:grid-cols-2 gap-4'>
+            <div>
+              <label class='text-xs text-slate-500 uppercase'>Crime Type</label>
+              <select id='p_crime_type'>
+                <option value=''>Select...</option>
+                <option value='theft'>Theft</option>
+                <option value='assault'>Assault</option>
+                <option value='domestic'>Domestic</option>
+                <option value='traffic'>Traffic</option>
+                <option value='suspicious'>Suspicious</option>
+                <option value='welfare'>Welfare Check</option>
+                <option value='noise'>Noise</option>
+                <option value='other'>Other</option>
+              </select>
+            </div>
+            <div>
+              <label class='text-xs text-slate-500 uppercase'>Weapon Involved</label>
+              <select id='p_weapon'>
+                <option value=''>Select...</option>
+                <option value='none'>None</option>
+                <option value='firearm'>Firearm</option>
+                <option value='knife'>Knife</option>
+                <option value='blunt'>Blunt Object</option>
+                <option value='other'>Other</option>
+              </select>
+            </div>
+            <div class='md:col-span-2 flex items-center gap-2'>
+              <input id='p_in_progress' type='checkbox' class='w-auto'> <label for='p_in_progress' class='text-xs text-slate-400'>Incident in progress</label>
+            </div>
+            <div>
+              <label class='text-xs text-slate-500 uppercase'># of Suspects</label>
+              <input id='p_suspect_count' type='number' min='0' placeholder='0'>
+            </div>
+            <div>
+              <label class='text-xs text-slate-500 uppercase'># of Victims</label>
+              <input id='p_victim_count' type='number' min='0' placeholder='0'>
+            </div>
+            <div class='md:col-span-2'>
+              <label class='text-xs text-slate-500 uppercase'>Suspect Description</label>
+              <textarea id='p_suspect_desc' rows='2' placeholder='Clothing, height, direction of travel...'></textarea>
+            </div>
+            <div class='md:col-span-2'>
+              <label class='text-xs text-slate-500 uppercase'>Officer Safety Notes</label>
+              <textarea id='p_safety_notes' rows='2' placeholder='Weapons, hazards, known subjects...'></textarea>
+            </div>
+          </div>
+          <div id='fireFields' class='hidden grid grid-cols-1 md:grid-cols-2 gap-4'>
+            <div>
+              <label class='text-xs text-slate-500 uppercase'>Smoke Color</label>
+              <select id='f_smoke_color'>
+                <option value=''>Select...</option>
+                <option value='none'>None</option>
+                <option value='white'>White</option>
+                <option value='gray'>Gray</option>
+                <option value='black'>Black</option>
+                <option value='brown'>Brown</option>
+              </select>
+            </div>
+            <div>
+              <label class='text-xs text-slate-500 uppercase'>Structure Type</label>
+              <select id='f_structure_type'>
+                <option value=''>Select...</option>
+                <option value='residential'>Residential</option>
+                <option value='commercial'>Commercial</option>
+                <option value='industrial'>Industrial</option>
+                <option value='vehicle'>Vehicle</option>
+                <option value='wildland'>Wildland</option>
+                <option value='other'>Other</option>
+              </select>
+            </div>
+            <div>
+              <label class='text-xs text-slate-500 uppercase'>Occupancy Status</label>
+              <select id='f_occupancy'>
+                <option value=''>Select...</option>
+                <option value='occupied'>Occupied</option>
+                <option value='vacant'>Vacant</option>
+                <option value='unknown'>Unknown</option>
+              </select>
+            </div>
+            <div class='flex flex-col gap-2'>
+              <div class='flex items-center gap-2'>
+                <input id='f_visible_flames' type='checkbox' class='w-auto'> <label for='f_visible_flames' class='text-xs text-slate-400'>Visible flames</label>
+              </div>
+              <div class='flex items-center gap-2'>
+                <input id='f_hazmat' type='checkbox' class='w-auto'> <label for='f_hazmat' class='text-xs text-slate-400'>Hazmat involved</label>
+              </div>
+            </div>
+            <div class='md:col-span-2'>
+              <label class='text-xs text-slate-500 uppercase'>Exposures / Additional Structures</label>
+              <textarea id='f_exposures' rows='2' placeholder='Adjoining buildings, vehicles, vegetation...'></textarea>
+            </div>
+          </div>
+          <div id='emsFields' class='hidden grid grid-cols-1 md:grid-cols-2 gap-4'>
+            <div class='md:col-span-2'>
+              <label class='text-xs text-slate-500 uppercase'>Chief Complaint</label>
+              <select id='e_chief_complaint'>
+                <option value=''>Select...</option>
+                <option value='cardiac_arrest'>Cardiac Arrest</option>
+                <option value='chest_pain'>Chest Pain</option>
+                <option value='respiratory'>Respiratory</option>
+                <option value='fall'>Fall</option>
+                <option value='mva'>Motor Vehicle Accident</option>
+                <option value='overdose'>Overdose</option>
+                <option value='seizure'>Seizure</option>
+                <option value='unconscious'>Unconscious</option>
+                <option value='psychiatric'>Psychiatric</option>
+                <option value='trauma'>Trauma</option>
+                <option value='other'>Other</option>
+              </select>
+            </div>
+            <div>
+              <label class='text-xs text-slate-500 uppercase'>Patient Age</label>
+              <input id='e_patient_age' type='number' min='0' placeholder='Years'>
+            </div>
+            <div>
+              <label class='text-xs text-slate-500 uppercase'>Patient Sex</label>
+              <select id='e_patient_sex'>
+                <option value=''>Select...</option>
+                <option value='male'>Male</option>
+                <option value='female'>Female</option>
+                <option value='unknown'>Unknown</option>
+              </select>
+            </div>
+            <div>
+              <label class='text-xs text-slate-500 uppercase'>Consciousness</label>
+              <select id='e_consciousness'>
+                <option value=''>Select...</option>
+                <option value='alert'>Alert</option>
+                <option value='verbal'>Verbal</option>
+                <option value='pain'>Pain</option>
+                <option value='unresponsive'>Unresponsive</option>
+              </select>
+            </div>
+            <div>
+              <label class='text-xs text-slate-500 uppercase'>Breathing</label>
+              <select id='e_breathing'>
+                <option value=''>Select...</option>
+                <option value='normal'>Normal</option>
+                <option value='difficult'>Difficult</option>
+                <option value='absent'>Absent</option>
+              </select>
+            </div>
+            <div class='md:col-span-2 flex flex-wrap gap-4'>
+              <div class='flex items-center gap-2'>
+                <input id='e_bleeding' type='checkbox' class='w-auto'> <label for='e_bleeding' class='text-xs text-slate-400'>Bleeding</label>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class='md:col-span-2'>
           <label class='text-xs text-slate-400 uppercase block mb-1'>Response Goals</label>
           <div id='responseGoals' class='text-xs text-slate-400'></div>
@@ -96,7 +247,18 @@
   </div>
 
 <script>
-function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+function api(path, opts={}){
+  return fetch(path, {...opts, credentials:'include'}).then(async r=>{
+    if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); }
+    if(!r.ok){
+      const text = await r.text();
+      let msg = text;
+      try{ const d = JSON.parse(text); if(d.detail) msg = d.detail; } catch(e){}
+      throw new Error(`${path} ${r.status}: ${msg}`);
+    }
+    return r.json();
+  });
+}
 
 let state = { agencies:[], agencyMap:{}, configs:{}, DISCIPLINE:'fire', user:null, callEntryStarted: new Date().toISOString() };
 const DEFAULT_CALL_TYPES = {
@@ -127,7 +289,7 @@ function showMsg(text, ok=true){
 function setDiscipline(d){
   state.DISCIPLINE = d;
   document.querySelectorAll('#disciplineTabs .tab').forEach(t=>{ if(!t.classList.contains('hidden')) t.classList.toggle('active', t.dataset.d===d); });
-  populateAgencies(); loadConfig(); renderResponseGoals();
+  populateAgencies(); loadConfig(); renderResponseGoals(); renderDisciplineFields();
 }
 
 function renderResponseGoals(){
@@ -178,6 +340,29 @@ function updatePriority(){
   if(p) document.getElementById('priority').value = p;
 }
 
+function renderDisciplineFields(){
+  ['police','fire','ems'].forEach(d=>{
+    document.getElementById(d+'Fields')?.classList.toggle('hidden', d !== state.DISCIPLINE);
+  });
+}
+
+function collectDisciplineFields(){
+  const out = {};
+  const ids = state.DISCIPLINE === 'police' ? ['p_crime_type','p_weapon','p_in_progress','p_suspect_count','p_victim_count','p_suspect_desc','p_safety_notes'] :
+              state.DISCIPLINE === 'fire' ? ['f_smoke_color','f_structure_type','f_occupancy','f_visible_flames','f_hazmat','f_exposures'] :
+              ['e_chief_complaint','e_patient_age','e_patient_sex','e_consciousness','e_breathing','e_bleeding'];
+  ids.forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(el.type === 'checkbox'){ if(el.checked) out[id.replace(/^(p_|f_|e_)/,'')] = true; }
+    else if(el.type === 'number' || el.tagName==='SELECT'){
+      if(el.value !== ''){ const v = el.type==='number' ? parseFloat(el.value) : el.value; out[id.replace(/^(p_|f_|e_)/,'')] = Number.isNaN(v) ? el.value : v; }
+    }
+    else if(el.value.trim()){ out[id.replace(/^(p_|f_|e_)/,'')] = el.value.trim(); }
+  });
+  return out;
+}
+
 document.getElementById('disciplineTabs').addEventListener('click', e=>{ if(e.target.classList.contains('tab')) setDiscipline(e.target.dataset.d); });
 document.getElementById('agency').addEventListener('change', loadConfig);
 document.getElementById('callType').addEventListener('change', updatePriority);
@@ -188,8 +373,10 @@ function getFormBody(status='intake'){
   const priority = parseInt(document.getElementById('priority').value);
   const lat = document.getElementById('lat').value ? parseFloat(document.getElementById('lat').value) : null;
   const lng = document.getElementById('lng').value ? parseFloat(document.getElementById('lng').value) : null;
+  const agencyId = parseInt(document.getElementById('agency').value);
+  const extra = {discipline_fields: collectDisciplineFields()};
   return {
-    agency_id: parseInt(document.getElementById('agency').value),
+    agency_id: Number.isNaN(agencyId) ? null : agencyId,
     call_type: document.getElementById('callType').value,
     priority: Number.isNaN(priority) ? 2 : priority,
     location_text: document.getElementById('location').value,
@@ -198,7 +385,8 @@ function getFormBody(status='intake'){
     narrative: document.getElementById('narrative').value,
     lat: Number.isNaN(lat) ? null : lat,
     lng: Number.isNaN(lng) ? null : lng,
-    status
+    status,
+    extra
   };
 }
 
@@ -210,12 +398,13 @@ async function createIntake(){
     document.getElementById('intakeNumber').textContent = inc.call_number || inc.incident_number;
     document.getElementById('consoleLink').href = `/console?discipline=${state.DISCIPLINE}`;
     document.getElementById('submitBtn').classList.remove('hidden');
+    document.getElementById('intakeActions').classList.remove('hidden');
   } catch(err){ showMsg(err.message, false); }
 }
 
 let saveTimer;
 async function saveIntake(){
-  if(!createdIncidentId) return;
+  if(!createdIncidentId) return true;
   const body = getFormBody('intake');
   try {
     const inc = await api(`/incidents/${createdIncidentId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
@@ -223,9 +412,12 @@ async function saveIntake(){
     const ss = document.getElementById('saveStatus');
     ss.textContent = 'Saved'; ss.classList.remove('hidden','text-red-400'); ss.classList.add('text-green-400');
     setTimeout(()=>ss.classList.add('hidden'), 1500);
+    return true;
   } catch(err){
     const ss = document.getElementById('saveStatus');
-    ss.textContent = 'Save failed'; ss.classList.remove('hidden','text-green-400'); ss.classList.add('text-red-400');
+    ss.textContent = 'Save failed: ' + err.message; ss.classList.remove('hidden','text-green-400'); ss.classList.add('text-red-400');
+    console.error(err);
+    return false;
   }
 }
 function scheduleSave(){
@@ -240,7 +432,7 @@ document.getElementById('callForm').addEventListener('change', e=>{ if(e.target.
 document.getElementById('callForm').addEventListener('submit', async e=>{
   e.preventDefault();
   if(!createdIncidentId) return;
-  await saveIntake();
+  if(!(await saveIntake())) return;
   try {
     await api(`/incidents/${createdIncidentId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:'open'})});
     window.location.href = `/console?discipline=${state.DISCIPLINE}`;
@@ -249,7 +441,7 @@ document.getElementById('callForm').addEventListener('submit', async e=>{
 
 document.getElementById('openBtn').addEventListener('click', async e=>{
   if(!createdIncidentId) return;
-  await saveIntake();
+  if(!(await saveIntake())) return;
   try {
     await api(`/incidents/${createdIncidentId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:'open'})});
     window.location.href = `/console?discipline=${state.DISCIPLINE}`;

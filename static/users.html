@@ -3,10 +3,12 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D Users</title>
+<title>D2D Unified Response - Users</title>
+<link rel='icon' href='/static/d2d-logo.svg' type='image/svg+xml'>
 <script src='https://cdn.tailwindcss.com'></script>
+<link rel='stylesheet' href='/static/branding.css'>
 <style>
-  html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
+  html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
   .card { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1rem; }
   .btn { padding:0.5rem 1rem; border-radius:0.375rem; font-size:0.875rem; }
   .btn-primary { background:#2563eb; color:#fff; }
@@ -18,10 +20,14 @@
   .hidden { display:none; }
 </style>
 </head>
-<body class='p-4'>
+<body class='p-4 d2d-font-body'>
   <div class='max-w-5xl mx-auto space-y-4'>
     <div class='flex justify-between items-center'>
-      <h1 class='text-2xl font-bold'>D2D <span class='text-slate-400 font-normal'>Users</span></h1>
+      <div class='flex items-center gap-2'>
+        <img src='/static/d2d-logo.svg' class='h-8 w-8' alt='D2D'>
+        <h1 class='text-2xl d2d-logo-text text-white'>D2D Unified Response</h1>
+        <span class='text-slate-400 font-normal'>Users</span>
+      </div>
       <div class='space-x-2'>
         <a href='/admin' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Admin</a>
         <a href='/console' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Console</a>
@@ -35,6 +41,10 @@
         <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2' id='userFormTitle'>Create User</h2>
         <form id='userForm' class='space-y-2'>
           <input type='hidden' id='editUserId'>
+          <div class='grid grid-cols-2 gap-2'>
+            <input id='uFirstName' type='text' placeholder='First name'>
+            <input id='uLastName' type='text' placeholder='Last name'>
+          </div>
           <input id='uEmail' type='email' placeholder='Email' required>
           <input id='uPassword' type='password' placeholder='Password (leave blank to keep current)'>
           <select id='uRole'>
@@ -81,14 +91,16 @@ async function loadUsers(){
   try {
     const users = await api('/users');
     const aMap = {}; state.agencies.forEach(a=>aMap[a.id]=a);
-    const rows = users.map(u=>`<tr><td>${u.id}</td><td>${u.email}</td><td>${u.role}</td><td>${u.is_active ? 'Active' : 'Inactive'}</td><td>${aMap[u.agency_id]?.name || '-'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editUser(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deleteUser(${u.id})'>Delete</button></td></tr>`).join('');
-    document.getElementById('userList').innerHTML = rows ? `<table><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>Active</th><th>Agency</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="text-slate-500">No users</div>';
+    const rows = users.map(u=>`<tr><td>${u.id}</td><td>${u.first_name || ''} ${u.last_name || ''}</td><td>${u.email}</td><td>${u.role}</td><td>${u.is_active ? 'Active' : 'Inactive'}</td><td>${aMap[u.agency_id]?.name || '-'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editUser(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deleteUser(${u.id})'>Delete</button></td></tr>`).join('');
+    document.getElementById('userList').innerHTML = rows ? `<table><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th><th>Active</th><th>Agency</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="text-slate-500">No users</div>';
   } catch(err){ showMsg(err.message, false); }
 }
 
 document.getElementById('userForm').addEventListener('submit', async e=>{
   e.preventDefault();
   const body = {
+    first_name: document.getElementById('uFirstName').value,
+    last_name: document.getElementById('uLastName').value,
     email: document.getElementById('uEmail').value,
     role: document.getElementById('uRole').value,
     agency_id: document.getElementById('uAgency').value ? parseInt(document.getElementById('uAgency').value) : null,
@@ -114,6 +126,8 @@ function resetUserForm(){
 
 function editUser(u){
   document.getElementById('editUserId').value=u.id;
+  document.getElementById('uFirstName').value=u.first_name || '';
+  document.getElementById('uLastName').value=u.last_name || '';
   document.getElementById('uEmail').value=u.email;
   document.getElementById('uRole').value=u.role;
   document.getElementById('uAgency').value=u.agency_id || '';

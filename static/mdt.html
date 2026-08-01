@@ -3,10 +3,12 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D MDT</title>
+<title>D2D Unified Response - MDT</title>
+<link rel='icon' href='/static/d2d-logo.svg' type='image/svg+xml'>
 <script src='https://cdn.tailwindcss.com'></script>
+<link rel='stylesheet' href='/static/branding.css'>
 <style>
-  html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  html,body { height:100%; margin:0; overflow:hidden; font-family: 'Inter', system-ui, sans-serif; }
   .mdt-btn { padding:1.25rem; border-radius:0.75rem; font-size:1.25rem; font-weight:600; text-transform:uppercase; letter-spacing:0.03em; min-height:4rem; width:100%; touch-action:manipulation; }
   .incident-card { background:#1e293b; border-left:8px solid; border-radius:0.75rem; padding:1.5rem; }
   .priority-1 { border-color:#ef4444; }
@@ -28,8 +30,8 @@
   .do-instruction { display:inline-block; font-size:1.5rem; font-weight:700; text-transform:uppercase; border:4px solid #fff; padding:1rem 2rem; border-radius:1rem; margin-top:1.5rem; }
 </style>
 </head>
-<body class='bg-slate-900 text-slate-100 h-screen flex flex-col'>
-  <header class='h-20 bg-slate-950 border-b border-slate-700 flex items-center justify-between px-6'>
+<body class='bg-slate-900 text-slate-100 h-screen flex flex-col d2d-font-body'>
+  <header class='h-20 d2d-header flex items-center justify-between px-6'>
     <div class='flex items-center space-x-4'>
       <div class='text-3xl font-bold text-white' id='unitCallsign'>--</div>
       <div class='text-slate-400 text-lg' id='unitAgency'>--</div>
@@ -71,27 +73,133 @@
     </section>
   </div>
 
-  <div id='loading' class='absolute inset-0 bg-slate-950/90 flex items-center justify-center text-2xl font-bold'>Select unit with ?unit_id=</div>
+  <div id='loading' class='absolute inset-0 bg-slate-950/90 flex items-center justify-center text-2xl font-bold hidden'></div>
+  <div id='startScreen' class='absolute inset-0 bg-slate-950/95 flex items-start justify-center pt-10 z-50 overflow-auto'>
+    <div class='bg-slate-800 border border-slate-600 rounded-xl p-6 w-full max-w-2xl shadow-2xl'>
+      <h1 class='text-2xl font-bold mb-1'>D2D MDT Start</h1>
+      <p class='text-slate-400 text-sm mb-4'>Select your unit, crew, and duty status to appear on the dispatcher screen.</p>
+      <div id='startForm' class='space-y-4'></div>
+    </div>
+  </div>
   <div id='dispatchOverlay' onclick='setStatus("ER")'></div>
 <script>
 const CONFIG = {
   police: { statuses: [{label:'AQ', code:'AQ'},{label:'CAN', code:'CAN'},{label:'Lunch', code:'LUN'},{label:'AFR', code:'AFR'},{label:'OS', code:'OS'},{label:'ER', code:'ER'},{label:'TR', code:'TR'}] },
   fire: { statuses: [{label:'AQ', code:'AQ'},{label:'CAN', code:'CAN'},{label:'OS', code:'OS'},{label:'ER', code:'ER'},{label:'OOS', code:'OOS'},{label:'AFR', code:'AFR'},{label:'Maint', code:'MAINT'}] },
-  ems: { statuses: [{label:'AQ', code:'AQ'},{label:'ER', code:'ER'},{label:'OS', code:'OS'},{label:'TR', code:'TR'},{label:'CAN', code:'CAN'},{label:'NPF', code:'NPF'},{label:'DEL', code:'DEL'},{label:'AFR', code:'AFR'}] }
+  ems: { statuses: [{label:'AQ', code:'AQ'},{label:'ER', code:'ER'},{label:'OS', code:'OS'},{label:'AP', code:'AP'},{label:'TR', code:'TR'},{label:'TH', code:'TH'},{label:'AD', code:'AD'},{label:'CAN', code:'CAN'},{label:'NPF', code:'NPF'},{label:'DEL', code:'DEL'},{label:'AFR', code:'AFR'}] },
 };
 function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
 function elapsed(iso){ return iso ? (Date.now()-new Date(iso).getTime())/1000 : 0; }
-function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul'}; return M[code]||code; }
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul',IN_SERVICE:'In Service',ON_DUTY:'On Duty',OFF_DUTY:'Off Duty',AP:'At Patient',TH:'Transporting to Hospital',AD:'At Destination'}; return M[code]||code; }
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 
 const url = new URL(window.location.href);
-let unitId = parseInt(url.searchParams.get('unit_id'));
-if(!unitId){ url.searchParams.set('unit_id','1'); unitId=1; history.replaceState(null,'',url); }
-let state = { unit:null, incident:null, destination:null, messages:[], crew:[], agencyMap:{}, config:{statuses:[], dispositions:[], callTypes:[]}, lastIncidentId:null };
+let unitId = parseInt(url.searchParams.get('unit_id')) || null;
+let state = { unit:null, incident:null, destination:null, messages:[], crew:[], agencyMap:{}, config:{statuses:[], dispositions:[], callTypes:[]}, lastIncidentId:null, start:{units:[], personnel:[]} };
 let dispatchedAt = null, dispatchedCall = null;
 
 function showLoading(msg){ const el=document.getElementById('loading'); el.textContent=msg; el.classList.remove('hidden'); }
 function hideLoading(){ document.getElementById('loading').classList.add('hidden'); }
+
+const PROVIDER_LEVELS = ['Paramedic','Advanced','Basic','Critical Care'];
+
+async function loadStart(){
+  try {
+    const me = await api('/me');
+    const agencyId = me.agency_id;
+    if(!agencyId) throw new Error('No agency assigned');
+    const [agencies, units, personnel] = await Promise.all([api('/agencies'), api(`/units?agency_id=${agencyId}`), api(`/personnel?agency_id=${agencyId}`)]);
+    state.agencyMap = {}; agencies.forEach(a=>state.agencyMap[a.id]=a);
+    state.start.units = units.filter(u=>u.is_active!==false);
+    state.start.personnel = personnel;
+    renderStart();
+  } catch(e){ document.getElementById('startForm').innerHTML = `<div class='text-red-400'>Error: ${e.message}</div>`; }
+}
+
+function getAgencyType(unit){ return state.agencyMap[unit?.agency_id]?.agency_type || ''; }
+function renderStart(){
+  const unitOpts = state.start.units.map(u=>`<option value='${u.id}'>${u.call_sign} - ${u.name}</option>`).join('');
+  const crewList = state.start.personnel.map(p=>`
+    <div class='flex items-center gap-2 bg-slate-900 p-2 rounded'>
+      <input type='checkbox' id='crew-${p.id}' value='${p.id}' class='crew-check w-4 h-4 accent-blue-500' data-ems='${p.provider_level||''}'>
+      <div class='flex-1'>
+        <div class='font-semibold'>${p.first_name||''} ${p.last_name||''}</div>
+        <div class='text-xs text-slate-400'>${p.duty_status||'off_duty'} ${p.provider_level ? '• '+p.provider_level : ''}</div>
+      </div>
+      ${p.photo_url ? `<img src='${p.photo_url}' class='h-8 w-8 rounded-full object-cover border border-slate-600'>` : ''}
+    </div>
+  `).join('');
+  document.getElementById('startForm').innerHTML = `
+    <div>
+      <label class='block text-sm text-slate-300 mb-1'>Unit</label>
+      <select id='startUnit' class='w-full bg-slate-900 border border-slate-600 rounded p-2' onchange='updateProviderControls()'>
+        <option value=''>Select unit...</option>
+        ${unitOpts}
+      </select>
+    </div>
+    <div id='providerHeader' class='hidden text-xs text-slate-400'>Assign provider level for EMS crew:</div>
+    <div class='grid grid-cols-1 sm:grid-cols-2 gap-2' id='crewList'>${crewList}</div>
+    <div>
+      <label class='block text-sm text-slate-300 mb-1'>Duty Status</label>
+      <select id='startStatus' class='w-full bg-slate-900 border border-slate-600 rounded p-2'>
+        <option value='IN_SERVICE'>In Service</option>
+        <option value='ON_DUTY'>On Duty</option>
+        <option value='AQ'>Available</option>
+      </select>
+    </div>
+    <button class='w-full bg-blue-700 hover:bg-blue-600 text-white font-bold py-3 rounded' onclick='startMDT()'>Start Shift</button>
+  `;
+  updateProviderControls();
+}
+
+function updateProviderControls(){
+  const selectedId = parseInt(document.getElementById('startUnit')?.value);
+  const unit = state.start.units.find(u=>u.id===selectedId);
+  const isEms = getAgencyType(unit)==='ems';
+  document.getElementById('providerHeader').classList.toggle('hidden', !isEms);
+  state.start.personnel.forEach(p=>{
+    const row = document.getElementById('crew-'+p.id)?.parentElement;
+    if(!row) return;
+    let sel = row.querySelector('.provider-select');
+    if(isEms){
+      if(!sel){
+        sel = document.createElement('select');
+        sel.className='provider-select bg-slate-800 border border-slate-600 rounded text-xs p-1';
+        sel.innerHTML = '<option value="">Provider level</option>' + PROVIDER_LEVELS.map(l=>`<option value='${l}'>${l}</option>`).join('');
+        if(p.provider_level) sel.value = p.provider_level;
+        row.appendChild(sel);
+      }
+    } else if(sel) { sel.remove(); }
+  });
+}
+
+async function startMDT(){
+  const unitSel = document.getElementById('startUnit');
+  const selectedUnitId = parseInt(unitSel.value);
+  if(!selectedUnitId) return alert('Select a unit');
+  const status = document.getElementById('startStatus').value;
+  const checked = [...document.querySelectorAll('.crew-check:checked')];
+  if(!checked.length) return alert('Select at least one crew member');
+  const personnelIds = checked.map(cb=>parseInt(cb.value));
+  const providerLevels = {};
+  const unit = state.start.units.find(u=>u.id===selectedUnitId);
+  if(getAgencyType(unit)==='ems'){
+    personnelIds.forEach(id=>{
+      const row = document.getElementById('crew-'+id).parentElement;
+      const sel = row.querySelector('.provider-select');
+      if(sel && sel.value) providerLevels[id] = sel.value;
+    });
+  }
+  try {
+    const result = await api('/mdt/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({unit_id:selectedUnitId, personnel_ids:personnelIds, status_code:status, provider_levels:providerLevels})});
+    const url = new URL(window.location.href);
+    url.searchParams.set('unit_id', selectedUnitId);
+    history.replaceState(null,'',url);
+    unitId = selectedUnitId;
+    document.getElementById('startScreen').classList.add('hidden');
+    await load();
+  } catch(e){ alert('Start error: '+e.message); }
+}
 
 async function load(){
   try {
@@ -119,19 +227,23 @@ function render(){
   document.getElementById('unitAgency').textContent = a.name || a.agency_type || '';
   document.getElementById('unitStatus').textContent = statusLabel(u.current_status);
   document.getElementById('shiftTimer').textContent = u.in_service_at ? fmtDur(elapsed(u.in_service_at)) : '--';
-  const onCall = ['OS','ER','TR','AK','dispatched'].includes(u.current_status) && u.last_assigned_at;
+  const onCall = ['OS','ER','TR','TH','AD','HEMS','AK','dispatched'].includes(u.current_status) && u.last_assigned_at;
   document.getElementById('callTimer').textContent = onCall ? fmtDur(elapsed(u.last_assigned_at)) : '--';
 
   document.getElementById('statusButtons').innerHTML = state.config.statuses.map(s=>{
     let color='bg-slate-700 hover:bg-slate-600';
-    if(s.code==='OS') color='bg-red-700 hover:bg-red-600';
-    else if(s.code==='ER'||s.code==='TR'||s.code==='DEL') color='bg-yellow-700 hover:bg-yellow-600';
+    if(s.code==='OS'||s.code==='AD'||s.code==='AP') color='bg-red-700 hover:bg-red-600';
+    else if(s.code==='ER'||s.code==='TR'||s.code==='DEL'||s.code==='TH'||s.code==='HEMS') color='bg-yellow-700 hover:bg-yellow-600';
     else if(s.code==='AQ') color='bg-green-700 hover:bg-green-600';
     else if(s.code==='CAN'||s.code==='NPF'||s.code==='OOS'||s.code==='MAINT'||s.code==='LUN'||s.code==='AFR') color='bg-slate-600 hover:bg-slate-500';
     return `<button class='mdt-btn ${color} text-white' onclick='setStatus("${s.code}")'>${statusLabel(s.code)}</button>`;
   }).join('') + `<button class='mdt-btn bg-indigo-700 hover:bg-indigo-600 text-white' onclick='toggleShift()'>Start/End Shift</button>`;
 
-  document.getElementById('crew').innerHTML = state.crew.length ? state.crew.map(p=>`${p.first_name||''} ${p.last_name||''}`).join('<br>') : 'No crew assigned';
+  document.getElementById('crew').innerHTML = state.crew.length ? state.crew.map(p=>{
+    const photo = p.photo_url ? `<img src='${p.photo_url}' class='h-8 w-8 rounded-full object-cover border border-slate-600 mr-2' alt=''>` : `<div class='h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center text-xs mr-2'>${(p.first_name?.[0]||'')}${(p.last_name?.[0]||'')}</div>`;
+    const badge = p.provider_level ? `<span class='ml-2 px-1.5 rounded bg-cyan-900 text-cyan-200 text-[10px]'>${p.provider_level}</span>` : '';
+    return `<div class='flex items-center mb-1'>${photo}<div class='flex-1'><div class='font-semibold text-sm'>${p.first_name||''} ${p.last_name||''}</div><div class='text-[10px] text-slate-400'>${p.duty_status||'off_duty'}${badge}</div></div></div>`;
+  }).join('') : 'No crew assigned';
 
   if(state.messages.length){
     document.getElementById('messages').innerHTML = state.messages.map(m=>{
@@ -231,13 +343,13 @@ async function promptDestination(incidentId){
 window.setStatus = async function(code){
   const u=state.unit;
   let extra={status_code:code};
-  if(code==='TR' || code==='CAN'){ const pc=prompt('Passenger/Patient count?'); if(pc) extra.passenger_count=parseInt(pc); }
+  if(code==='TR' || code==='TH' || code==='CAN'){ const pc=prompt('Passenger/Patient count?'); if(pc) extra.passenger_count=parseInt(pc); }
   const cfg=state.config;
   if(code==='CAN' || code==='TR' || code==='NPF'){ const d=prompt('Disposition?\n'+(cfg.dispositions||[]).join('\n')); if(d) extra.disposition=d; }
-  if(u.current_incident_id && ['OS','ER','TR','ED','DEL','AQ'].includes(code)){
+  if(u.current_incident_id && ['OS','ER','TR','TH','ED','DEL','AD','AQ'].includes(code)){
     const m = prompt('Mileage (odometer)?'); if(m && !isNaN(parseFloat(m))) extra.mileage = parseFloat(m);
   }
-  if((code==='TR' || code==='ED') && u.current_incident_id){
+  if((code==='TR' || code==='TH' || code==='ED') && u.current_incident_id){
     let dest = state.destination;
     if(!dest || !dest.destination_id){ dest = await promptDestination(u.current_incident_id); if(dest) state.destination = dest; }
     if(dest && dest.destination_id) extra.destination_id = dest.destination_id;
@@ -292,9 +404,9 @@ function updateDispatchOverlay(){
 }
 function updateClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); updateDispatchOverlay(); }
 updateClock(); setInterval(updateClock,1000);
-load();
+if(unitId){ load(); } else { loadStart(); }
 if('Notification' in window) Notification.requestPermission();
-setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); }, 10000);
+setInterval(()=>{ if(unitId && document.getElementById('liveToggle').checked) load(); }, 10000);
 </script>
 </body>
 </html>

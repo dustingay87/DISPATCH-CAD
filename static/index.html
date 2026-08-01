@@ -3,8 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>D2D Dispatch</title>
+  <title>D2D Unified Response - Dashboard</title>
+  <link rel="icon" href="/static/d2d-logo.svg" type="image/svg+xml" />
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/branding.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <style>
@@ -12,9 +14,13 @@
     body { height: 100vh; overflow: hidden; }
   </style>
 </head>
-<body class="bg-gray-100 text-gray-800">
-  <header class="bg-slate-800 text-white p-4 flex items-center justify-between">
-    <h1 class="text-xl font-bold tracking-wide">D2D Dispatch Dashboard</h1>
+<body class="bg-gray-100 text-gray-800 d2d-font-body">
+  <header class="d2d-header p-4 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <img src="/static/d2d-logo.svg" class="h-8 w-8" alt="D2D" />
+      <h1 class="text-xl d2d-logo-text text-white">D2D Unified Response</h1>
+      <span class="text-slate-400 text-sm">Dashboard</span>
+    </div>
     <div class='space-x-2'>
       <button id='refreshBtn' class='bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm'>Refresh</button>
       <button id='seedBtn' class='bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm'>Seed Demo</button>

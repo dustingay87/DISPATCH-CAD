@@ -100,6 +100,10 @@
           <label class='flex items-center space-x-1'><input id='stretcher' type='checkbox' class='accent-blue-500'> <span>Stretcher</span></label>
           <label class='flex items-center space-x-1'><input id='wheelchair' type='checkbox' class='accent-blue-500'> <span>Wheelchair</span></label>
         </div>
+        <label class='text-xs text-slate-400'>Allergies</label>
+        <input id='allergies' class='form-input' placeholder='Known allergies'>
+        <label class='text-xs text-slate-400'>Medications</label>
+        <input id='medications' class='form-input' placeholder='Current medications'>
         <label class='text-xs text-slate-400'>Notes</label>
         <textarea id='notes' class='form-input' rows='2'></textarea>
         <div id='conflictList' class='text-xs text-slate-300'></div>
@@ -252,6 +256,8 @@ function editTransport(id){
   document.getElementById('isolation').checked = t.isolation;
   document.getElementById('stretcher').checked = t.stretcher;
   document.getElementById('wheelchair').checked = t.wheelchair;
+  document.getElementById('allergies').value = t.allergies||'';
+  document.getElementById('medications').value = t.medications||'';
   document.getElementById('notes').value = t.notes||'';
 }
 
@@ -276,6 +282,8 @@ async function save(){
     isolation: document.getElementById('isolation').checked,
     stretcher: document.getElementById('stretcher').checked,
     wheelchair: document.getElementById('wheelchair').checked,
+    allergies: document.getElementById('allergies').value,
+    medications: document.getElementById('medications').value,
     notes: document.getElementById('notes').value
   };
   try {

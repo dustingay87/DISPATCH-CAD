@@ -45,6 +45,11 @@
       <div id='byStatus' class='text-sm space-y-1'>Loading...</div>
     </div>
   </div>
+
+  <div class='panel p-4 mt-4'>
+    <h2 class='font-bold mb-2'>Recent Incidents</h2>
+    <div id='incidentList' class='text-sm'>Loading...</div>
+  </div>
 </div>
 
 <script>
@@ -58,6 +63,33 @@ async function load(){
   document.getElementById('totalTripMiles').textContent = data.total_trip_miles != null ? data.total_trip_miles + ' mi' : '-';
   document.getElementById('byCallType').innerHTML = renderMap(data.by_call_type || {});
   document.getElementById('byStatus').innerHTML = renderMap(data.by_status || {});
+  loadIncidentList();
+}
+async function loadIncidentList(){
+  try {
+    const incidents = await api('/incidents');
+    if(!incidents.length){ document.getElementById('incidentList').innerHTML = '<div class="text-slate-500">No incidents</div>'; return; }
+    const statusPromises = incidents.map(i => api(`/incidents/${i.id}/report/status`).catch(() => ({status:'none'})));
+    const statuses = await Promise.all(statusPromises);
+    document.getElementById('incidentList').innerHTML = incidents.map((i,idx) => {
+      const s = statuses[idx] || {};
+      const reportLink = `/static/after_call_summary.html?incident_id=${i.id}`;
+      return `<div class='flex justify-between items-center border-b border-slate-700 py-1'>
+        <div>
+          <a class='text-blue-400 hover:underline font-bold' href='${reportLink}'>${i.call_number||i.incident_number}</a>
+          <span class='text-slate-400 ml-2'>${i.call_type}</span>
+          <span class='text-slate-500 text-xs ml-2'>P${i.priority||'-'} · ${i.status}</span>
+        </div>
+        <div class='space-x-2 text-xs'>
+          <span class='text-slate-400'>v${s.version||'-'} · ${(s.status||'none').replace(/_/g,' ')}</span>
+          <a class='text-blue-400 hover:underline' href='/static/after_call_summary.html?incident_id=${i.id}'>Summary</a>
+          <a class='text-orange-400 hover:underline' href='/static/supplement.html?incident_id=${i.id}&discipline=ems'>EMS</a>
+          <a class='text-red-400 hover:underline' href='/static/supplement.html?incident_id=${i.id}&discipline=fire'>Fire</a>
+          <a class='text-blue-300 hover:underline' href='/static/supplement.html?incident_id=${i.id}&discipline=law'>Law</a>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e){ document.getElementById('incidentList').innerHTML = `<div class='text-red-400'>Error: ${e.message}</div>`; }
 }
 function renderMap(obj){
   const keys = Object.keys(obj);
