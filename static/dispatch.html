@@ -1526,7 +1526,7 @@ function startStream(){
   try {
     const me = await api('/me');
     const adminLink = document.getElementById('adminLink');
-    if(adminLink && (me.role==='admin' || me.role==='super_admin')) adminLink.classList.remove('hidden');
+    if(adminLink && ['admin','super_admin','superadmin'].includes(me.role)) adminLink.classList.remove('hidden');
   } catch(e){}
   window.addEventListener('resize', ()=>{ if(map) map.invalidateSize(); });
   setInterval(()=>{ if(document.getElementById('liveToggle').checked && !isUserInteracting()) load(); },10000);

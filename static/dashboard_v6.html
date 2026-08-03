@@ -296,7 +296,7 @@ async function init(){
     state.agencies=agencies; state.agencyMap={}; agencies.forEach(a=>state.agencyMap[a.id]=a);
     state.crossAgencies=state.user.cross_discipline_agencies||[];
     localStorage.setItem('ur_module',state.user.selected_module||'all');
-    if(state.user && (state.user.role==='admin'||state.user.role==='super_admin')){
+    if(state.user && ['admin','super_admin','superadmin'].includes(state.user.role)){
       document.getElementById('adminLink').classList.remove('hidden');
     }
     applyDashboardLayout();
