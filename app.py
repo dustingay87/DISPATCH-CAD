@@ -3131,10 +3131,10 @@ def recommend_units(incident_id: int, limit: int = Query(10), db: Session = Depe
             eligible = False; reasons.append(f"status {u.current_status}")
         if u.last_seen_at is None:
             eligible = False; reasons.append('no GPS')
-        elif (now - u.last_seen_at).total_seconds() > TAIP_OFFLINE_SECONDS:
+        elif (_naive_local(now) - _naive_local(u.last_seen_at)).total_seconds() > TAIP_OFFLINE_SECONDS:
             eligible = False; reasons.append('GPS offline')
-        elif (now - u.last_seen_at).total_seconds() > TAIP_STALE_SECONDS:
-            age = (now - u.last_seen_at).total_seconds()
+        elif (_naive_local(now) - _naive_local(u.last_seen_at)).total_seconds() > TAIP_STALE_SECONDS:
+            age = (_naive_local(now) - _naive_local(u.last_seen_at)).total_seconds()
             s -= age * 0.05; reasons.append('GPS stale')
 
         # Distance and ETA (road-based with OSRM, fallback to Haversine)
@@ -3772,7 +3772,7 @@ def update_incident(request: Request, incident_id: int, body: IncidentUpdate, db
                     iu.cleared_at = incident.closed_at
                     iu.assignment_status = 'cleared'
                     if iu.assigned_at:
-                        duration = (incident.closed_at - iu.assigned_at).total_seconds()
+                        duration = (_naive_local(incident.closed_at) - _naive_local(iu.assigned_at)).total_seconds()
                         unit.accumulated_call_seconds = (unit.accumulated_call_seconds or 0) + duration
                 agency = db.query(Agency).get(unit.agency_id) if unit.agency_id else None
                 unit.current_status = 'AFR' if (agency and agency.agency_type == 'fire') else 'AQ'
@@ -4071,7 +4071,7 @@ def update_unit_status(request: Request, incident_id: int, unit_id: int, body: S
         unit.current_incident_id = incident_id
     else:
         if iu.assigned_at:
-            duration = (ts - iu.assigned_at).total_seconds()
+            duration = (_naive_local(ts) - _naive_local(iu.assigned_at)).total_seconds()
             if duration > 0:
                 unit.accumulated_call_seconds = (unit.accumulated_call_seconds or 0) + duration
         iu.cleared_at = ts
@@ -4596,7 +4596,7 @@ def set_unit_status(request: Request, unit_id: int, body: UnitStatus, db: Sessio
                     iu.assignment_status = map_status(body.status_code)
                 else:
                     if iu.assigned_at:
-                        duration = (ts - iu.assigned_at).total_seconds()
+                        duration = (_naive_local(ts) - _naive_local(iu.assigned_at)).total_seconds()
                         if duration > 0:
                             unit.accumulated_call_seconds = (unit.accumulated_call_seconds or 0) + duration
                     iu.cleared_at = ts
