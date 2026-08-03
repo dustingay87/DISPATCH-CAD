@@ -53,7 +53,7 @@ See `.env.example`.
 3. Set the build/start commands:
    - Build: `pip install -r requirements.txt`
    - Start: `uvicorn app:app --host 0.0.0.0 --port $PORT`
-4. Add environment variables (`DATABASE_URL`, `SECRET_KEY`).
+4. Add environment variables (`DATABASE_URL`, `SECRET_KEY`, `TURNSTILE_SECRET`).
 
 ## Safe update procedure
 
