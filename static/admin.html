@@ -47,9 +47,24 @@
 
     <div class='grid grid-cols-1 md:grid-cols-2 gap-4'>
       <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2' id='customerFormTitle'>Create Customer</h2>
+        <form id='customerForm' class='space-y-2'>
+          <input type='hidden' id='cId'>
+          <input id='cName' placeholder='Customer name' class='w-full' required>
+          <input id='cSlug' placeholder='Slug (optional)' class='w-full'>
+          <input id='cDomain' placeholder='Domain (optional)' class='w-full'>
+          <div class='flex gap-2'>
+            <button id='cSubmit' class='btn btn-primary text-white flex-1'>Create Customer</button>
+            <button type='button' id='cCancel' class='btn bg-slate-700 hover:bg-slate-600 text-white hidden' onclick='resetCustomerForm()'>Cancel</button>
+          </div>
+        </form>
+      </div>
+
+      <div class='card'>
         <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2' id='agencyFormTitle'>Create Agency</h2>
         <form id='agencyForm' class='space-y-2'>
           <input type='hidden' id='aId'>
+          <select id='aCustomer' class='w-full'><option value=''>Customer</option></select>
           <input id='aName' placeholder='Agency name' class='w-full' required>
           <select id='aType' class='w-full'>
             <option value='police'>Police</option>
@@ -87,6 +102,11 @@
           <p class='text-xs text-slate-400'>Creates police, fire, and EMS agencies with units, personnel, and a sample incident.</p>
         </div>
       </div>
+    </div>
+
+    <div class='card'>
+      <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Customers</h2>
+      <div id='customerList' class='overflow-x-auto'><div class='text-slate-500'>Loading...</div></div>
     </div>
 
     <div class='card'>
@@ -132,20 +152,69 @@ function showMsg(text, ok=true){
   setTimeout(()=>el.classList.add('hidden'), 4000);
 }
 
+let state = {customers:[], agencies:[]};
+
+async function loadCustomers(){
+  state.customers = await api('/customers');
+  const cSel = document.getElementById('aCustomer');
+  cSel.innerHTML = '<option value="">Customer</option>' + state.customers.map(c=>`<option value='${c.id}'>${c.name}</option>`).join('');
+  document.getElementById('customerList').innerHTML = state.customers.length ? `<table><thead><tr><th>ID</th><th>Name</th><th>Slug</th><th>Domain</th><th></th></tr></thead><tbody>${state.customers.map(c=>`<tr><td>${c.id}</td><td>${c.name}</td><td>${c.slug||'-'}</td><td>${c.domain||'-'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editCustomer(${JSON.stringify(c).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deleteCustomer(${c.id})'>Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No customers</div>';
+}
+
 async function loadAgencies(){
-  const agencies = await api('/agencies');
+  state.agencies = await api('/agencies');
+  const customerMap = {};
+  state.customers.forEach(c=>customerMap[c.id]=c.name);
   const aSel = document.getElementById('seedAgency');
   const cSel = document.getElementById('configAgency');
-  aSel.innerHTML = '<option value="">Select agency</option>' + agencies.map(a=>`<option value='${a.id}'>${a.name} (${a.agency_type})</option>`).join('');
-  cSel.innerHTML = '<option value="">All agencies</option>' + agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
-  document.getElementById('coopAgency').innerHTML = '<option value="">Select agency</option>' + agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
-  document.getElementById('coopList').innerHTML = agencies.map(a=>`<label class='flex items-center gap-1'><input type='checkbox' class='coop-check' value='${a.id}'> ${a.name}</label>`).join('');
-  document.getElementById('agencyList').innerHTML = agencies.length ? `<table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>City</th><th>State</th><th>Domain</th><th></th></tr></thead><tbody>${agencies.map(a=>`<tr><td>${a.id}</td><td>${a.name}</td><td>${a.agency_type}</td><td>${a.city||'-'}</td><td>${a.state||'-'}</td><td>${a.domain||'-'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editAgency(${JSON.stringify(a).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deleteAgency(${a.id})'>Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No agencies</div>';
+  aSel.innerHTML = '<option value="">Select agency</option>' + state.agencies.map(a=>`<option value='${a.id}'>${a.name} (${a.agency_type})</option>`).join('');
+  cSel.innerHTML = '<option value="">All agencies</option>' + state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
+  document.getElementById('coopAgency').innerHTML = '<option value="">Select agency</option>' + state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
+  document.getElementById('coopList').innerHTML = state.agencies.map(a=>`<label class='flex items-center gap-1'><input type='checkbox' class='coop-check' value='${a.id}'> ${a.name}</label>`).join('');
+  document.getElementById('agencyList').innerHTML = state.agencies.length ? `<table><thead><tr><th>ID</th><th>Customer</th><th>Name</th><th>Type</th><th>City</th><th>State</th><th>Domain</th><th></th></tr></thead><tbody>${state.agencies.map(a=>`<tr><td>${a.id}</td><td>${customerMap[a.customer_id]||'-'}</td><td>${a.name}</td><td>${a.agency_type}</td><td>${a.city||'-'}</td><td>${a.state||'-'}</td><td>${a.domain||'-'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editAgency(${JSON.stringify(a).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deleteAgency(${a.id})'>Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No agencies</div>';
+}
+
+document.getElementById('customerForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const body = {
+    name: document.getElementById('cName').value,
+    slug: document.getElementById('cSlug').value || null,
+    domain: document.getElementById('cDomain').value || null
+  };
+  const id = document.getElementById('cId').value;
+  try {
+    if(id){ await api(`/customers/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); showMsg('Customer updated'); }
+    else { await api('/customers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); showMsg('Customer created'); }
+    resetCustomerForm(); await loadCustomers(); loadAgencies();
+  } catch(err){ showMsg(err.message, false); }
+});
+
+function resetCustomerForm(){
+  document.getElementById('customerForm').reset(); document.getElementById('cId').value='';
+  document.getElementById('customerFormTitle').textContent='Create Customer';
+  document.getElementById('cSubmit').textContent='Create Customer';
+  document.getElementById('cCancel').classList.add('hidden');
+}
+
+function editCustomer(c){
+  document.getElementById('cId').value=c.id;
+  document.getElementById('cName').value=c.name;
+  document.getElementById('cSlug').value=c.slug||'';
+  document.getElementById('cDomain').value=c.domain||'';
+  document.getElementById('customerFormTitle').textContent='Edit Customer';
+  document.getElementById('cSubmit').textContent='Update Customer';
+  document.getElementById('cCancel').classList.remove('hidden');
+}
+
+async function deleteCustomer(id){
+  if(!confirm('Delete this customer?')) return;
+  try { await api(`/customers/${id}`,{method:'DELETE'}); showMsg('Customer deleted'); await loadCustomers(); } catch(err){ showMsg(err.message, false); }
 }
 
 document.getElementById('agencyForm').addEventListener('submit', async e=>{
   e.preventDefault();
   const body = {
+    customer_id: document.getElementById('aCustomer').value ? parseInt(document.getElementById('aCustomer').value) : null,
     name: document.getElementById('aName').value,
     agency_type: document.getElementById('aType').value,
     city: document.getElementById('aCity').value,
@@ -169,6 +238,7 @@ function resetAgencyForm(){
 
 function editAgency(a){
   document.getElementById('aId').value=a.id;
+  document.getElementById('aCustomer').value=a.customer_id||'';
   document.getElementById('aName').value=a.name;
   document.getElementById('aType').value=a.agency_type;
   document.getElementById('aCity').value=a.city||'';
@@ -234,7 +304,7 @@ async function logout(){
   window.location.href='/login';
 }
 
-loadAgencies();
+(async function(){ await loadCustomers(); await loadAgencies(); })();
 </script>
 <script src='/static/sortable.js'></script>
 <script src="/static/theme.js"></script>

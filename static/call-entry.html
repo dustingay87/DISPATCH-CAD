@@ -63,6 +63,10 @@
         <div class='md:col-span-2'>
           <label class='text-xs text-slate-400 uppercase'>Location</label>
           <input id='location' type='text' placeholder='Address / intersection' required>
+          <div class='flex items-center gap-2 mt-1'>
+            <button type='button' id='geocodeBtn' class='text-xs bg-slate-700 hover:bg-slate-600 text-white px-2 py-1 rounded' onclick='geocodeLocation()'>Verify Location</button>
+            <span id='geocodeStatus' class='text-xs text-slate-500'></span>
+          </div>
         </div>
         <div>
           <label class='text-xs text-slate-400 uppercase'>Lat</label>
@@ -364,10 +368,54 @@ function collectDisciplineFields(){
 }
 
 document.getElementById('disciplineTabs').addEventListener('click', e=>{ if(e.target.classList.contains('tab')) setDiscipline(e.target.dataset.d); });
-document.getElementById('agency').addEventListener('change', loadConfig);
+document.getElementById('agency').addEventListener('change', ()=>{ loadConfig(); setTimeout(geocodeLocation, 200); });
 document.getElementById('callType').addEventListener('change', updatePriority);
 
 let createdIncidentId = null;
+let geoTimer;
+
+function buildGeocodeQuery(){
+  const loc = document.getElementById('location').value.trim();
+  const agencyId = document.getElementById('agency').value;
+  const agency = agencyId ? state.agencyMap[agencyId] : null;
+  if(!loc) return null;
+  let q = loc;
+  if(agency){
+    const ctx = [agency.city, agency.state].filter(Boolean).join(', ');
+    if(ctx) q += ', ' + ctx;
+  }
+  return q;
+}
+
+async function geocodeLocation(){
+  const q = buildGeocodeQuery();
+  const ss = document.getElementById('geocodeStatus');
+  if(!q){ ss.textContent=''; return false; }
+  ss.textContent='Geocoding...'; ss.className='text-xs text-slate-400';
+  try {
+    const res = await fetch('https://nominatim.openstreetmap.org/search?' + new URLSearchParams({q, format:'json', limit:1}), {headers:{'Accept':'application/json'}});
+    const data = await res.json();
+    if(data && data.length){
+      document.getElementById('lat').value = parseFloat(data[0].lat).toFixed(6);
+      document.getElementById('lng').value = parseFloat(data[0].lon).toFixed(6);
+      ss.textContent = 'Found: ' + data[0].display_name;
+      ss.className = 'text-xs text-green-400';
+      return true;
+    } else {
+      ss.textContent = 'Address not found; map may use agency location fallback';
+      ss.className = 'text-xs text-yellow-400';
+      return false;
+    }
+  } catch(e){
+    ss.textContent = 'Geocode unavailable';
+    ss.className = 'text-xs text-red-400';
+    return false;
+  }
+}
+
+document.getElementById('location').addEventListener('input', ()=>{ clearTimeout(geoTimer); if(document.getElementById('location').value.trim().length>3) geoTimer = setTimeout(geocodeLocation, 1200); });
+
+document.getElementById('location').addEventListener('blur', ()=>{ clearTimeout(geoTimer); geoTimer = setTimeout(geocodeLocation, 200); });
 
 function getFormBody(status='intake'){
   const priority = parseInt(document.getElementById('priority').value);
@@ -397,6 +445,7 @@ async function createIntake(){
   if(!agencyId){ showMsg('Select an agency before creating the call.', false); return false; }
   if(!callType){ showMsg('Select a call type.', false); return false; }
   if(!location){ showMsg('Enter a location.', false); return false; }
+  if(!document.getElementById('lat').value || !document.getElementById('lng').value) await geocodeLocation();
   const ss = document.getElementById('saveStatus');
   ss.textContent = 'Creating...'; ss.classList.remove('hidden','text-red-400','text-green-400'); ss.classList.add('text-slate-400');
   const body = getFormBody('intake');

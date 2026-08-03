@@ -769,6 +769,30 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     preferences: Optional[dict] = None
 
+class CustomerCreate(BaseModel):
+    name: str
+    slug: Optional[str] = None
+    domain: Optional[str] = None
+    config: Optional[dict] = None
+
+class CustomerOut(BaseModel):
+    id: int
+    name: str
+    slug: Optional[str] = None
+    domain: Optional[str] = None
+    config: Optional[dict] = None
+    approved: Optional[bool] = None
+    created_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+class CustomerUpdate(BaseModel):
+    name: Optional[str] = None
+    slug: Optional[str] = None
+    domain: Optional[str] = None
+    config: Optional[dict] = None
+    approved: Optional[bool] = None
+
 class DestinationCreate(BaseModel):
     agency_id: Optional[int] = None
     name: str
@@ -2608,6 +2632,36 @@ def health():
 @app.get('/version')
 def version():
     return APP_VERSION
+
+@app.get('/customers', response_model=List[CustomerOut])
+def list_customers(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return db.query(Customer).order_by(Customer.name).all()
+
+@app.post('/customers', response_model=CustomerOut)
+def create_customer(body: CustomerCreate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    if not body.slug:
+        body.slug = re.sub(r'[^a-z0-9]+', '-', body.name.lower()).strip('-')[:100]
+    customer = Customer(**body.model_dump())
+    db.add(customer); db.commit(); db.refresh(customer)
+    return customer
+
+@app.put('/customers/{customer_id}', response_model=CustomerOut)
+def update_customer(customer_id: int, body: CustomerUpdate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    c = db.query(Customer).get(customer_id)
+    if not c:
+        raise HTTPException(status_code=404, detail='Customer not found')
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(c, k, v)
+    db.commit(); db.refresh(c)
+    return c
+
+@app.delete('/customers/{customer_id}')
+def delete_customer(customer_id: int, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    c = db.query(Customer).get(customer_id)
+    if not c:
+        raise HTTPException(status_code=404, detail='Customer not found')
+    db.delete(c); db.commit()
+    return {'deleted': customer_id}
 
 @app.post('/agencies', response_model=AgencyOut)
 def create_agency(body: AgencyCreate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):

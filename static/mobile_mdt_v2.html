@@ -501,7 +501,10 @@ function initMap(){
   state.routeLayer = L.layerGroup().addTo(state.map);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap'}).addTo(state.map);
 }
-function serviceAreaColor(type){ if(type==='primary') return '#22c55e'; if(type==='secondary') return '#3b82f6'; if(type==='mutual') return '#eab308'; return '#3b82f6'; }
+function serviceAreaColor(type){
+  const M = {primary:'#22c55e', secondary:'#3b82f6', mutual:'#eab308', post:'#64748b', zone:'#a855f7', beat:'#f97316', staging:'#ec4899', coverage:'#06b6d4', water:'#0ea5e9', district:'#8b5cf6'};
+  return M[type] || '#3b82f6';
+}
 function renderMap(){
   initMap();
   state.map.eachLayer(l=>{ if(l instanceof L.Marker || l instanceof L.CircleMarker) state.map.removeLayer(l); });

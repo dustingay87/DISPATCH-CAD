@@ -91,7 +91,10 @@ function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}
 let state={agencies:[], zones:[], units:[], postings:[]};
 let map, drawnItems, zonesLayer, drawControl;
 
-function defaultColor(type){ if(type==='primary') return '#22c55e'; if(type==='secondary') return '#3b82f6'; if(type==='mutual') return '#eab308'; return document.getElementById('zoneColor')?.value || '#3b82f6'; }
+function defaultColor(type){
+  const M = {primary:'#22c55e', secondary:'#3b82f6', mutual:'#eab308', post:'#64748b', zone:'#a855f7', beat:'#f97316', staging:'#ec4899', coverage:'#06b6d4', water:'#0ea5e9', district:'#8b5cf6'};
+  return M[type] || document.getElementById('zoneColor')?.value || '#3b82f6';
+}
 function styleLayer(layer, type){ const c=defaultColor(type); if(layer.setStyle) layer.setStyle({color:c, fillColor:c, fillOpacity:0.15, weight:2}); }
 
 function initMap(){

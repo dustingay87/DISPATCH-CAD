@@ -56,7 +56,21 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
   .resizer:hover { background:#00B8FF; }
   .resizer-h { height:4px; background:#475569; cursor:row-resize; transition:background 0.1s; }
   .resizer-h:hover { background:#00B8FF; }
-  .locked .resizer, .locked .resizer-h { display:none; }
+  .locked .resizer, .locked .resizer-h, .locked .undock-btn, .locked .dock-btn { display:none !important; }
+  .locked .floated-panel { resize:none !important; }
+  .undock-btn, .dock-btn { background:#334155; color:#e2e8f0; border:none; border-radius:0.25rem; padding:0.15rem 0.4rem; font-size:0.75rem; cursor:pointer; margin-left:0.5rem; }
+  .undock-btn:hover, .dock-btn:hover { background:#475569; }
+  .floated-panel { position:fixed; display:flex; flex-direction:column; min-width:220px; min-height:150px; resize:both; overflow:hidden; z-index:9000; background:#0f172a; border:1px solid #1E4B8C; border-radius:0.5rem; box-shadow:0 10px 25px rgba(0,0,0,0.5); }
+  .floated-panel .card { flex:1; min-height:0; min-width:0; border-radius:0; border:none; }
+  .cursor-grab { cursor:grab; }
+  .cursor-grabbing { cursor:grabbing; }
+  #layoutModal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; align-items:center; justify-content:center; }
+  #layoutModal.open { display:flex; }
+  #layoutModal .modal-box { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1.25rem; width:28rem; max-width:95%; color:#e2e8f0; }
+  #layoutModal h2 { margin-top:0; margin-bottom:1rem; }
+  .layout-row { display:flex; align-items:center; justify-content:space-between; margin:0.5rem 0; }
+  html.light #layoutModal .modal-box { background:#f8fafc; border-color:#e2e8f0; color:#0f172a; }
+  html.light .floated-panel { background:#ffffff; border-color:#e2e8f0; }
   ::-webkit-scrollbar { width:6px; height:6px; }
   ::-webkit-scrollbar-track { background:#0f172a; }
   ::-webkit-scrollbar-thumb { background:#475569; border-radius:3px; }
@@ -89,14 +103,13 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
       <span class='text-slate-400 text-xs' id='consoleLabel'>Console</span>
       <select id='disciplineSelect' class='bg-slate-800 border border-slate-600 rounded px-1 py-1 text-xs'><option value='all'>All Disciplines</option><option value='police'>Police</option><option value='fire'>Fire</option><option value='ems'>EMS</option></select>
       <div class='text-slate-400 font-mono' id='clock'>--:--:--</div>
-      <label class='flex items-center space-x-1'><input id='liveToggle' type='checkbox' checked class='accent-blue-500'> <span>Live</span></label>
-      <label class='flex items-center space-x-1 text-slate-300'><input id='lockLayout' type='checkbox' class='accent-pink-500'> <span>Lock</span></label>
+      <button id='consoleLayoutBtn' class='app-btn-outline' onclick='openLayoutEditor()'>Console Layout</button>
       <button id='refreshBtn' class='app-btn-outline'>Refresh</button>
       <div class='spacer'></div>
       <button id='alertsBtn' class='hidden app-btn-outline text-red-400 border-red-400' onclick='showAlerts()'>Alerts <span id='alertsCount' class='bg-red-500 rounded-full px-1.5'>0</span></button>
       <button class='app-btn-outline' onclick='document.documentElement.classList.toggle("light"); localStorage.setItem("ur_theme", document.documentElement.classList.contains("light")?"light":"dark")'>🌓</button>
     </header>
-    <div class='app-kpi' id='kpiBar'>
+    <div id='kpiBar' class='app-kpi'>
       <div class='app-kpi-card'><div class='icon'>📞</div><div><div class='value' id='kpiActive'>0</div><div class='label'>Active Calls</div></div></div>
       <div class='app-kpi-card'><div class='icon' style='color:#eab308'>🚑</div><div><div class='value' id='kpiEnRoute'>0</div><div class='label'>En Route</div></div></div>
       <div class='app-kpi-card'><div class='icon' style='color:#ef4444'>📍</div><div><div class='value' id='kpiOnScene'>0</div><div class='label'>On Scene</div></div></div>
@@ -106,7 +119,7 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
     <div class='app-content'>
       <main id='main' class='flex-1 grid p-0 overflow-hidden' style='grid-template-columns:var(--col1,25%) 4px var(--col2,35%) 4px var(--col3,40%);'>
         <aside class='flex flex-col gap-1 min-h-0'>
-          <div class='card flex-1 min-h-0'>
+          <div id='callsCard' class='card flex-1 min-h-0'>
             <div class='card-head flex justify-between items-center'>
               <div class='flex gap-1'>
                 <button id='tabActive' class='px-2 py-0.5 rounded text-xs bg-blue-600 text-white' onclick='state.showClosed=false; document.getElementById("tabActive").classList.add("bg-blue-600","text-white"); document.getElementById("tabClosed").classList.remove("bg-blue-600","text-white"); renderCalls();'>Active</button>
@@ -127,7 +140,7 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
         </section>
         <div id='resizer2' class='resizer'></div>
         <aside class='flex flex-col gap-1 min-h-0'>
-          <div class='card flex-1 min-h-0'>
+          <div id='mapCard' class='card flex-1 min-h-0'>
             <div class='card-head flex justify-between items-center'>
               <span>Map</span>
               <div class='flex gap-3 text-xs'>
@@ -141,11 +154,11 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
       </main>
       <div id='footerResizer' class='resizer-h'></div>
       <footer id='footer' class='shrink-0 p-1 flex gap-1 min-h-0' style='height:var(--footer-h,14rem);'>
-        <div class='card w-1/2 flex flex-col'>
+        <div id='unitBoardCard' class='card w-1/2 flex flex-col'>
           <div class='card-head flex justify-between'><span>Unit Board</span><span id='unitCount' class='text-slate-400'>0</span></div>
           <div id='unitList' class='card-body'></div>
         </div>
-        <div class='card w-1/2 flex flex-col'>
+        <div id='messagesCard' class='card w-1/2 flex flex-col'>
           <div class='card-head'>Messages</div>
           <div id='msgList' class='card-body log text-slate-300 space-y-0.5'></div>
           <div class='flex p-1 gap-1 border-t border-slate-700'>
@@ -211,13 +224,22 @@ function updateBrand(){
   document.title = user.customer_name ? `${user.customer_name} - ${cfg.name}` : cfg.name;
 }
 
+const LAYOUT_PANELS = ['callsCard','incidentPanel','mapCard','unitBoardCard','messagesCard','kpiBar'];
+const LAYOUT_DEFAULT = {col1:'25%',col2:'35%',col3:'40%',rowTop:'100%',rowBottom:'0%',footer:'14rem',locked:true,autoRefresh:true,hidden:[],undocked:[]};
 function loadLayout(){
-  try{ const raw=localStorage.getItem(LAYOUT_KEY); if(raw){ return JSON.parse(raw); } }catch(e){}
-  return {col1:'25%',col2:'35%',col3:'40%',rowTop:'100%',rowBottom:'0%',footer:'14rem',locked:false};
+  try{ const raw=localStorage.getItem(LAYOUT_KEY); if(raw){ const l=JSON.parse(raw); return {...LAYOUT_DEFAULT, ...l}; } }catch(e){}
+  return {...LAYOUT_DEFAULT};
 }
 function saveLayout(l){
   localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
   api('/me/preferences', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({preferences:{layout:l}})}).catch(()=>{});
+}
+function setLayoutLocked(locked){
+  document.body.classList.toggle('locked', locked);
+  if(locked){ removeUndockButtons(); }
+  else { addUndockButtons(); }
+  document.querySelectorAll('.floated-panel').forEach(w=>{ w.style.resize = locked ? 'none' : 'both'; });
+  document.querySelectorAll('.dock-btn').forEach(b=>{ b.style.display = locked ? 'none' : ''; });
 }
 function applyLayout(l){
   const main=document.getElementById('main');
@@ -226,8 +248,10 @@ function applyLayout(l){
   if(main){ main.style.setProperty('--col1', l.col1); main.style.setProperty('--col2', l.col2); main.style.setProperty('--col3', l.col3); }
   if(center){ center.style.setProperty('--rowTop', l.rowTop); center.style.setProperty('--rowBottom', l.rowBottom); }
   if(footer){ footer.style.height = l.footer; }
-  document.body.classList.toggle('locked', !!l.locked);
-  const cb=document.getElementById('lockLayout'); if(cb) cb.checked=!!l.locked;
+  LAYOUT_PANELS.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display = (l.hidden||[]).includes(id) ? 'none' : ''; });
+  applyUndockedPanels(l.undocked||[]);
+  setLayoutLocked(!!l.locked);
+  state.layout = l;
 }
 function setupResizers(){
   const main=document.getElementById('main'), center=document.getElementById('center'), footer=document.getElementById('footer');
@@ -293,16 +317,161 @@ function setupResizers(){
     document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
   });
 }
+
+function openLayoutEditor(){
+  const modal=document.getElementById('layoutModal');
+  renderLayoutEditor();
+  modal.classList.add('open');
+}
+function closeLayoutEditor(){
+  document.getElementById('layoutModal').classList.remove('open');
+}
+function renderLayoutEditor(){
+  const l=state.layout||loadLayout();
+  document.getElementById('layoutAutoRefresh').checked=!!l.autoRefresh;
+  document.getElementById('layoutLock').checked=!!l.locked;
+  const list=document.getElementById('layoutPanels');
+  const labels={callsCard:'Active Calls',incidentPanel:'Incident Workspace',mapCard:'Map',unitBoardCard:'Unit Board',messagesCard:'Messages',kpiBar:'KPI Bar'};
+  list.innerHTML=LAYOUT_PANELS.map(id=>`
+    <label class="layout-row"><span>${labels[id]}</span><input type="checkbox" data-panel="${id}" ${(l.hidden||[]).includes(id)?'':'checked'} onchange="togglePanel('${id}')"></label>
+  `).join('');
+}
+function togglePanel(id){
+  const l=loadLayout();
+  const hidden=new Set(l.hidden||[]);
+  const el=document.getElementById(id);
+  if(hidden.has(id)){ hidden.delete(id); if(el) el.style.display=''; }
+  else { hidden.add(id); if(el) el.style.display='none'; }
+  l.hidden=[...hidden];
+  saveLayout(l);
+}
+function toggleLayoutAutoRefresh(){
+  const l=loadLayout(); l.autoRefresh=document.getElementById('layoutAutoRefresh').checked; saveLayout(l); state.layout=l;
+}
+function toggleLayoutLock(){
+  const l=loadLayout(); l.locked=document.getElementById('layoutLock').checked; saveLayout(l); applyLayout(l);
+}
+function resetLayout(){
+  if(!confirm('Reset console layout to default?')) return;
+  const l={...LAYOUT_DEFAULT};
+  saveLayout(l); applyLayout(l); renderLayoutEditor();
+}
+function saveLayoutSettings(){
+  const l=loadLayout();
+  l.autoRefresh=document.getElementById('layoutAutoRefresh').checked;
+  l.locked=document.getElementById('layoutLock').checked;
+  saveLayout(l); applyLayout(l); closeLayoutEditor();
+}
+
+function addUndockButtons(){
+  const labels={callsCard:'Active Calls',incidentPanel:'Incident Workspace',mapCard:'Map',unitBoardCard:'Unit Board',messagesCard:'Messages'};
+  ['callsCard','incidentPanel','mapCard','unitBoardCard','messagesCard'].forEach(id=>{
+    const card=document.getElementById(id); if(!card) return;
+    const head=card.querySelector('.card-head'); if(!head) return;
+    if(!head.querySelector('.undock-btn')) head.insertAdjacentHTML('beforeend', `<button class="undock-btn" data-undock="${id}" title="Undock">⇱</button>`);
+  });
+}
+function removeUndockButtons(){
+  document.querySelectorAll('.undock-btn').forEach(b=>b.remove());
+}
+document.addEventListener('click', e=>{
+  const btn=e.target.closest('.undock-btn');
+  if(btn){ e.stopPropagation(); undockPanel(btn.dataset.undock); }
+});
+
+const floatPlaceholders = {};
+function undockPanel(id){
+  const card=document.getElementById(id); if(!card) return;
+  if(card.dataset.floated==='true') return;
+  const rect=card.getBoundingClientRect();
+  const holder=document.createElement('div'); holder.className='floated-placeholder'; holder.dataset.panel=id; holder.style.cssText='display:none;'; card.parentNode.insertBefore(holder, card);
+  floatPlaceholders[id]=holder;
+  const wrap=document.createElement('div'); wrap.id='float-'+id; wrap.className='floated-panel'; wrap.dataset.panel=id;
+  wrap.style.cssText=`position:fixed;top:${rect.top}px;left:${rect.left}px;width:${rect.width}px;height:${rect.height}px;`;
+  wrap.appendChild(card);
+  document.body.appendChild(wrap);
+  card.dataset.floated='true';
+  card.classList.add('floated');
+  const head=card.querySelector('.card-head');
+  if(head){
+    head.classList.add('cursor-grab');
+    head.insertAdjacentHTML('beforeend', `<button class="dock-btn" data-dock="${id}" title="Dock">⇲</button>`);
+  }
+  makeDraggable(wrap);
+  const l=loadLayout();
+  const existing=(l.undocked||[]).find(u=>u.id===id);
+  if(existing){ wrap.style.top=existing.top; wrap.style.left=existing.left; wrap.style.width=existing.width; wrap.style.height=existing.height; }
+  const list=l.undocked||[];
+  const filtered=list.filter(u=>u.id!==id);
+  filtered.push({id, top:wrap.style.top, left:wrap.style.left, width:wrap.style.width, height:wrap.style.height});
+  l.undocked=filtered; saveLayout(l); state.layout=l;
+  setTimeout(()=>{ if(map) map.invalidateSize(); }, 50);
+}
+function dockPanel(id){
+  const card=document.getElementById(id); if(!card || card.dataset.floated!=='true') return;
+  const wrap=document.getElementById('float-'+id);
+  const holder=floatPlaceholders[id];
+  if(holder && holder.parentNode) holder.parentNode.replaceChild(card, holder);
+  else document.getElementById('main')?.appendChild(card);
+  card.dataset.floated='';
+  card.classList.remove('floated');
+  card.querySelector('.dock-btn')?.remove();
+  if(wrap) wrap.remove();
+  delete floatPlaceholders[id];
+  const l=loadLayout(); l.undocked=(l.undocked||[]).filter(u=>u.id!==id); saveLayout(l); state.layout=l;
+  setTimeout(()=>{ if(map) map.invalidateSize(); }, 50);
+}
+document.addEventListener('click', e=>{
+  const btn=e.target.closest('.dock-btn');
+  if(btn){ e.stopPropagation(); dockPanel(btn.dataset.dock); }
+});
+function applyUndockedPanels(undocked){
+  const l=loadLayout();
+  const hidden=new Set(l.hidden||[]);
+  const current=[...document.querySelectorAll('.floated-panel')].map(w=>w.dataset.panel);
+  const desired=(undocked||[]).map(u=>u.id).filter(id=>!hidden.has(id));
+  current.filter(id=>!desired.includes(id)).forEach(dockPanel);
+  desired.forEach(id=>{ if(!current.includes(id) && !document.body.classList.contains('locked')) undockPanel(id); });
+  (undocked||[]).forEach(u=>{
+    const wrap=document.getElementById('float-'+u.id); if(!wrap) return;
+    ['top','left','width','height'].forEach(k=>{ if(u[k]) wrap.style[k]=u[k]; });
+  });
+}
+function makeDraggable(wrap){
+  const head=wrap.querySelector('.card-head'); if(!head) return;
+  let dragging=false, startX=0, startY=0, startTop=0, startLeft=0;
+  head.addEventListener('mousedown', e=>{
+    if(document.body.classList.contains('locked')) return;
+    if(e.target.closest('.dock-btn') || e.target.closest('button')) return;
+    e.preventDefault();
+    dragging=true;
+    startX=e.clientX; startY=e.clientY;
+    startTop=parseFloat(wrap.style.top)||0;
+    startLeft=parseFloat(wrap.style.left)||0;
+    head.classList.add('cursor-grabbing');
+  });
+  window.addEventListener('mousemove', e=>{
+    if(!dragging) return;
+    wrap.style.top=(startTop+e.clientY-startY)+'px';
+    wrap.style.left=(startLeft+e.clientX-startX)+'px';
+  });
+  window.addEventListener('mouseup', ()=>{
+    if(!dragging) return;
+    dragging=false; head.classList.remove('cursor-grabbing');
+    const l=loadLayout();
+    const list=l.undocked||[];
+    const idx=list.findIndex(u=>u.id===wrap.dataset.panel);
+    const pos={id:wrap.dataset.panel, top:wrap.style.top, left:wrap.style.left, width:wrap.style.width, height:wrap.style.height};
+    if(idx>=0) list[idx]=pos; else list.push(pos);
+    l.undocked=list; saveLayout(l); state.layout=l;
+  });
+}
+
 async function initLayout(){
   let l = loadLayout();
-  try { const me = await api('/me'); if(me.preferences && me.preferences.layout){ l = me.preferences.layout; } } catch(e){}
+  try { const me = await api('/me'); if(me.preferences && me.preferences.layout){ l = {...LAYOUT_DEFAULT, ...me.preferences.layout}; } } catch(e){}
   applyLayout(l);
   setupResizers();
-  document.getElementById('lockLayout').addEventListener('change', e=>{
-    const locked=e.target.checked;
-    document.body.classList.toggle('locked', locked);
-    const l=loadLayout(); l.locked=locked; saveLayout(l);
-  });
 }
 
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
@@ -382,7 +551,10 @@ function statusLabelByType(type, code){
 }
 function isTransportStatus(code){ return ['TR','TH','ED','DEL','HEMS','TRP','transport'].includes(code); }
 function needsMileage(code){ return ['OS','AD'].includes(code); }
-function serviceAreaColor(type){ if(type==='primary') return '#22c55e'; if(type==='secondary') return '#3b82f6'; if(type==='mutual') return '#eab308'; return '#64748b'; }
+function serviceAreaColor(type){
+  const M = {primary:'#22c55e', secondary:'#3b82f6', mutual:'#eab308', post:'#64748b', zone:'#a855f7', beat:'#f97316', staging:'#ec4899', coverage:'#06b6d4', water:'#0ea5e9', district:'#8b5cf6'};
+  return M[type] || '#3b82f6';
+}
 function matchesDiscipline(t){ return DISCIPLINE==='all' || t===DISCIPLINE; }
 function log(msg){ state.logs.unshift(`${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${msg}`); if(state.logs.length>100) state.logs.pop(); console.log(msg); }
 
@@ -410,7 +582,10 @@ function initMap(){
       <div class='font-bold mb-1 border-t border-slate-600 pt-1 mt-1'>Coverage</div>
       <div class='mb-0.5'><span class='dot' style='background:#22c55e'></span>Primary</div>
       <div class='mb-0.5'><span class='dot' style='background:#3b82f6'></span>Secondary</div>
-      <div class='mb-0.5'><span class='dot' style='background:#eab308'></span>Mutual Aid</div>`;
+      <div class='mb-0.5'><span class='dot' style='background:#eab308'></span>Mutual Aid</div>
+      <div class='mb-0.5'><span class='dot' style='background:#f97316'></span>Beat</div>
+      <div class='mb-0.5'><span class='dot' style='background:#a855f7'></span>Zone</div>
+      <div class='mb-0.5'><span class='dot' style='background:#06b6d4'></span>Coverage</div>`;
     return d;
   };
   legend.addTo(map);
@@ -1643,7 +1818,12 @@ function startStream(){
     if(adminLink && ['admin','super_admin','superadmin'].includes(me.role)) adminLink.classList.remove('hidden');
   } catch(e){}
   window.addEventListener('resize', ()=>{ if(map) map.invalidateSize(); });
-  setInterval(()=>{ if(document.getElementById('liveToggle').checked && !isUserInteracting()) load(); },10000);
+  window.addEventListener('keydown', e=>{
+    if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+    if(e.key==='F2'){ e.preventDefault(); window.location.href='/call-entry'; }
+    if(e.key==='F9'){ e.preventDefault(); window.location.href='/scheduled-transports-page'; }
+  });
+  setInterval(()=>{ if(state.layout?.autoRefresh && !isUserInteracting()) load(); },10000);
   setInterval(updateTimers,1000);
 })();
 
@@ -1718,6 +1898,24 @@ function attachIncidentPanelDrops(){
       <button class='bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-sm' onclick='closeCrewModal()'>Cancel</button>
       <button class='bg-blue-700 hover:bg-blue-600 px-3 py-1 rounded text-sm' onclick='saveCrew()'>Save</button>
     </div>
+  </div>
+</div>
+
+<div id='layoutModal'>
+  <div class='modal-box'>
+    <h2>Console Layout Editor</h2>
+    <p class='text-xs text-slate-400 mb-2'>Use this screen to customize the console. Unlock to resize columns, undock panels, and move them. Lock when taking calls to prevent accidental changes.</p>
+    <label class='layout-row'><span>Auto-refresh (10s)</span><input id='layoutAutoRefresh' type='checkbox' onchange='toggleLayoutAutoRefresh()'></label>
+    <label class='layout-row'><span>Lock layout</span><input id='layoutLock' type='checkbox' onchange='toggleLayoutLock()'></label>
+    <div class='border-t border-slate-700 my-2 pt-2'>
+      <div class='font-semibold text-sm mb-1'>Visible Panels</div>
+      <div id='layoutPanels'></div>
+    </div>
+    <div class='flex gap-2 mt-3'>
+      <button class='app-btn-outline flex-1' onclick='resetLayout()'>Reset to Default</button>
+      <button class='bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm flex-1' onclick='saveLayoutSettings()'>Save &amp; Close</button>
+    </div>
+    <button class='absolute top-2 right-2 text-slate-400 hover:text-white' onclick='closeLayoutEditor()'>&#x2715;</button>
   </div>
 </div>
 
