@@ -2635,7 +2635,10 @@ def version():
 
 @app.get('/customers', response_model=List[CustomerOut])
 def list_customers(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
-    return db.query(Customer).order_by(Customer.name).all()
+    q = db.query(Customer)
+    if current_user.get('role') != 'superadmin' and current_user.get('customer_id'):
+        q = q.filter(Customer.id == current_user.get('customer_id'))
+    return q.order_by(Customer.name).all()
 
 @app.post('/customers', response_model=CustomerOut)
 def create_customer(body: CustomerCreate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
@@ -2667,7 +2670,17 @@ def delete_customer(customer_id: int, current_user: dict = Depends(require_admin
 def create_agency(body: AgencyCreate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     agency = Agency(**body.model_dump())
     if agency.customer_id is None:
-        agency.customer_id = current_user.get('customer_id')
+        # Agencies are customers. Each agency gets its own customer tenant.
+        slug = (agency.domain or re.sub(r'[^a-z0-9]+', '-', agency.name.lower()).strip('-'))[:100]
+        if not slug:
+            slug = 'agency-' + str(int(time.time()))
+        if db.query(Customer).filter(Customer.slug == slug).first():
+            slug = slug + '-' + str(int(time.time() % 10000))
+        customer = Customer(name=agency.name, slug=slug, domain=agency.domain, config={}, approved=agency.approved)
+        db.add(customer)
+        db.commit()
+        db.refresh(customer)
+        agency.customer_id = customer.id
     fill_agency_lat_lng(agency)
     db.add(agency)
     db.commit()
