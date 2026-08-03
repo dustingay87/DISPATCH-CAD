@@ -157,10 +157,14 @@ function isFireSelected(){ return getSelectedType() === 'fire'; }
 
 function applyModuleBadge(){
   const m=state.user?.selected_module||localStorage.getItem('ur_module')||'all';
-  document.getElementById('brandTitle').textContent=MODULE_BRAND[m]||MODULE_BRAND.all;
+  const user=state.user||{};
+  const moduleName=MODULE_BRAND[m]||MODULE_BRAND.all;
+  const customerName=user.customer_name;
+  const customerLogo=user.customer_logo;
+  document.getElementById('brandTitle').textContent=customerName?`${customerName} - ${moduleName}`:moduleName;
   const logo = document.getElementById('brandLogo');
-  if(logo) logo.src = MODULE_LOGO[m] || MODULE_LOGO.all;
-  document.title=MODULE_BRAND[m]||MODULE_BRAND.all;
+  if(logo) logo.src = customerLogo || (MODULE_LOGO[m] || MODULE_LOGO.all);
+  document.title=customerName?`${customerName} - ${moduleName}`:moduleName;
   const sel=document.getElementById('moduleSelect');
   if(sel){ sel.value=m; }
 }

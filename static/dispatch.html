@@ -104,7 +104,7 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
       <div class='app-kpi-card'><div class='icon' style='color:#f97316'>🔔</div><div><div class='value' id='kpiUnacked'>0</div><div class='label'>Unacked Dispatches</div></div></div>
     </div>
     <div class='app-content'>
-      <main id='main' class='flex-1 grid p-0 overflow-hidden' style='grid-template-columns:var(--col1,25%) 4px var(--col2,45%) 4px var(--col3,30%);'>
+      <main id='main' class='flex-1 grid p-0 overflow-hidden' style='grid-template-columns:var(--col1,25%) 4px var(--col2,35%) 4px var(--col3,40%);'>
         <aside class='flex flex-col gap-1 min-h-0'>
           <div class='card flex-1 min-h-0'>
             <div class='card-head flex justify-between items-center'>
@@ -119,13 +119,15 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
           </div>
         </aside>
         <div id='resizer1' class='resizer'></div>
-        <section id='center' class='flex flex-col gap-1 min-h-0' style='grid-template-rows:var(--rowTop,55%) 4px var(--rowBottom,45%); display:grid;'>
-          <div id='incidentPanel' class='card min-h-0 overflow-auto'>
+        <section id='center' class='flex flex-col gap-1 min-h-0'>
+          <div id='incidentPanel' class='card flex-1 min-h-0 overflow-auto'>
             <div class='card-head'>Incident Workspace</div>
             <div class='p-2 text-slate-400'>Select a call from the left.</div>
           </div>
-          <div id='resizerV' class='resizer-h'></div>
-          <div class='card min-h-0'>
+        </section>
+        <div id='resizer2' class='resizer'></div>
+        <aside class='flex flex-col gap-1 min-h-0'>
+          <div class='card flex-1 min-h-0'>
             <div class='card-head flex justify-between items-center'>
               <span>Map</span>
               <div class='flex gap-3 text-xs'>
@@ -135,20 +137,13 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
             </div>
             <div class='card-body p-0'><div id='map'></div></div>
           </div>
-        </section>
-        <div id='resizer2' class='resizer'></div>
-        <aside class='flex flex-col gap-1 min-h-0'>
-          <div class='card flex-1 min-h-0'>
-            <div class='card-head flex justify-between'><span>Unit Board</span><span id='unitCount' class='text-slate-400'>0</span></div>
-            <div id='unitList' class='card-body'></div>
-          </div>
         </aside>
       </main>
       <div id='footerResizer' class='resizer-h'></div>
-      <footer id='footer' class='shrink-0 p-1 flex gap-1 min-h-0' style='height:var(--footer-h,9rem);'>
-        <div class='card w-1/2'>
-          <div class='card-head'>Event Log</div>
-          <div id='eventLog' class='card-body log font-mono text-slate-300 space-y-0.5'></div>
+      <footer id='footer' class='shrink-0 p-1 flex gap-1 min-h-0' style='height:var(--footer-h,14rem);'>
+        <div class='card w-1/2 flex flex-col'>
+          <div class='card-head flex justify-between'><span>Unit Board</span><span id='unitCount' class='text-slate-400'>0</span></div>
+          <div id='unitList' class='card-body'></div>
         </div>
         <div class='card w-1/2 flex flex-col'>
           <div class='card-head'>Messages</div>
@@ -164,7 +159,7 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
   </div>
 <script>
 const DEFAULT_CENTER = [39.9612,-82.9988];
-let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, configs:{}, postZones:[], selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false, mapLayers:[], destinations:{}, lastCallsHtml:null, lastUnitsHtml:null, showClosed:false };
+let state = { user:null, agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, configs:{}, postZones:[], selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false, mapLayers:[], destinations:{}, lastCallsHtml:null, lastUnitsHtml:null, showClosed:false };
 const QUICK_STAMPS = {
   police: ['Shots Fired','Officer Down','Help Needed','K9 Released','Taser Deployed','OC Deployed','In Custody','Vehicle Pursuit','Foot Pursuit','TVI','Crash','Item Thrown','Secure the Chanel','Send Coroner','Send EMS','Send Fire','Send Rescue','Entry Made','Vehicle Search','Building Search'],
   fire: ['Send Law Enforcement','Send EMS','Smoke Showing','Send Power Co','Entry Made','Fire Attack','Fire Out','Search','Recovery','Traffic Assistance','Road Closed','Lane Blocked','Command'],
@@ -208,15 +203,17 @@ const DISCIPLINE_BRAND={all:{name:'Unified Response',logo:'/static/d2d-logo.png'
 
 function updateBrand(){
   const cfg = DISCIPLINE_BRAND[DISCIPLINE] || DISCIPLINE_BRAND.all;
+  const user = state.user || {};
   const logo = document.getElementById('brandLogo');
   const title = document.getElementById('brandTitle');
-  if(logo) logo.src = cfg.logo;
-  if(title) title.textContent = cfg.name;
+  if(logo) logo.src = user.customer_logo || cfg.logo;
+  if(title) title.textContent = user.customer_name ? `${user.customer_name} - ${cfg.name}` : cfg.name;
+  document.title = user.customer_name ? `${user.customer_name} - ${cfg.name}` : cfg.name;
 }
 
 function loadLayout(){
   try{ const raw=localStorage.getItem(LAYOUT_KEY); if(raw){ return JSON.parse(raw); } }catch(e){}
-  return {col1:'25%',col2:'45%',col3:'30%',rowTop:'55%',rowBottom:'45%',footer:'9rem',locked:false};
+  return {col1:'25%',col2:'35%',col3:'40%',rowTop:'100%',rowBottom:'0%',footer:'14rem',locked:false};
 }
 function saveLayout(l){
   localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
@@ -387,7 +384,7 @@ function isTransportStatus(code){ return ['TR','TH','ED','DEL','HEMS','TRP','tra
 function needsMileage(code){ return ['OS','AD'].includes(code); }
 function serviceAreaColor(type){ if(type==='primary') return '#22c55e'; if(type==='secondary') return '#3b82f6'; if(type==='mutual') return '#eab308'; return '#64748b'; }
 function matchesDiscipline(t){ return DISCIPLINE==='all' || t===DISCIPLINE; }
-function log(msg){ state.logs.unshift(`${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${msg}`); if(state.logs.length>100) state.logs.pop(); renderLog(); }
+function log(msg){ state.logs.unshift(`${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${msg}`); if(state.logs.length>100) state.logs.pop(); console.log(msg); }
 
 function initMap(){
   map = L.map('map');
@@ -1640,6 +1637,8 @@ function startStream(){
   updateClock(); setInterval(updateClock,1000);
   try {
     const me = await api('/me');
+    state.user = me;
+    updateBrand();
     const adminLink = document.getElementById('adminLink');
     if(adminLink && ['admin','super_admin','superadmin'].includes(me.role)) adminLink.classList.remove('hidden');
   } catch(e){}

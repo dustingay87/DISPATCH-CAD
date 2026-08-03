@@ -64,10 +64,42 @@
   }
 
   if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', ()=>{ insertToggle(); showVersion(); });
+    document.addEventListener('DOMContentLoaded', ()=>{ insertToggle(); loadMe(); showVersion(); });
   } else {
     insertToggle();
+    loadMe();
     showVersion();
+  }
+
+  function loadMe(){
+    fetch('/me',{credentials:'include'}).then(r=>{ if(!r.ok) return null; return r.json(); }).then(me=>{
+      if(!me) return;
+      window.__urMe = me;
+      applyCustomerBrand(me);
+    }).catch(()=>{});
+  }
+
+  function applyCustomerBrand(me){
+    if(!me || (!me.customer_name && !me.customer_logo)) return;
+    const title = document.getElementById('brandTitle') || document.querySelector('h1');
+    const logo = document.getElementById('brandLogo') || document.querySelector('header img, .app-sidebar-header img, .d2d-header img');
+    if(logo && me.customer_logo){ logo.src = me.customer_logo; logo.onerror = function(){ this.src='/static/d2d-logo.png'; }; }
+    if(title && me.customer_name){
+      const suffix = title.textContent.replace(/^[^\-]+\s*-\s*/,'').trim();
+      const hasSuffix = suffix && suffix !== title.textContent;
+      title.textContent = (me.customer_name || 'Unified Response') + (hasSuffix ? ' - ' + suffix : '');
+    }
+    if(!title && !logo){
+      const header = findHeader();
+      if(header){
+        const badge = document.createElement('div');
+        badge.className = 'customer-brand';
+        badge.style.cssText = 'display:flex;align-items:center;gap:0.5rem;margin-right:auto;';
+        if(me.customer_logo) badge.innerHTML += `<img src='${me.customer_logo}' style='height:1.5rem' onerror='this.src="/static/d2d-logo.png"'>`;
+        if(me.customer_name) badge.innerHTML += `<span style='font-weight:700;color:#00B8FF'>${me.customer_name}</span>`;
+        header.insertBefore(badge, header.firstChild);
+      }
+    }
   }
 
   function showVersion(){

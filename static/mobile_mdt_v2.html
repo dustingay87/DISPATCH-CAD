@@ -98,7 +98,12 @@ body { -webkit-tap-highlight-color:transparent; overscroll-behavior:none; }
   </div>
 
   <div id='map' class='tab-content'>
-    <div id='map' class='map'></div>
+    <div id='routePanel' class='card hidden'>
+      <div class='text-xs font-semibold text-slate-400 uppercase mb-1'>Navigation</div>
+      <div id='routeSummary' class='text-sm text-slate-200'></div>
+      <div id='routeSteps' class='text-sm space-y-1 mt-2 max-h-40 overflow-auto'></div>
+    </div>
+    <div id='mapContainer' class='map'></div>
   </div>
 
   <div id='notes' class='tab-content'>
@@ -298,9 +303,13 @@ function render(){
   const u = state.unit; const a = state.agencyMap[u.agency_id]||{};
   const role = roleFromAgencyType(a.agency_type);
   const badge = ROLE_BADGE[role] || ROLE_BADGE.all;
-  document.getElementById('brandTitle').textContent = role==='all' ? 'Unified Response' : `Unified Response - ${role.toUpperCase()} MDT`;
+  const roleLogo = ROLE_LOGO[role] || ROLE_LOGO.all;
+  const me = state.me || {};
+  const customerName = me.customer_name || 'Unified Response';
+  document.getElementById('brandTitle').textContent = role==='all' ? customerName : `${customerName} - ${role.toUpperCase()} MDT`;
   const logo = document.getElementById('brandLogo');
-  if(logo) logo.src = ROLE_LOGO[role] || ROLE_LOGO.all;
+  if(logo) logo.src = me.customer_logo || roleLogo;
+  document.title = document.getElementById('brandTitle').textContent;
   document.getElementById('unitCallsign').textContent = u.call_sign;
   document.getElementById('unitAgency').textContent = a.name || a.agency_type || '';
   document.getElementById('unitStatus').textContent = statusLabel(u.current_status);
@@ -487,8 +496,9 @@ async function selectIncident(id){
 
 function initMap(){
   if(state.map) return;
-  state.map = L.map('map');
+  state.map = L.map('mapContainer');
   state.zonesLayer = L.layerGroup().addTo(state.map);
+  state.routeLayer = L.layerGroup().addTo(state.map);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap'}).addTo(state.map);
 }
 function serviceAreaColor(type){ if(type==='primary') return '#22c55e'; if(type==='secondary') return '#3b82f6'; if(type==='mutual') return '#eab308'; return '#3b82f6'; }
@@ -536,6 +546,80 @@ function renderMap(){
     const center = (u && u.lat!=null && u.lng!=null) ? [u.lat,u.lng] : (a && a.lat!=null && a.lng!=null ? [a.lat,a.lng] : DEFAULT_CENTER);
     state.map.setView(center, 11);
   }
+  updateRoute();
+}
+
+let routeCache = null;
+
+function getNavTarget(){
+  const p = state.packet;
+  if(p && p.destination && p.destination.lat!=null && p.destination.lng!=null) return [p.destination.lat, p.destination.lng];
+  if(p && p.lat!=null && p.lng!=null) return [p.lat, p.lng];
+  if(state.incident && state.incident.lat!=null && state.incident.lng!=null) return [state.incident.lat, state.incident.lng];
+  if(state.selectedIncident && state.selectedIncident.lat!=null && state.selectedIncident.lng!=null) return [state.selectedIncident.lat, state.selectedIncident.lng];
+  return null;
+}
+
+function formatRouteDistance(m){ return m<1000 ? `${Math.round(m)} m` : `${(m/1609.34).toFixed(1)} mi`; }
+function formatRouteDuration(s){ return s<60 ? `${Math.round(s)} s` : `${Math.round(s/60)} min`; }
+
+function routeInstructionText(step){
+  const type = step.maneuver?.type;
+  const mod = step.maneuver?.modifier;
+  const road = step.name || step.ref || 'unnamed road';
+  const dist = formatRouteDistance(step.distance);
+  if(type==='depart') return `Head ${mod||'straight'} on ${road} (${dist})`;
+  if(type==='arrive') return `Arrive at ${road} (${dist})`;
+  if(type==='turn') return `Turn ${mod} on ${road} (${dist})`;
+  if(type==='continue') return `Continue on ${road} (${dist})`;
+  if(type==='uturn') return `U-turn on ${road} (${dist})`;
+  if(type==='roundabout') return `Roundabout, exit ${step.maneuver?.exit||'?'} onto ${road} (${dist})`;
+  if(type==='new name') return `Continue on ${road} (${dist})`;
+  if(type==='merge') return `Merge onto ${road} (${dist})`;
+  if(type==='on ramp') return `Take ramp onto ${road} (${dist})`;
+  if(type==='off ramp') return `Take exit onto ${road} (${dist})`;
+  if(type==='fork') return `Keep ${mod||'straight'} onto ${road} (${dist})`;
+  return `${type||'Proceed'} ${mod||''} on ${road} (${dist})`;
+}
+
+function updateRoute(force){
+  if(!state.map || !state.unit || state.unit.lat==null || state.unit.lng==null) return;
+  const target = getNavTarget();
+  const panel = document.getElementById('routePanel');
+  if(!target){ if(panel) panel.classList.add('hidden'); return; }
+  const start = [state.unit.lat, state.unit.lng];
+  const end = [target[0], target[1]];
+  const key = `${start[0].toFixed(3)},${start[1].toFixed(3)};${end[0].toFixed(3)},${end[1].toFixed(3)}`;
+  const now = Date.now();
+  if(!force && routeCache && routeCache.key===key && now-routeCache.ts<30000) return;
+  const url = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true`;
+  fetch(url).then(r=>r.json()).then(data=>{
+    if(!data.routes || !data.routes.length) throw new Error('no route');
+    const route = data.routes[0];
+    if(!state.routeLayer){ state.routeLayer = L.layerGroup().addTo(state.map); }
+    state.routeLayer.clearLayers();
+    if(route.geometry){
+      L.geoJSON(route.geometry, {style:{color:'#2563eb',weight:5,opacity:0.8}}).addTo(state.routeLayer);
+    }
+    const leg = route.legs[0];
+    const summary = `${formatRouteDistance(route.distance)} • ${formatRouteDuration(route.duration)}`;
+    document.getElementById('routeSummary').textContent = summary;
+    const stepsHtml = leg.steps.map((s,i)=>`<div class='p-1 border-l-2 ${i===0?"border-green-500 bg-slate-800":"border-blue-500"} pl-2'>${routeInstructionText(s)}</div>`).join('');
+    document.getElementById('routeSteps').innerHTML = stepsHtml;
+    panel.classList.remove('hidden');
+    routeCache = {key, ts:now, route};
+    // Voice prompt for the current next turn
+    if('speechSynthesis' in window && leg.steps.length){
+      const next = leg.steps[0];
+      const text = `In ${formatRouteDistance(next.distance)}, ${routeInstructionText(next).replace(/\s*\([^)]*\)$/,'')}`;
+      const utter = new SpeechSynthesisUtterance(text);
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utter);
+    }
+  }).catch(err=>{
+    console.error('route error', err);
+    if(panel) panel.classList.add('hidden');
+  });
 }
 
 let pendingStatusCode = null;
