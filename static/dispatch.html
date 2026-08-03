@@ -1059,9 +1059,10 @@ window.dispatchRecommendedAll = async function(incidentId){
 let dragUnitId = null;
 let isDragging = false;
 function unitDragStart(e, unitId){
-  dragUnitId = unitId;
+  dragUnitId = Number(unitId);
   isDragging = true;
-  e.dataTransfer.setData('text/plain', unitId);
+  e.dataTransfer.setData('text/plain', String(unitId));
+  e.dataTransfer.setData('text/x-unit-id', String(unitId));
   e.dataTransfer.effectAllowed = 'move';
   e.currentTarget.classList.add('dragging');
 }
@@ -1072,6 +1073,7 @@ function unitDragEnd(e){
   document.querySelectorAll('tr.drop-target').forEach(r=>r.classList.remove('drop-target'));
 }
 function callDragOver(e, incidentId){
+  if(!isDragging || !dragUnitId){ e.dataTransfer.dropEffect = 'none'; return; }
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
   e.currentTarget.classList.add('drop-target');
@@ -1082,8 +1084,8 @@ function callDragLeave(e){
 async function callDrop(e, incidentId){
   e.preventDefault();
   e.currentTarget.classList.remove('drop-target');
-  const unitId = e.dataTransfer.getData('text/plain');
-  if(!unitId || !incidentId) return;
+  if(!isDragging || !dragUnitId || !incidentId) return;
+  const unitId = dragUnitId;
   log(`Call drop: unit ${unitId} on incident ${incidentId}`);
   try {
     const res = await api(`/incidents/${incidentId}/dispatch/${unitId}?reassign=1`, {method:'POST'});
@@ -1121,11 +1123,10 @@ function renderUnits(){
     const shiftIso = u.in_service_at || '';
     const staleClass = u.offline ? 'bg-slate-900 text-slate-500' : u.stale ? 'bg-orange-950 text-orange-400' : '';
     const staleText = u.offline ? ' (Offline)' : u.stale ? ' (Stale)' : '';
-    const dispatchable = u.current_incident_id || ['AQ','AFR','POSTING','STAGED','AT_STATION','AVAILABLE_ON_RADIO','IN_SERVICE','ON_DUTY'].includes(u.current_status);
-    const canDrag = dispatchable;
+    const canDrag = true;
     const crew = state.personnel.filter(p=>p.current_unit_id===u.id);
     const crewHtml = crew.length ? `<div class='flex -space-x-1 overflow-hidden'>${crew.map(p=>p.photo_url ? `<img src='${p.photo_url}' class='inline-block h-5 w-5 rounded-full ring-1 ring-slate-700' title='${p.first_name||''} ${p.last_name||''}${p.provider_level?' ('+p.provider_level+')':''}'>` : `<div class='inline-block h-5 w-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center ring-1 ring-slate-700' title='${p.first_name||''} ${p.last_name||''}${p.provider_level?' ('+p.provider_level+')':''}'>${(p.first_name?.[0]||'')}${(p.last_name?.[0]||'')}</div>`).join('')}</div>` : '-';
-    return `<tr class='${unitClass(u.current_status)} ${state.selectedUnit===u.id?'selected':''}' ${canDrag ? "draggable='true' ondragstart='unitDragStart(event,\"" + u.id + "\")' ondragend='unitDragEnd(event)'" : ''} onclick='selectUnit(${u.id})'>
+    return `<tr class='${unitClass(u.current_status)} ${state.selectedUnit===u.id?'selected':''}' draggable='true' ondragstart='unitDragStart(event,${u.id})' ondragend='unitDragEnd(event)' onclick='selectUnit(${u.id})'>
       <td class='font-bold'>${u.call_sign}</td>
       <td>${a.agency_type ? a.agency_type.toUpperCase() : '-'}</td>
       <td class='${staleClass}'>${statusLabelByType(a.agency_type,u.current_status)}${staleText}</td>
@@ -1540,6 +1541,7 @@ function attachIncidentPanelDrops(){
   if(!incidentPanel) return;
   let dropCount = 0;
   incidentPanel.addEventListener('dragenter', e=>{
+    if(!isDragging || !dragUnitId) return;
     e.preventDefault();
     if(++dropCount === 1) incidentPanel.classList.add('drop-target');
   });
@@ -1547,6 +1549,7 @@ function attachIncidentPanelDrops(){
     if(--dropCount <= 0){ dropCount = 0; incidentPanel.classList.remove('drop-target'); }
   });
   incidentPanel.addEventListener('dragover', e=>{
+    if(!isDragging || !dragUnitId){ e.dataTransfer.dropEffect = 'none'; return; }
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   });
@@ -1554,9 +1557,10 @@ function attachIncidentPanelDrops(){
     e.preventDefault();
     dropCount = 0;
     incidentPanel.classList.remove('drop-target');
-    const unitId = e.dataTransfer.getData('text/plain');
+    if(!isDragging || !dragUnitId) return;
+    const unitId = dragUnitId;
     const incidentId = state.selectedIncident;
-    if(!unitId || !incidentId) return;
+    if(!incidentId) return;
     log(`Panel drop: unit ${unitId} on incident ${incidentId}`);
     try {
       await api(`/incidents/${incidentId}/dispatch/${unitId}?reassign=1`, {method:'POST'});
