@@ -3,8 +3,8 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D Unified Response - Command</title>
-<link rel='icon' href='/static/d2d-logo.svg' type='image/svg+xml'>
+<title>Unified Response - Command</title>
+<link rel='icon' href='/static/favicon.png' type='image/png'>
 <script src='https://cdn.tailwindcss.com'></script>
 <link rel='stylesheet' href='/static/branding.css'>
 <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
@@ -33,12 +33,15 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: 'Inter', system
 .flash-urgent { animation:flashRed 1.2s infinite; }
 .overdue { color:#f87171; font-weight:bold; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='bg-slate-900 text-slate-200 text-xs h-screen flex flex-col d2d-font-body'>
   <header class='min-h-14 h-auto d2d-header flex flex-wrap items-center justify-between px-4 py-1 shrink-0 gap-2'>
     <div class='flex items-center gap-2'>
-      <img src='/static/d2d-logo.svg' class='h-8 w-8' alt='D2D'>
-      <div class='font-bold text-lg text-white d2d-logo-text' id='brandTitle'>D2D Unified Response</div>
+      <img id='brandLogo' src='/static/d2d-logo.png' class='h-8 w-8' alt=''>
+      <div class='font-bold text-lg text-white d2d-logo-text' id='brandTitle'>Unified Response</div>
       <select id='moduleSelect' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden'></select>
     </div>
     <div class='flex flex-wrap items-center gap-2'>
@@ -105,7 +108,8 @@ const CENTER=[39.9612,-82.9988];
 let state={agencies:[],units:[],mapUnits:[],incidents:[],scheduled:[],scheduledEvents:[],agencyMap:{},postZones:[],unitPostings:[],postingMap:{},personnel:[],selectedTrip:null,selectedVehicle:null,user:null,crossAgencies:[],destinationsList:{}};
 const LAYOUT_STORAGE='d2d_dashboard_layout';
 const MODULE_LABELS={ems:'EMS',fire:'Fire',law:'Law',all:'Command'};
-const MODULE_BRAND={ems:'D2D EMS',fire:'D2D Fire',law:'D2D Law',all:'D2D Command'};
+const MODULE_BRAND={ems:'Unified Response - EMS',fire:'Unified Response - Fire',law:'Unified Response - Law',all:'Unified Response'};
+const MODULE_LOGO={ems:'/static/logo-ems.png',fire:'/static/logo-fire.png',law:'/static/logo-law.png',all:'/static/d2d-logo.png'};
 const MODULE_COLOR={ems:'bg-emerald-700',fire:'bg-red-700',law:'bg-blue-700',all:'bg-purple-700'};
 let map,layers;
 
@@ -133,6 +137,8 @@ function isFireSelected(){ return getSelectedType() === 'fire'; }
 function applyModuleBadge(){
   const m=state.user?.selected_module||localStorage.getItem('ur_module')||'all';
   document.getElementById('brandTitle').textContent=MODULE_BRAND[m]||MODULE_BRAND.all;
+  const logo = document.getElementById('brandLogo');
+  if(logo) logo.src = MODULE_LOGO[m] || MODULE_LOGO.all;
   document.title=MODULE_BRAND[m]||MODULE_BRAND.all;
   const sel=document.getElementById('moduleSelect');
   if(sel){ sel.value=m; }
@@ -541,5 +547,7 @@ window.loadDestinationStatusSummary=async function(incidentId){
 
 init();setInterval(()=>{ if(!isUserInteracting()) load(); },10000);
 </script>
+<script src='/static/sortable.js'></script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

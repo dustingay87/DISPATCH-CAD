@@ -3,7 +3,7 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D HUD</title>
+<title>Unified Response - HUD</title>
 <script src='https://cdn.tailwindcss.com'></script>
 <style>
 html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; overflow:hidden; }
@@ -27,11 +27,14 @@ button.btn-red:hover { background:#b91c1c; }
 button.btn-slate { background:#475569; }
 button.btn-slate:hover { background:#334155; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body>
   <header class='h-14 bg-slate-950 border-b border-slate-700 flex items-center justify-between px-4'>
     <div class='flex items-center gap-2'>
-      <span class='font-bold text-lg text-white' id='brandTitle'>D2D HUD</span>
+      <span class='font-bold text-lg text-white' id='brandTitle'>Unified Response - HUD</span>
     </div>
     <div class='flex items-center gap-2 add-bar'>
       <label class='text-sm text-slate-400'>Screens</label>
@@ -178,5 +181,6 @@ document.getElementById('resetLayout').addEventListener('click', ()=>{
 
 render();
 </script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

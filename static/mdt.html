@@ -3,8 +3,8 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D Unified Response - MDT</title>
-<link rel='icon' href='/static/d2d-logo.svg' type='image/svg+xml'>
+<title>Unified Response - MDT</title>
+<link rel='icon' href='/static/favicon.png' type='image/png'>
 <script src='https://cdn.tailwindcss.com'></script>
 <link rel='stylesheet' href='/static/branding.css'>
 <style>
@@ -29,6 +29,9 @@
   .do-timer { font-size:5rem; font-weight:700; font-variant-numeric:tabular-nums; margin:1rem 0; }
   .do-instruction { display:inline-block; font-size:1.5rem; font-weight:700; text-transform:uppercase; border:4px solid #fff; padding:1rem 2rem; border-radius:1rem; margin-top:1.5rem; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='bg-slate-900 text-slate-100 h-screen flex flex-col d2d-font-body'>
   <header class='h-20 d2d-header flex items-center justify-between px-6'>
@@ -76,7 +79,7 @@
   <div id='loading' class='absolute inset-0 bg-slate-950/90 flex items-center justify-center text-2xl font-bold hidden'></div>
   <div id='startScreen' class='absolute inset-0 bg-slate-950/95 flex items-start justify-center pt-10 z-50 overflow-auto'>
     <div class='bg-slate-800 border border-slate-600 rounded-xl p-6 w-full max-w-2xl shadow-2xl'>
-      <h1 class='text-2xl font-bold mb-1'>D2D MDT Start</h1>
+      <h1 class='text-2xl font-bold mb-1'>Unified Response - MDT Start</h1>
       <p class='text-slate-400 text-sm mb-4'>Select your unit, crew, and duty status to appear on the dispatcher screen.</p>
       <div id='startForm' class='space-y-4'></div>
     </div>
@@ -408,5 +411,6 @@ if(unitId){ load(); } else { loadStart(); }
 if('Notification' in window) Notification.requestPermission();
 setInterval(()=>{ if(unitId && document.getElementById('liveToggle').checked) load(); }, 10000);
 </script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

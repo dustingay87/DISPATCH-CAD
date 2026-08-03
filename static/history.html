@@ -3,8 +3,8 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D Unified Response - Call History</title>
-<link rel='icon' href='/static/d2d-logo.svg' type='image/svg+xml'>
+<title>Unified Response - Call History</title>
+<link rel='icon' href='/static/favicon.png' type='image/png'>
 <script src='https://cdn.tailwindcss.com'></script>
 <link rel='stylesheet' href='/static/branding.css'>
 <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
@@ -20,12 +20,15 @@
   .tab.active { background:#475569; color:#fff; }
   #map { height:300px; background:#0f172a; border-radius:0.5rem; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='bg-slate-900 text-slate-200 h-screen flex flex-col d2d-font-body'>
   <header class='h-16 d2d-header flex items-center justify-between px-4 shrink-0'>
     <div class='flex items-center gap-2'>
-      <img src='/static/d2d-logo.svg' class='h-8 w-8' alt='D2D'>
-      <span class='text-xl d2d-logo-text text-white'>D2D Unified Response</span>
+      <img src='/static/d2d-logo.png' class='h-8 w-8' alt=''>
+      <span class='text-xl d2d-logo-text text-white'>Unified Response</span>
       <span class='text-slate-400 font-normal text-base ml-2'>Call History</span>
     </div>
     <a href='/' class='bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded'>Console</a>
@@ -274,5 +277,6 @@ function init(){
 
 init();
 </script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

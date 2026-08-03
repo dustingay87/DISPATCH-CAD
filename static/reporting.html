@@ -3,7 +3,7 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D Reporting</title>
+<title>Unified Response - Reporting</title>
 <script src='https://cdn.tailwindcss.com'></script>
 <style>
   html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
@@ -13,11 +13,14 @@
   .bar-fill { height:100%; background:#2563eb; }
   .hidden { display:none; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='p-4'>
   <div class='max-w-6xl mx-auto space-y-4'>
     <div class='flex justify-between items-center'>
-      <h1 class='text-2xl font-bold'>D2D <span class='text-slate-400 font-normal'>Reporting</span></h1>
+      <h1 class='text-2xl font-bold'>Unified Response - <span class='text-slate-400 font-normal'>Reporting</span></h1>
       <div class='space-x-2'>
         <a href='/admin' class='px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-white text-sm'>Admin</a>
         <a href='/console' class='px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-white text-sm'>Console</a>
@@ -122,5 +125,7 @@ function renderBar(id, data, total, labels={}){
 
 init();
 </script>
+<script src='/static/sortable.js'></script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

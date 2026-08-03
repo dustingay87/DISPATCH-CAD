@@ -3,7 +3,7 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D Call Entry</title>
+<title>Unified Response - Call Entry</title>
 <script src='https://cdn.tailwindcss.com'></script>
 <style>
   html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
@@ -16,11 +16,14 @@
   input, select, textarea { background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:0.5rem 0.75rem; border-radius:0.25rem; width:100%; }
   .hidden { display:none; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='p-4'>
   <div class='max-w-3xl mx-auto space-y-4'>
-    <div class='flex justify-between items-center'>
-      <h1 class='text-2xl font-bold'>D2D <span class='text-slate-400 font-normal'>Call Entry</span></h1>
+    <div class='flex flex-wrap justify-between items-center gap-2'>
+      <h1 class='text-2xl font-bold'>Unified Response - <span class='text-slate-400 font-normal'>Call Entry</span></h1>
       <div class='space-x-2'>
         <a href='/console' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Console</a>
         <a href='/admin' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Admin</a>
@@ -125,16 +128,8 @@
             </div>
           </div>
           <div id='fireFields' class='hidden grid grid-cols-1 md:grid-cols-2 gap-4'>
-            <div>
-              <label class='text-xs text-slate-500 uppercase'>Smoke Color</label>
-              <select id='f_smoke_color'>
-                <option value=''>Select...</option>
-                <option value='none'>None</option>
-                <option value='white'>White</option>
-                <option value='gray'>Gray</option>
-                <option value='black'>Black</option>
-                <option value='brown'>Brown</option>
-              </select>
+            <div class='flex items-center gap-2'>
+              <input id='f_smoke_showing' type='checkbox' class='w-auto'> <label for='f_smoke_showing' class='text-xs text-slate-400'>Smoke Showing</label>
             </div>
             <div>
               <label class='text-xs text-slate-500 uppercase'>Structure Type</label>
@@ -233,6 +228,7 @@
         </div>
         <div class='md:col-span-2 flex justify-end space-x-2'>
           <span id='saveStatus' class='text-xs text-slate-500 self-center mr-2 hidden'></span>
+          <button type='button' id='createBtn' class='btn btn-primary'>Create Call</button>
           <button type='submit' id='submitBtn' class='btn btn-primary hidden'>Open for Dispatch</button>
         </div>
       </form>
@@ -254,6 +250,7 @@ function api(path, opts={}){
       const text = await r.text();
       let msg = text;
       try{ const d = JSON.parse(text); if(d.detail) msg = d.detail; } catch(e){}
+      if(msg && msg.length > 200) msg = msg.slice(0,200)+'...';
       throw new Error(`${path} ${r.status}: ${msg}`);
     }
     return r.json();
@@ -283,7 +280,8 @@ function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60);
 function showMsg(text, ok=true){
   const el = document.getElementById('msg'); el.classList.remove('hidden');
   el.className = ok ? 'px-4 py-2 rounded text-sm bg-green-900 text-green-100' : 'px-4 py-2 rounded text-sm bg-red-900 text-red-100';
-  el.textContent = text; setTimeout(()=>el.classList.add('hidden'), 4000);
+  el.textContent = text;
+  if(ok) setTimeout(()=>el.classList.add('hidden'), 4000);
 }
 
 function setDiscipline(d){
@@ -349,7 +347,7 @@ function renderDisciplineFields(){
 function collectDisciplineFields(){
   const out = {};
   const ids = state.DISCIPLINE === 'police' ? ['p_crime_type','p_weapon','p_in_progress','p_suspect_count','p_victim_count','p_suspect_desc','p_safety_notes'] :
-              state.DISCIPLINE === 'fire' ? ['f_smoke_color','f_structure_type','f_occupancy','f_visible_flames','f_hazmat','f_exposures'] :
+              state.DISCIPLINE === 'fire' ? ['f_smoke_showing','f_structure_type','f_occupancy','f_visible_flames','f_hazmat','f_exposures'] :
               ['e_chief_complaint','e_patient_age','e_patient_sex','e_consciousness','e_breathing','e_bleeding'];
   ids.forEach(id=>{
     const el = document.getElementById(id);
@@ -391,15 +389,28 @@ function getFormBody(status='intake'){
 }
 
 async function createIntake(){
+  const agencyId = document.getElementById('agency').value;
+  const callType = document.getElementById('callType').value;
+  const location = document.getElementById('location').value;
+  if(!agencyId){ showMsg('Select an agency before creating the call.', false); return false; }
+  if(!callType){ showMsg('Select a call type.', false); return false; }
+  if(!location){ showMsg('Enter a location.', false); return false; }
+  const ss = document.getElementById('saveStatus');
+  ss.textContent = 'Creating...'; ss.classList.remove('hidden','text-red-400','text-green-400'); ss.classList.add('text-slate-400');
   const body = getFormBody('intake');
+  console.log('create call body', body);
   try {
     const inc = await api('/incidents', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     createdIncidentId = inc.id;
     document.getElementById('intakeNumber').textContent = inc.call_number || inc.incident_number;
     document.getElementById('consoleLink').href = `/console?discipline=${state.DISCIPLINE}`;
+    document.getElementById('createBtn').classList.add('hidden');
     document.getElementById('submitBtn').classList.remove('hidden');
     document.getElementById('intakeActions').classList.remove('hidden');
-  } catch(err){ showMsg(err.message, false); }
+    ss.textContent = 'Created'; ss.classList.remove('hidden','text-slate-400','text-red-400'); ss.classList.add('text-green-400');
+    setTimeout(()=>ss.classList.add('hidden'), 1500);
+    return true;
+  } catch(err){ console.error('create call error', err); showMsg(err.message, false); ss.classList.add('hidden'); return false; }
 }
 
 let saveTimer;
@@ -431,7 +442,7 @@ document.getElementById('callForm').addEventListener('change', e=>{ if(e.target.
 
 document.getElementById('callForm').addEventListener('submit', async e=>{
   e.preventDefault();
-  if(!createdIncidentId) return;
+  if(!createdIncidentId && !(await createIntake())) return;
   if(!(await saveIntake())) return;
   try {
     await api(`/incidents/${createdIncidentId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:'open'})});
@@ -447,6 +458,8 @@ document.getElementById('openBtn').addEventListener('click', async e=>{
     window.location.href = `/console?discipline=${state.DISCIPLINE}`;
   } catch(err){ showMsg(err.message, false); }
 });
+
+document.getElementById('createBtn').addEventListener('click', createIntake);
 
 async function init(){
   try {
@@ -464,11 +477,11 @@ async function init(){
     }
     setDiscipline(defaultDiscipline);
     await loadConfig();
-    await createIntake();
     startTimer();
   } catch(err){ showMsg(err.message, false); }
 }
 init();
 </script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

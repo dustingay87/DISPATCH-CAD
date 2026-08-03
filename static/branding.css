@@ -1,0 +1,60 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap');
+
+:root {
+  --d2d-navy: #081D33;
+  --d2d-steel: #1E4B8C;
+  --d2d-cyan: #00B8FF;
+  --d2d-gray: #687280;
+  --d2d-slate: #F1FAF8;
+  --d2d-gold: #F2B705;
+  --d2d-law: #1E58FF;
+  --d2d-fire: #E02428;
+  --d2d-ems: #00B894;
+  --d2d-mobile: #FF8A00;
+  --d2d-command: #6A3DF0;
+  --d2d-connect: #F2B705;
+  --d2d-insights: #00D2C6;
+  --d2d-training: #FFB32C;
+}
+
+.d2d-font-display { font-family: 'Outfit', sans-serif; }
+.d2d-font-body { font-family: 'Inter', system-ui, sans-serif; }
+.d2d-text-navy { color: var(--d2d-navy); }
+.d2d-text-steel { color: var(--d2d-steel); }
+.d2d-text-cyan { color: var(--d2d-cyan); }
+.d2d-text-gold { color: var(--d2d-gold); }
+.d2d-bg-navy { background-color: var(--d2d-navy); }
+.d2d-bg-steel { background-color: var(--d2d-steel); }
+.d2d-bg-cyan { background-color: var(--d2d-cyan); }
+.d2d-bg-gold { background-color: var(--d2d-gold); }
+.d2d-border-cyan { border-color: var(--d2d-cyan); }
+.d2d-border-gold { border-color: var(--d2d-gold); }
+
+.d2d-btn {
+  background-color: var(--d2d-cyan);
+  color: var(--d2d-navy);
+  font-weight: 600;
+  border-radius: 0.375rem;
+  transition: background-color 0.15s ease;
+}
+.d2d-btn:hover { background-color: #33c6ff; }
+
+.d2d-btn-gold {
+  background-color: var(--d2d-gold);
+  color: var(--d2d-navy);
+  font-weight: 600;
+  border-radius: 0.375rem;
+  transition: background-color 0.15s ease;
+}
+.d2d-btn-gold:hover { background-color: #f5c43a; }
+
+.d2d-header {
+  background-color: var(--d2d-navy);
+  border-bottom: 2px solid var(--d2d-steel);
+}
+
+.d2d-logo-text {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}

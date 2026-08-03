@@ -22,6 +22,9 @@
   tr:hover td { background:#334155; }
   .alert { background:#1e293b; border-left:4px solid #ef4444; color:#fff; padding:0.5rem; border-radius:0.25rem; margin-bottom:0.5rem; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='bg-slate-900 text-slate-200 text-xs'>
   <header class='h-14 bg-slate-800 flex items-center justify-between px-3 border-b border-slate-700'>
@@ -277,5 +280,7 @@ map.on('click',e=>{
 
 load();
 </script>
+<script src='/static/sortable.js'></script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

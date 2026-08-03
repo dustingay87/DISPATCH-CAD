@@ -8,5 +8,11 @@ services:
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: INSECURE_DEV
+        value: "false"
+      - key: DEFAULT_TIMEZONE
+        value: "America/Chicago"
+      - key: SECRET_KEY
+        sync: false
       - key: SUPABASE_DB_URL
         sync: false

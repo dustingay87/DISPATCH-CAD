@@ -3,8 +3,8 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D Unified Response - Users</title>
-<link rel='icon' href='/static/d2d-logo.svg' type='image/svg+xml'>
+<title>Unified Response - Users</title>
+<link rel='icon' href='/static/favicon.png' type='image/png'>
 <script src='https://cdn.tailwindcss.com'></script>
 <link rel='stylesheet' href='/static/branding.css'>
 <style>
@@ -19,13 +19,16 @@
   th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
   .hidden { display:none; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='p-4 d2d-font-body'>
   <div class='max-w-5xl mx-auto space-y-4'>
     <div class='flex justify-between items-center'>
       <div class='flex items-center gap-2'>
-        <img src='/static/d2d-logo.svg' class='h-8 w-8' alt='D2D'>
-        <h1 class='text-2xl d2d-logo-text text-white'>D2D Unified Response</h1>
+        <img src='/static/d2d-logo.png' class='h-8 w-8' alt=''>
+        <h1 class='text-2xl d2d-logo-text text-white'>Unified Response</h1>
         <span class='text-slate-400 font-normal'>Users</span>
       </div>
       <div class='space-x-2'>
@@ -145,5 +148,7 @@ async function deleteUser(id){
 
 (async function(){ await loadAgencies(); loadUsers(); })();
 </script>
+<script src='/static/sortable.js'></script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

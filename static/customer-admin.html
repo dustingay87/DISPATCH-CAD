@@ -3,7 +3,7 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D Customer Admin</title>
+<title>Unified Response - Customer Admin</title>
 <script src='https://cdn.tailwindcss.com'></script>
 <style>
 html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
@@ -19,11 +19,14 @@ th, td { padding:0.5rem; border-bottom:1px solid #334155; text-align:left; }
 th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
 .tag { background:#334155; padding:0.15rem 0.4rem; border-radius:0.25rem; font-size:0.75rem; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='p-4'>
   <div class='max-w-6xl mx-auto space-y-4'>
-    <div class='flex justify-between items-center'>
-      <h1 class='text-2xl font-bold'>D2D <span class='text-slate-400 font-normal'>Customer Admin</span></h1>
+    <div class='flex flex-wrap justify-between items-center gap-2'>
+      <h1 class='text-2xl font-bold'>Unified Response - <span class='text-slate-400 font-normal'>Customer Admin</span></h1>
       <div class='space-x-2'>
         <a href='/' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Dashboard</a>
         <a href='/admin' class='btn bg-slate-700 hover:bg-slate-600 text-white'>System Admin</a>
@@ -48,6 +51,16 @@ th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
       </div>
 
       <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Response Planning</h2>
+        <label class='flex items-center gap-2 text-sm'>
+          <input type='checkbox' id='featureResponsePlanning'>
+          <span>Enable response planning / run-card recommendations</span>
+        </label>
+        <p class='text-xs text-slate-500 mt-1'>When on, the dispatch console shows Resource Slots and a "Dispatch All Needed" button based on the profiles below. Fire/EMS customers can disable this if they do not use pre-planned responses.</p>
+        <button id='saveResponsePlanning' class='btn btn-primary text-white mt-2'>Save Response Planning Setting</button>
+      </div>
+
+      <div class='card'>
         <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Call Types</h2>
         <div id='callTypeList' class='mb-2'></div>
         <form id='callTypeForm' class='grid grid-cols-1 sm:grid-cols-4 gap-2'>
@@ -60,6 +73,37 @@ th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
             <button type='button' id='ctCancel' class='btn bg-slate-700 hover:bg-slate-600 text-white hidden' onclick='resetCallTypeForm()'>Cancel</button>
           </div>
         </form>
+      </div>
+
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Response Profiles</h2>
+        <div id='responseProfileList' class='mb-2'></div>
+        <form id='responseProfileForm' class='space-y-2 border border-slate-700 p-2 rounded hidden'>
+          <input type='hidden' id='rpCallType'>
+          <div class='flex gap-2 items-center'>
+            <span id='rpLabel' class='font-semibold text-sm w-48 truncate'></span>
+            <select id='rpMode' class='flex-1'>
+              <option value='emergency'>Emergency</option>
+              <option value='routine'>Routine</option>
+            </select>
+            <select id='rpServiceLevel' class='flex-1 hidden'>
+              <option value=''>Service Level (optional)</option>
+              <option value='ALS'>ALS</option>
+              <option value='BLS'>BLS</option>
+            </select>
+          </div>
+          <div id='rpSlots' class='space-y-1'></div>
+          <div class='flex gap-2'>
+            <select id='rpSlotUnit' class='flex-1'><option value=''>Unit type</option></select>
+            <input id='rpSlotCount' type='number' min='1' value='1' class='w-20'>
+            <button type='button' id='rpAddSlot' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Add Slot</button>
+          </div>
+          <div class='flex gap-2'>
+            <button id='rpSubmit' class='btn btn-primary text-white flex-1'>Save Profile</button>
+            <button type='button' id='rpCancel' class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='resetResponseProfileForm()'>Cancel</button>
+          </div>
+        </form>
+        <p id='rpNoCallTypes' class='text-xs text-slate-500 hidden'>Add call types first to build response profiles.</p>
       </div>
 
       <div class='card'>
@@ -107,6 +151,11 @@ th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
           <input id='pEmail' placeholder='Email'>
           <select id='pDuty' class='w-full'><option value='off_duty'>Off Duty</option><option value='on_duty'>On Duty</option></select>
           <select id='pUnit' class='w-full'><option value=''>No unit</option></select>
+          <div class='sm:col-span-4 flex items-center gap-2'>
+            <img id='pPhotoPreview' class='h-10 w-10 rounded-full object-cover border border-slate-600 hidden'>
+            <input type='file' id='pPhotoFile' accept='image/*'>
+            <button type='button' class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='uploadPersonnelPhoto()'>Upload Photo</button>
+          </div>
           <div class='flex gap-2'>
             <button id='pSubmit' class='btn btn-primary text-white flex-1'>Add Crew</button>
             <button type='button' id='pCancel' class='btn bg-slate-700 hover:bg-slate-600 text-white hidden' onclick='resetPersonnelForm()'>Cancel</button>
@@ -128,6 +177,11 @@ th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
           <input id='uTaipPort' placeholder='Port #' type='number'>
           <input id='uLat' placeholder='Lat' type='number' step='any'>
           <input id='uLng' placeholder='Lng' type='number' step='any'>
+          <div class='sm:col-span-4 flex items-center gap-2'>
+            <img id='uPhotoPreview' class='h-10 w-10 rounded-full object-cover border border-slate-600 hidden'>
+            <input type='file' id='uPhotoFile' accept='image/*'>
+            <button type='button' class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='uploadUnitPhoto()'>Upload Photo</button>
+          </div>
           <div class='flex gap-2'>
             <button id='uSubmit' class='btn btn-primary text-white flex-1'>Add Unit</button>
             <button type='button' id='uCancel' class='btn bg-slate-700 hover:bg-slate-600 text-white hidden' onclick='resetUnitForm()'>Cancel</button>
@@ -140,7 +194,40 @@ th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
 <script>
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 
-let state = {agencies:[], agency_id:null, call_types:[], unit_types:[], units:[], personnel:[]};
+function resizeImage(file, maxDim=1024, quality=0.85){
+  return new Promise((resolve, reject)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      let w = img.width, h = img.height;
+      if(w > maxDim || h > maxDim){
+        const scale = Math.min(maxDim/w, maxDim/h);
+        w = Math.round(w*scale); h = Math.round(h*scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(img.src);
+      canvas.toBlob(blob=>resolve(blob), 'image/jpeg', quality);
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function uploadPhoto(path, file, previewEl){
+  let uploadFile = file;
+  if(file.size > 1024*1024){
+    const blob = await resizeImage(file);
+    if(blob.size > 1024*1024){ throw new Error('Image is too large (max 1MB after resize)'); }
+    uploadFile = new File([blob], 'photo.jpg', {type:'image/jpeg'});
+  }
+  const form = new FormData(); form.append('file', uploadFile);
+  const res = await api(path, {method:'POST', body:form});
+  if(previewEl){ previewEl.src = res.photo_url; previewEl.classList.remove('hidden'); }
+  return res;
+}
+
+let state = {agencies:[], agency_id:null, call_types:[], unit_types:[], units:[], personnel:[], features:{}, response_profiles:{}};
 
 async function loadAgencies(){
   state.agencies = await api('/agencies');
@@ -152,8 +239,10 @@ document.getElementById('agencySelect').addEventListener('change', async e=>{
   if(!state.agency_id){ document.getElementById('setup').classList.add('hidden'); return; }
   document.getElementById('setup').classList.remove('hidden');
   await loadModules();
+  await loadFeatures();
   await loadCallTypes();
   await loadUnitTypes();
+  await loadResponseProfiles();
   await loadDestinations();
   await loadUnits();
   await loadPersonnel();
@@ -314,7 +403,7 @@ document.getElementById('destForm').addEventListener('submit', async e=>{
 
 async function loadUnits(){
   state.units = await api(`/units?agency_id=${state.agency_id}`);
-  document.getElementById('unitList').innerHTML = state.units.length ? `<table><thead><tr><th>Call Sign</th><th>Name</th><th>Type</th><th>Status</th><th></th></tr></thead><tbody>${state.units.map(u=>`<tr><td>${u.call_sign}</td><td>${u.name}</td><td>${u.unit_type}</td><td>${u.current_status}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editUnit(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deleteUnit(${u.id})'>Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No units.</div>';
+  document.getElementById('unitList').innerHTML = state.units.length ? `<table><thead><tr><th>Photo</th><th>Call Sign</th><th>Name</th><th>Type</th><th>Status</th><th></th></tr></thead><tbody>${state.units.map(u=>`<tr><td>${u.photo_url?`<img src='${u.photo_url}' class='h-8 w-8 rounded-full object-cover border border-slate-600'>`:'-'}</td><td>${u.call_sign}</td><td>${u.name}</td><td>${u.unit_type}</td><td>${u.current_status}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editUnit(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deleteUnit(${u.id})'>Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No units.</div>';
   const opts = state.units.map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
   document.getElementById('pUnit').innerHTML = '<option value="">No unit</option>' + opts;
 }
@@ -324,6 +413,8 @@ function resetUnitForm(){
   document.getElementById('unitFormTitle').textContent='Units';
   document.getElementById('uSubmit').textContent='Add Unit';
   document.getElementById('uCancel').classList.add('hidden');
+  const prev = document.getElementById('uPhotoPreview'); prev.src=''; prev.classList.add('hidden');
+  document.getElementById('uPhotoFile').value='';
 }
 
 function editUnit(u){
@@ -340,6 +431,21 @@ function editUnit(u){
   document.getElementById('unitFormTitle').textContent='Edit Unit';
   document.getElementById('uSubmit').textContent='Update Unit';
   document.getElementById('uCancel').classList.remove('hidden');
+  const prev = document.getElementById('uPhotoPreview');
+  if(u.photo_url){ prev.src=u.photo_url; prev.classList.remove('hidden'); } else { prev.src=''; prev.classList.add('hidden'); }
+  document.getElementById('uPhotoFile').value='';
+}
+
+async function uploadUnitPhoto(){
+  const id = document.getElementById('uId').value;
+  const file = document.getElementById('uPhotoFile').files[0];
+  if(!id){ alert('Save the unit before uploading a photo'); return; }
+  if(!file){ alert('Select a photo'); return; }
+  try {
+    await uploadPhoto(`/units/${id}/photo`, file, document.getElementById('uPhotoPreview'));
+    alert('Unit photo updated');
+    await loadUnits();
+  } catch(err){ alert(err.message); }
 }
 
 async function deleteUnit(id){
@@ -371,7 +477,7 @@ document.getElementById('unitForm').addEventListener('submit', async e=>{
 
 async function loadPersonnel(){
   state.personnel = await api(`/personnel?agency_id=${state.agency_id}`);
-  document.getElementById('personnelList').innerHTML = state.personnel.length ? `<table><thead><tr><th>Name</th><th>Radio</th><th>Phone</th><th>Duty</th><th>Unit</th><th></th></tr></thead><tbody>${state.personnel.map(p=>`<tr><td>${p.first_name} ${p.last_name}</td><td>${p.radio_id||'-'}</td><td>${p.phone||'-'}</td><td>${p.duty_status}</td><td>${(state.units.find(u=>u.id==p.current_unit_id)||{}).call_sign||'-'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editPersonnel(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deletePersonnel(${p.id})'>Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No crew members.</div>';
+  document.getElementById('personnelList').innerHTML = state.personnel.length ? `<table><thead><tr><th>Photo</th><th>Name</th><th>Radio</th><th>Phone</th><th>Duty</th><th>Unit</th><th></th></tr></thead><tbody>${state.personnel.map(p=>`<tr><td>${p.photo_url?`<img src='${p.photo_url}' class='h-8 w-8 rounded-full object-cover border border-slate-600'>`:'-'}</td><td>${p.first_name} ${p.last_name}</td><td>${p.radio_id||'-'}</td><td>${p.phone||'-'}</td><td>${p.duty_status}</td><td>${(state.units.find(u=>u.id==p.current_unit_id)||{}).call_sign||'-'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editPersonnel(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deletePersonnel(${p.id})'>Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No crew members.</div>';
 }
 
 function resetPersonnelForm(){
@@ -379,6 +485,8 @@ function resetPersonnelForm(){
   document.getElementById('personnelFormTitle').textContent='Crew Members';
   document.getElementById('pSubmit').textContent='Add Crew';
   document.getElementById('pCancel').classList.add('hidden');
+  const prev = document.getElementById('pPhotoPreview'); prev.src=''; prev.classList.add('hidden');
+  document.getElementById('pPhotoFile').value='';
 }
 
 function editPersonnel(p){
@@ -393,6 +501,21 @@ function editPersonnel(p){
   document.getElementById('personnelFormTitle').textContent='Edit Crew Member';
   document.getElementById('pSubmit').textContent='Update Crew';
   document.getElementById('pCancel').classList.remove('hidden');
+  const prev = document.getElementById('pPhotoPreview');
+  if(p.photo_url){ prev.src=p.photo_url; prev.classList.remove('hidden'); } else { prev.src=''; prev.classList.add('hidden'); }
+  document.getElementById('pPhotoFile').value='';
+}
+
+async function uploadPersonnelPhoto(){
+  const id = document.getElementById('pId').value;
+  const file = document.getElementById('pPhotoFile').files[0];
+  if(!id){ alert('Save the crew member before uploading a photo'); return; }
+  if(!file){ alert('Select a photo'); return; }
+  try {
+    await uploadPhoto(`/personnel/${id}/photo`, file, document.getElementById('pPhotoPreview'));
+    alert('Crew photo updated');
+    await loadPersonnel();
+  } catch(err){ alert(err.message); }
 }
 
 async function deletePersonnel(id){
@@ -425,7 +548,132 @@ async function logout(){
   window.location.href='/login';
 }
 
+// Features / response planning
+async function loadFeatures(){
+  const features = await getConfigValue('features') || {};
+  state.features = features;
+  document.getElementById('featureResponsePlanning').checked = !!features.response_planning;
+}
+
+document.getElementById('saveResponsePlanning').addEventListener('click', async ()=>{
+  const features = state.features || {};
+  features.response_planning = document.getElementById('featureResponsePlanning').checked;
+  state.features = features;
+  await setConfigValue('features', features);
+  alert('Response planning setting saved');
+});
+
+// Response profiles
+let rpSlots = [];
+
+async function loadResponseProfiles(){
+  const rp = await getConfigValue('response_profiles') || {};
+  state.response_profiles = rp;
+  renderResponseProfiles();
+}
+
+function renderResponseProfiles(){
+  const el = document.getElementById('responseProfileList');
+  const form = document.getElementById('responseProfileForm');
+  const noCt = document.getElementById('rpNoCallTypes');
+  if(!state.call_types.length){
+    el.innerHTML = '';
+    form.classList.add('hidden');
+    noCt.classList.remove('hidden');
+    return;
+  }
+  noCt.classList.add('hidden');
+  const rows = state.call_types.map((ct,i)=>{
+    const profile = state.response_profiles[ct.label] || {};
+    const slots = (profile.slots || []).map(s=>`${s.unit_type} x${s.count}`).join(', ') || 'Not set';
+    const mode = profile.response_mode || '-';
+    return `<tr><td>${ct.label}</td><td>P${ct.priority}</td><td>${mode}</td><td>${slots}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editResponseProfile(${i})'>Edit</button>${state.response_profiles[ct.label] ? `<button class='btn btn-danger' onclick='deleteResponseProfile(${i})'>Delete</button>` : ''}</td></tr>`;
+  }).join('');
+  el.innerHTML = `<table><thead><tr><th>Call Type</th><th>Priority</th><th>Mode</th><th>Slots</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function escapeHtml(str){ return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function editResponseProfile(idx){
+  const ct = state.call_types[idx];
+  const profile = state.response_profiles[ct.label] || {};
+  document.getElementById('responseProfileForm').classList.remove('hidden');
+  document.getElementById('rpCallType').value = ct.label;
+  document.getElementById('rpLabel').textContent = ct.label;
+  document.getElementById('rpMode').value = profile.response_mode || 'emergency';
+  const agency = state.agencies.find(a=>a.id===state.agency_id) || {};
+  const serviceSel = document.getElementById('rpServiceLevel');
+  serviceSel.classList.toggle('hidden', agency.agency_type !== 'ems');
+  serviceSel.value = profile.service_level || '';
+  rpSlots = (profile.slots || []).map(s=>({unit_type:s.unit_type, count:s.count}));
+  renderRpSlotOptions();
+  renderRpSlots();
+}
+
+function renderRpSlotOptions(){
+  const sel = document.getElementById('rpSlotUnit');
+  const opts = state.unit_types.map(u=>`<option value='${u}'>${u}</option>`).join('');
+  sel.innerHTML = '<option value="">Unit type</option>' + opts;
+}
+
+function renderRpSlots(){
+  const el = document.getElementById('rpSlots');
+  if(!rpSlots.length){ el.innerHTML = '<div class="text-xs text-slate-500">No slots defined.</div>'; return; }
+  el.innerHTML = rpSlots.map((s,i)=>`<div class='flex gap-2 items-center bg-slate-900 p-1 rounded'><span class='flex-1 text-sm'>${s.unit_type} x${s.count}</span><button type='button' class='text-red-400 hover:text-red-200 text-xs' onclick='removeRpSlot(${i})'>Remove</button></div>`).join('');
+}
+
+function addRpSlot(){
+  const unit = document.getElementById('rpSlotUnit').value;
+  const count = parseInt(document.getElementById('rpSlotCount').value) || 1;
+  if(!unit){ alert('Select a unit type'); return; }
+  rpSlots.push({unit_type:unit, count});
+  renderRpSlots();
+  document.getElementById('rpSlotUnit').value = '';
+  document.getElementById('rpSlotCount').value = '1';
+}
+
+function removeRpSlot(i){ rpSlots.splice(i,1); renderRpSlots(); }
+
+function resetResponseProfileForm(){
+  document.getElementById('responseProfileForm').classList.add('hidden');
+  document.getElementById('rpCallType').value = '';
+  rpSlots = [];
+  renderRpSlots();
+}
+
+document.getElementById('rpAddSlot').addEventListener('click', addRpSlot);
+
+document.getElementById('responseProfileForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const callType = document.getElementById('rpCallType').value;
+  if(!callType) return;
+  const profile = {
+    slots: rpSlots.map(s=>({unit_type:s.unit_type, count:s.count})),
+    response_mode: document.getElementById('rpMode').value
+  };
+  const agency = state.agencies.find(a=>a.id===state.agency_id) || {};
+  if(agency.agency_type === 'ems'){
+    const sl = document.getElementById('rpServiceLevel').value;
+    if(sl) profile.service_level = sl;
+  }
+  state.response_profiles[callType] = profile;
+  await setConfigValue('response_profiles', state.response_profiles);
+  resetResponseProfileForm();
+  renderResponseProfiles();
+});
+
+async function deleteResponseProfile(idx){
+  if(!confirm('Delete this response profile?')) return;
+  const ct = state.call_types[idx];
+  if(!ct) return;
+  delete state.response_profiles[ct.label];
+  await setConfigValue('response_profiles', state.response_profiles);
+  renderResponseProfiles();
+}
+
 loadAgencies();
 </script>
+<script src='/static/sortable.js'></script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

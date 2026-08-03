@@ -24,6 +24,9 @@
   .tag { display:inline-block; padding:.1rem .4rem; border-radius:.25rem; font-size:.7rem; font-weight:600; background:#334155; }
   #map { height:500px; background:#0f172a; border-radius:.5rem; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='p-4'>
 <div class='max-w-7xl mx-auto'>
@@ -288,5 +291,6 @@ async function removePost(id){
 
 init();
 </script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

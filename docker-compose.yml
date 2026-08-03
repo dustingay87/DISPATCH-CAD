@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  volcad:
+    build: .
+    container_name: volcad
+    ports:
+      - "${PORT:-10000}:${PORT:-10000}"
+    env_file:
+      - .env
+    restart: unless-stopped
+    # If you want to persist a local SQLite file outside the container, uncomment:
+    # volumes:
+    #   - ./volcad.db:/app/volcad.db

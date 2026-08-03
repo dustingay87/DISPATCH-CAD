@@ -25,6 +25,9 @@
   .status-completed { background:#22c55e; }
   .status-cancelled { background:#ef4444; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='p-4'>
 <div class='max-w-7xl mx-auto'>
@@ -317,5 +320,6 @@ async function cancelTransport(id){
 
 init();
 </script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

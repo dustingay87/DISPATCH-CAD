@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#081D33;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1E4B8C;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Shield outline -->
+  <path d="M50 8 L86 18 L86 45 C86 72 50 92 50 92 C50 92 14 72 14 45 L14 18 Z" fill="url(#shieldGrad)" stroke="#F1FAF8" stroke-width="2"/>
+  <!-- Vertical road -->
+  <path d="M50 25 L50 82" stroke="#00B8FF" stroke-width="5" stroke-linecap="round"/>
+  <path d="M50 38 L50 44 M50 52 L50 58 M50 66 L50 72" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+  <!-- Gold compass / star -->
+  <path d="M50 12 L54 24 L50 28 L46 24 Z" fill="#F2B705"/>
+  <circle cx="50" cy="24" r="3" fill="#081D33"/>
+  <!-- Radio waves left -->
+  <path d="M28 32 Q20 40 28 48" stroke="#00B8FF" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <path d="M22 28 Q10 40 22 52" stroke="#00B8FF" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.7"/>
+  <!-- Cross / service right -->
+  <path d="M68 36 L68 44 M64 40 L72 40" stroke="#F1FAF8" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

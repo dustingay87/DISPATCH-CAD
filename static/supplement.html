@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<title>Discipline Supplemental Report</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  @media print { .no-print { display:none; } body { background:white; color:black; } .card { border:1px solid #ccc; break-inside:avoid; } }
+  .card { background:#1e293b; border:1px solid #334155; border-radius:0.25rem; padding:0.75rem; margin-bottom:0.75rem; }
+  .card h3 { font-size:0.75rem; text-transform:uppercase; color:#94a3b8; margin-bottom:0.25rem; }
+  table { width:100%; border-collapse:collapse; font-size:0.8rem; }
+  th, td { text-align:left; padding:0.25rem 0.5rem; border-bottom:1px solid #334155; }
+  th { color:#94a3b8; text-transform:uppercase; font-size:0.65rem; }
+  .tab { cursor:pointer; padding:0.25rem 0.75rem; border-bottom:2px solid transparent; }
+  .tab.active { border-bottom-color:#3b82f6; color:#60a5fa; }
+</style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
+</head>
+<body class='bg-slate-950 text-slate-200 p-4'>
+<div class='max-w-4xl mx-auto'>
+  <div class='flex justify-between items-start mb-4 no-print'>
+    <div>
+      <h1 class='text-2xl font-bold text-white'>Discipline Supplemental Report</h1>
+      <div class='text-sm text-slate-400' id='headerTitle'></div>
+    </div>
+    <div class='space-x-2'>
+      <button class='bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded text-sm' onclick='window.print()'>Print</button>
+      <a class='bg-blue-700 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm' id='summaryLink' href='#'>After-Call Summary</a>
+    </div>
+  </div>
+  <div class='flex space-x-4 text-sm border-b border-slate-700 no-print mb-2'>
+    <div class='tab active' onclick='switchTab("ems")'>EMS</div>
+    <div class='tab' onclick='switchTab("fire")'>Fire / NERIS</div>
+    <div class='tab' onclick='switchTab("law")'>Law</div>
+  </div>
+  <div id='content'><div class='text-slate-500'>Loading...</div></div>
+</div>
+<script>
+const params = new URLSearchParams(window.location.search);
+const incidentId = params.get('incident_id');
+const discipline = params.get('discipline') || 'ems';
+document.getElementById('summaryLink').href = `/static/after_call_summary.html?incident_id=${incidentId}`;
+
+function api(path, opts={}){
+  return fetch(path, {...opts, credentials:'include'}).then(r=>{
+    if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); }
+    if(!r.ok) throw new Error(`${path} ${r.status}`);
+    return r.json();
+  });
+}
+
+function fmtTime(iso){ if(!iso) return '-'; return new Date(iso).toLocaleString(); }
+
+async function switchTab(d){
+  if(!incidentId) return;
+  history.replaceState(null,'',`?incident_id=${incidentId}&discipline=${d}`);
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+  await loadDiscipline(d);
+}
+
+async function loadDiscipline(d){
+  document.getElementById('content').innerHTML = '<div class="text-slate-500">Loading...</div>';
+  try {
+    const r = await api(`/incidents/${incidentId}/supplement/${d}`);
+    const h = r.header || {};
+    document.getElementById('headerTitle').textContent = `${h.incident_number || h.call_number || ''} · ${h.call_type || ''} · ${d.toUpperCase()}`;
+    let html = '';
+    html += `<div class='card'>
+      <h3>Header</h3>
+      <div class='grid grid-cols-2 gap-2 text-sm'>
+        <div><span class='text-slate-500'>Incident #</span> ${h.incident_number||'-'}</div>
+        <div><span class='text-slate-500'>Call #</span> ${h.call_number||'-'}</div>
+        <div><span class='text-slate-500'>Call Type</span> ${h.call_type||'-'}</div>
+        <div><span class='text-slate-500'>Discipline</span> ${h.discipline||'-'}</div>
+      </div>
+    </div>`;
+
+    if(d==='ems' && r.transport_legs){
+      html += `<div class='card'>
+        <h3>Transport Legs</h3>
+        <table><thead><tr><th>Unit</th><th>Pickup</th><th>Pickup Miles</th><th>Dropoff</th><th>Dropoff Miles</th><th>Departed Scene</th><th>Arrived Dest</th></tr></thead><tbody>
+          ${(r.transport_legs.length?r.transport_legs:[]).map(l=>`<tr><td>${l.unit_id}</td><td>${l.pickup_address||'-'}</td><td>${l.pickup_mileage!=null?l.pickup_mileage:'-'}</td><td>${l.dropoff_address||'-'}</td><td>${l.dropoff_mileage!=null?l.dropoff_mileage:'-'}</td><td>${fmtTime(l.departed_scene_at)}</td><td>${fmtTime(l.arrived_destination_at)}</td></tr>`).join('')}
+        </tbody></table>
+      </div>`;
+      html += `<div class='card'>
+        <h3>Mileage Readings</h3>
+        <table><thead><tr><th>Unit</th><th>Status</th><th>Mileage</th><th>Recorded</th></tr></thead><tbody>
+          ${(r.mileage_readings.length?r.mileage_readings:[]).map(m=>`<tr><td>${m.unit_id}</td><td>${m.status_code}</td><td>${m.mileage!=null?m.mileage:'-'}</td><td>${fmtTime(m.recorded_at)}</td></tr>`).join('')}
+        </tbody></table>
+      </div>`;
+      if(r.epcr){
+        html += `<div class='card'><h3>ePCR Export</h3><div class='text-sm'><div>Status: ${r.epcr.nemsis_status||'-'}</div><div>Created: ${fmtTime(r.epcr.created_at)}</div><div class='text-xs text-slate-400 mt-1'>XML payload length: ${(r.epcr.xml_payload||'').length} chars</div></div></div>`;
+      }
+    }
+
+    if(d==='fire' && r.neris){
+      const n = r.neris;
+      html += `<div class='card'>
+        <h3>NERIS Fire Report</h3>
+        <div class='text-sm'>
+          <div><span class='text-slate-500'>NERIS Version</span> ${n.neris_version}</div>
+          <div><span class='text-slate-500'>Submission Status</span> ${n.submission_status}</div>
+          <div><span class='text-slate-500'>Alarm Level</span> ${n.alarm_level||'-'}</div>
+          <div><span class='text-slate-500'>Fire Origin Detected</span> ${n.fire_origin_detected?'Yes':'No'}</div>
+          <div><span class='text-slate-500'>Property Use</span> ${n.property_use||'-'}</div>
+          <div><span class='text-slate-500'>Fire Origin</span> ${n.fire_origin||'-'}</div>
+          <div><span class='text-slate-500'>Flame Description</span> ${n.flame_description||'-'}</div>
+        </div>
+      </div>`;
+      if(n.units){
+        html += `<div class='card'>
+          <h3>NERIS Units</h3>
+          <table><thead><tr><th>Call Sign</th><th>Arrived</th><th>Cleared</th></tr></thead><tbody>
+            ${n.units.map(u=>`<tr><td>${u.call_sign||'-'}</td><td>${fmtTime(u.arrived_at)}</td><td>${fmtTime(u.cleared_at)}</td></tr>`).join('')}
+          </tbody></table>
+        </div>`;
+      }
+      if(r.nfirs_historical_readonly){
+        html += `<div class='card'>
+          <h3>Historical NFIRS (Read-Only)</h3>
+          <div class='text-sm text-slate-400'>${r.nfirs_historical_readonly.note}</div>
+          <div class='text-sm'>Legacy Incident #: ${r.nfirs_historical_readonly.legacy_incident_number||'-'}</div>
+        </div>`;
+      }
+    }
+
+    if(d==='law' && r.enforcement){
+      const e = r.enforcement;
+      html += `<div class='card'>
+        <h3>Enforcement</h3>
+        <div class='text-sm'>
+          <div><span class='text-slate-500'>Case #</span> ${e.case_number_assigned||'-'}</div>
+          <div><span class='text-slate-500'>Citations</span> ${e.citations.length||0}</div>
+          <div><span class='text-slate-500'>Arrests</span> ${e.arrests.length||0}</div>
+          <div><span class='text-slate-500'>Warnings</span> ${e.warnings.length||0}</div>
+          <div><span class='text-slate-500'>Officer Summary</span> ${e.officer_summary||'-'}</div>
+        </div>
+      </div>`;
+      if(e.citations && e.citations.length){
+        html += `<div class='card'><h3>Citations</h3><ul class='text-sm list-disc pl-4'>${e.citations.map(c=>`<li>${JSON.stringify(c)}</li>`).join('')}</ul></div>`;
+      }
+    }
+    document.getElementById('content').innerHTML = html;
+  } catch(err){ document.getElementById('content').innerHTML = `<div class='text-red-400'>Error: ${err.message}</div>`; }
+}
+
+// initial tab state
+(async function(){
+  if(!incidentId){ document.getElementById('content').innerHTML = '<div class="text-red-400">No incident_id.</div>'; return; }
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  const idx = ['ems','fire','law'].indexOf(discipline);
+  document.querySelectorAll('.tab')[idx>=0?idx:0].classList.add('active');
+  await loadDiscipline(discipline);
+})();
+</script>
+<script src='/static/sortable.js'></script>
+<script src="/static/theme.js"></script>
+</body>
+</html>

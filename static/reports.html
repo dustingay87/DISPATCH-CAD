@@ -11,6 +11,9 @@
   .stat { font-size:1.5rem; font-weight:700; color:#fff; }
   .label { font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='p-4'>
 <div class='max-w-6xl mx-auto'>
@@ -98,5 +101,6 @@ function renderMap(obj){
 }
 load();
 </script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

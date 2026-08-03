@@ -3,18 +3,21 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D Unified Response - Login</title>
-<link rel='icon' href='/static/d2d-logo.svg' type='image/svg+xml'>
+<title>Unified Response - Login</title>
+<link rel='icon' href='/static/favicon.png' type='image/png'>
 <script src='https://cdn.tailwindcss.com'></script>
 <link rel='stylesheet' href='/static/branding.css'>
 <style>
   html,body { height:100%; margin:0; font-family: 'Inter', system-ui, sans-serif; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='d2d-bg-navy text-slate-100 flex items-center justify-center h-screen d2d-font-body'>
   <div class='bg-slate-800 border border-slate-600 rounded-xl p-8 w-full max-w-md shadow-2xl text-center'>
-    <img src='/static/d2d-logo.svg' class='h-16 w-16 mx-auto mb-3' alt='D2D Unified Response'>
-    <h1 class='text-3xl d2d-logo-text text-white mb-1'>D2D Unified Response</h1>
+    <img src='/static/d2d-logo.png' class='h-16 w-16 mx-auto mb-3' alt='Unified Response'>
+    <h1 class='text-3xl d2d-logo-text text-white mb-1'>Unified Response</h1>
     <p class='text-sm d2d-text-cyan mb-6'>Built for the call. Designed for the response.</p>
     <form id='loginForm' class='space-y-4 text-left'>
       <div>
@@ -46,5 +49,6 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   } catch (err) { document.getElementById('error').textContent = err.message; document.getElementById('error').classList.remove('hidden'); }
 });
 </script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

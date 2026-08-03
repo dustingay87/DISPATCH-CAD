@@ -3,7 +3,7 @@
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>D2D v5 Console</title>
+<title>Unified Response - v5 Console</title>
 <script src='https://cdn.tailwindcss.com'></script>
 <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
 <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' crossorigin=''></script>
@@ -29,11 +29,14 @@
   ::-webkit-scrollbar-track { background:#0f172a; }
   ::-webkit-scrollbar-thumb { background:#475569; border-radius:4px; }
 </style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
 <body class='bg-slate-900 text-slate-200 text-sm h-screen flex flex-col'>
   <header class='h-16 bg-slate-950 flex items-center justify-between px-4 border-b border-slate-700 shrink-0'>
     <div class='flex items-center space-x-3'>
-      <div class='font-bold text-xl tracking-wide text-white'>D2D <span class='text-slate-500 font-normal text-sm'>v5</span></div>
+      <div class='font-bold text-xl tracking-wide text-white'>Unified Response - <span class='text-slate-500 font-normal text-sm'>v5</span></div>
       <div id='clock' class='text-slate-400 font-mono text-lg'></div>
     </div>
     <div class='flex items-center space-x-2'>
@@ -500,5 +503,6 @@ load();
 updateClock(); setInterval(updateClock,1000);
 setInterval(()=>{ if(document.getElementById('liveToggle').checked) load(); },5000);
 </script>
+<script src="/static/theme.js"></script>
 </body>
 </html>

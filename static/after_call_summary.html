@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<title>After-Call Summary</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  @media print {
+    .no-print { display:none; }
+    body { background:white; color:black; }
+    .card { border:1px solid #ccc; break-inside:avoid; }
+  }
+  .card { background:#1e293b; border:1px solid #334155; border-radius:0.25rem; padding:0.75rem; margin-bottom:0.75rem; }
+  .card h3 { font-size:0.75rem; text-transform:uppercase; color:#94a3b8; margin-bottom:0.25rem; }
+  table { width:100%; border-collapse:collapse; font-size:0.8rem; }
+  th, td { text-align:left; padding:0.25rem 0.5rem; border-bottom:1px solid #334155; }
+  th { color:#94a3b8; text-transform:uppercase; font-size:0.65rem; }
+</style>
+
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
+</head>
+<body class='bg-slate-950 text-slate-200 p-4'>
+<div class='max-w-4xl mx-auto'>
+  <div class='flex justify-between items-start mb-4 no-print'>
+    <div>
+      <h1 class='text-2xl font-bold text-white'>After-Call Summary</h1>
+      <div class='text-sm text-slate-400' id='headerTitle'></div>
+    </div>
+    <div class='space-x-2'>
+      <button class='bg-blue-700 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm' onclick='window.print()'>Print / PDF</button>
+      <button class='bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded text-sm' onclick='exportReport("json")'>JSON</button>
+      <button class='bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded text-sm' onclick='exportReport("pdf")'>PDF</button>
+      <a class='bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded text-sm' href='/static/dispatch.html'>Back to Console</a>
+    </div>
+  </div>
+  <div id='statusBar' class='card flex flex-wrap justify-between items-center no-print' style='display:none'>
+    <div class='text-sm'>
+      <span class='text-slate-500'>Report #</span> <span id='rptNumber' class='font-mono'></span>
+      <span class='mx-2'>·</span>
+      <span class='text-slate-500'>Version</span> <span id='rptVersion'></span>
+      <span class='mx-2'>·</span>
+      <span class='text-slate-500'>Status</span> <span id='rptStatus' class='font-bold text-yellow-400'></span>
+    </div>
+    <div class='space-x-2 mt-1 sm:mt-0'>
+      <button class='bg-green-700 hover:bg-green-600 text-white px-2 py-1 rounded text-xs' id='btnFinalize' onclick='doStatus("finalize")'>Finalize</button>
+      <button class='bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded text-xs' id='btnReady' onclick='doStatus("ready-for-review")'>Ready for Review</button>
+      <button class='bg-orange-700 hover:bg-orange-600 text-white px-2 py-1 rounded text-xs' onclick='doAmend()'>Amend</button>
+      <button class='bg-red-800 hover:bg-red-700 text-white px-2 py-1 rounded text-xs' onclick='doReturn()'>Return</button>
+      <button class='bg-slate-700 hover:bg-slate-600 text-white px-2 py-1 rounded text-xs' onclick='loadVersions()'>Versions</button>
+    </div>
+  </div>
+  <div id='content'><div class='text-slate-500'>Loading report...</div></div>
+</div>
+<script>
+const params = new URLSearchParams(window.location.search);
+const incidentId = params.get('incident_id');
+
+function api(path, opts={}){
+  return fetch(path, {...opts, credentials:'include'}).then(r=>{
+    if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); }
+    if(!r.ok) throw new Error(`${path} ${r.status}`);
+    return r.json();
+  });
+}
+
+function fmtTime(iso){
+  if(!iso) return '-';
+  const d = new Date(iso);
+  return d.toLocaleString();
+}
+
+function fmtDur(start, end){
+  if(!start || !end) return null;
+  const s = new Date(start).getTime();
+  const e = new Date(end).getTime();
+  const sec = (e - s) / 1000;
+  if(sec <= 0) return null;
+  const m = Math.floor(sec/60);
+  const h = Math.floor(m/60);
+  const rem = Math.round(sec%60);
+  if(h) return `${h}h ${m%60}m ${rem}s`;
+  return `${m}m ${rem}s`;
+}
+
+function renderUnit(u){
+  const intervals = [];
+  if(u.assigned_at && u.arrived_at) intervals.push(`Response: ${fmtDur(u.assigned_at, u.arrived_at)}`);
+  if(u.arrived_at && u.cleared_at) intervals.push(`Scene: ${fmtDur(u.arrived_at, u.cleared_at)}`);
+  if(u.transport_at && u.destination_arrived_at) intervals.push(`Transport: ${fmtDur(u.transport_at, u.destination_arrived_at)}`);
+  const m = u.mileage || {};
+  const miles = [];
+  if(m.beginning!=null) miles.push(`Begin: ${m.beginning}`);
+  if(m.scene!=null) miles.push(`On Scene: ${m.scene}`);
+  if(m.destination!=null) miles.push(`At Destination: ${m.destination}`);
+  if(m.total!=null) miles.push(`Total: ${m.total}`);
+  if(m.ending!=null) miles.push(`End: ${m.ending}`);
+  const dest = m.destination_name ? `<div class='text-xs text-slate-400'>Destination: ${m.destination_name}${m.destination_address?' — '+m.destination_address:''}</div>` : '';
+  const crew = u.crew && u.crew.length ? `<div class='text-xs text-slate-400'>Crew: ${u.crew.map(c=>c.name).join(', ')}</div>` : '';
+  return `<div class='card'>
+    <div class='flex justify-between'>
+      <div class='font-bold text-white'>${u.call_sign} <span class='text-slate-400 font-normal'>(${u.unit_type||'-'})</span></div>
+      <div class='text-xs text-slate-400'>${u.discipline ? u.discipline.toUpperCase() : ''} · ${u.agency||'-'}</div>
+    </div>
+    <table class='mt-2'>
+      <thead><tr><th>Assigned</th><th>Dispatched</th><th>En Route</th><th>Arrived</th><th>Transport</th><th>Dest Arrival</th><th>Cleared</th></tr></thead>
+      <tbody><tr>
+        <td>${fmtTime(u.assigned_at)}</td>
+        <td>${fmtTime(u.dispatched_at)}</td>
+        <td>${fmtTime(u.en_route_at)}</td>
+        <td>${fmtTime(u.arrived_at)}</td>
+        <td>${fmtTime(u.transport_at)}</td>
+        <td>${fmtTime(u.destination_arrived_at)}</td>
+        <td>${fmtTime(u.cleared_at)}</td>
+      </tr></tbody>
+    </table>
+    <div class='text-xs text-slate-400 mt-1'>${intervals.join(' · ')}</div>
+    ${miles.length?`<div class='text-xs text-slate-400'>Mileage: ${miles.join(' · ')}</div>`:''}
+    ${dest}
+    ${crew}
+    ${u.disposition?`<div class='text-xs text-slate-400'>Disposition: ${u.disposition}</div>`:''}
+  </div>`;
+}
+
+async function load(){
+  if(!incidentId){ document.getElementById('content').innerHTML = '<div class="text-red-400">No incident_id provided.</div>'; return; }
+  try {
+    const r = await api(`/incidents/${incidentId}/report`);
+    const h = r.header || {};
+    document.getElementById('headerTitle').textContent = `${h.incident_number || h.call_number || ''} · ${h.call_type || ''} · ${h.incident_date || ''}`;
+    const loc = r.location || {};
+    const call = r.call_info || {};
+    let html = '';
+    html += `<div class='card'>
+      <h3>Call Information</h3>
+      <div class='grid grid-cols-2 gap-2 text-sm'>
+        <div><span class='text-slate-500'>Incident #</span> ${h.incident_number||'-'}</div>
+        <div><span class='text-slate-500'>Call #</span> ${h.call_number||'-'}</div>
+        <div><span class='text-slate-500'>Priority</span> P${h.priority||'-'}</div>
+        <div><span class='text-slate-500'>Status</span> ${h.status||'-'}</div>
+        <div><span class='text-slate-500'>Received</span> ${fmtTime(h.call_received_at)}</div>
+        <div><span class='text-slate-500'>Closed</span> ${fmtTime(h.closed_at)}</div>
+        <div class='sm:col-span-2'><span class='text-slate-500'>Narrative</span> ${call.narrative||'-'}</div>
+        ${call.caller_name?`<div><span class='text-slate-500'>Caller</span> ${call.caller_name}</div>`:''}
+        ${call.callback?`<div><span class='text-slate-500'>Callback</span> ${call.callback}</div>`:''}
+      </div>
+    </div>`;
+    html += `<div class='card'>
+      <h3>Location</h3>
+      <div class='text-sm'>
+        <div class='font-semibold text-white'>${loc.validated_address || loc.original_address || '-'}</div>
+        <div class='text-slate-400 text-xs'>${[loc.city,loc.state,loc.postal_code].filter(Boolean).join(', ')}</div>
+        <div class='text-slate-400 text-xs'>${[loc.cross_streets,loc.zone].filter(Boolean).join(' · ') || '-'}</div>
+        ${loc.latitude?`<div class='text-slate-500 text-xs'>Lat ${loc.latitude}, Lng ${loc.longitude}</div>`:''}
+        <div class='text-slate-500 text-xs'>Verification: ${loc.verification_status||'-'}</div>
+      </div>
+    </div>`;
+    if(r.units && r.units.length){
+      html += `<div class='card'>
+        <h3>Units</h3>
+        <div class='space-y-2'>${r.units.map(renderUnit).join('')}</div>
+      </div>`;
+    }
+    if(r.timeline && r.timeline.length){
+      html += `<div class='card'>
+        <h3>Timeline</h3>
+        <table><thead><tr><th>Time</th><th>Event</th><th>Unit</th><th>Source</th><th>Notes</th></tr></thead><tbody>
+          ${r.timeline.map(t=>`<tr><td>${fmtTime(t.at)}</td><td>${t.event||'-'}</td><td>${t.unit||'-'}</td><td>${t.source||'-'}</td><td class='text-slate-400'>${t.notes||''}</td></tr>`).join('')}
+        </tbody></table>
+      </div>`;
+    }
+    document.getElementById('content').innerHTML = html;
+    setStatusBar(r);
+  } catch(e){ document.getElementById('content').innerHTML = `<div class='text-red-400'>Error loading report: ${e.message}</div>`; }
+}
+
+async function doStatus(action){
+  try {
+    const res = await api(`/incidents/${incidentId}/report/${action}`, {method:'PUT'});
+    alert(`Report ${action.replace('-',' ')}: v${res.version} ${res.status}`);
+    await load();
+  } catch(e){ alert('Error: '+e.message); }
+}
+
+async function doAmend(){
+  const reason = prompt('Amendment reason (required):');
+  if(!reason) return;
+  try {
+    const res = await api(`/incidents/${incidentId}/report/amend`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason})});
+    alert(`Amended to v${res.version}`);
+    await load();
+  } catch(e){ alert('Error: '+e.message); }
+}
+
+async function doReturn(){
+  const reason = prompt('Return reason (required):');
+  if(!reason) return;
+  try {
+    const res = await api(`/incidents/${incidentId}/report/return-for-correction`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason})});
+    alert(`Returned for correction: v${res.version}`);
+    await load();
+  } catch(e){ alert('Error: '+e.message); }
+}
+
+async function loadVersions(){
+  try {
+    const versions = await api(`/incidents/${incidentId}/report/versions`);
+    const vhtml = versions.map(v=>`<li>v${v.version} · ${v.status} · ${v.report_number} · ${new Date(v.created_at).toLocaleString()}${v.amendment_reason?' · '+v.amendment_reason:''}</li>`).join('');
+    document.getElementById('content').insertAdjacentHTML('beforebegin', `<div class='card no-print'><h3>Versions</h3><ul class='text-xs list-disc pl-4'>${vhtml}</ul></div>`);
+  } catch(e){ alert('Error: '+e.message); }
+}
+
+function exportReport(fmt){
+  const url = `/incidents/${incidentId}/report/export?format=${fmt}`;
+  window.open(url, '_blank');
+}
+
+async function setStatusBar(r){
+  const rp = r.report || {};
+  const sb = document.getElementById('statusBar');
+  if(!sb || !r.report) return;
+  sb.style.display = 'flex';
+  document.getElementById('rptNumber').textContent = rp.report_number || '-';
+  document.getElementById('rptVersion').textContent = rp.version || '-';
+  document.getElementById('rptStatus').textContent = (rp.status || 'draft').replace(/_/g,' ');
+  const finalized = rp.status === 'finalized';
+  document.getElementById('btnFinalize').style.display = finalized ? 'none' : 'inline-block';
+  document.getElementById('btnReady').style.display = finalized ? 'none' : 'inline-block';
+}
+
+load();
+</script>
+<script src='/static/sortable.js'></script>
+<script src="/static/theme.js"></script>
+</body>
+</html>

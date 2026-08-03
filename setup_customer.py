@@ -88,7 +88,7 @@ def main():
             a.lng = agency.get('lng')
             app.fill_agency_lat_lng(a)
             a.approved = True
-            a.approved_at = datetime.utcnow()
+            a.approved_at = app.tz_now()
             session.flush()
             agency_map[agency.get('name')] = a.id
 
