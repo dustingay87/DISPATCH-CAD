@@ -622,7 +622,11 @@ def ensure_db_columns():
         for table in Base.metadata.tables.values():
             if table.name not in existing_tables:
                 continue
-            existing_cols = {c['name'] for c in inspector.get_columns(table.name)}
+            try:
+                existing_cols = {c['name'] for c in inspector.get_columns(table.name)}
+            except Exception as e:
+                print(f'DB migration warning for {table.name}: could not inspect columns: {e}')
+                continue
             for col in table.columns:
                 if col.name in existing_cols:
                     continue
