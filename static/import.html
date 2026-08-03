@@ -32,33 +32,80 @@
 
     <div class='grid grid-cols-1 md:grid-cols-2 gap-4'>
       <div class='card'>
-        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Import Agencies</h2>
-        <p class='text-xs text-slate-400 mb-2'>CSV columns: name, agency_type, city, state, domain</p>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Agencies</h2>
+        <p class='text-xs text-slate-400 mb-2'>name, agency_type, city, state, domain, address</p>
+        <a href='/import/template/agencies' class='btn bg-slate-700 hover:bg-slate-600 text-white mb-2 inline-block text-center w-full' download>Download Template</a>
         <input type='file' id='fileAgencies' accept='.csv' class='text-sm text-slate-300 mb-2'>
         <button class='btn btn-primary w-full' data-entity='agencies'>Upload</button>
       </div>
       <div class='card'>
-        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Import Units</h2>
-        <p class='text-xs text-slate-400 mb-2'>CSV columns: agency_id, call_sign, [name], [unit_type], [lat], [lng], [taip_id], [taip_destination_url], [taip_port]</p>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Units</h2>
+        <p class='text-xs text-slate-400 mb-2'>agency, call_sign, [name], [unit_type], [lat], [lng], [taip_id], [taip_destination_url], [taip_port], [camera_url]</p>
+        <a href='/import/template/units' class='btn bg-slate-700 hover:bg-slate-600 text-white mb-2 inline-block text-center w-full' download>Download Template</a>
         <input type='file' id='fileUnits' accept='.csv' class='text-sm text-slate-300 mb-2'>
         <button class='btn btn-primary w-full' data-entity='units'>Upload</button>
       </div>
       <div class='card'>
-        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Import Personnel</h2>
-        <p class='text-xs text-slate-400 mb-2'>CSV columns: agency_id, first_name, last_name, [email], [phone], [sms_phone], [current_unit_id], [duty_status]</p>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Crew Members</h2>
+        <p class='text-xs text-slate-400 mb-2'>agency, first_name, last_name, [email], [phone], [sms_phone], [unit], [duty_status], [provider_level], [radio_id]</p>
+        <a href='/import/template/crew-members' class='btn bg-slate-700 hover:bg-slate-600 text-white mb-2 inline-block text-center w-full' download>Download Template</a>
         <input type='file' id='filePersonnel' accept='.csv' class='text-sm text-slate-300 mb-2'>
         <button class='btn btn-primary w-full' data-entity='personnel'>Upload</button>
       </div>
       <div class='card'>
-        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Import Incidents</h2>
-        <p class='text-xs text-slate-400 mb-2'>CSV columns: agency_id, [call_number], [call_type], [priority], [location_text], [lat], [lng], [status], [caller_name], [callback], [narrative]</p>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Incidents</h2>
+        <p class='text-xs text-slate-400 mb-2'>agency, [call_number], [call_type], [priority], [location_text], [lat], [lng], [status], [caller_name], [callback], [narrative]</p>
+        <a href='/import/template/incidents' class='btn bg-slate-700 hover:bg-slate-600 text-white mb-2 inline-block text-center w-full' download>Download Template</a>
         <input type='file' id='fileIncidents' accept='.csv' class='text-sm text-slate-300 mb-2'>
         <button class='btn btn-primary w-full' data-entity='incidents'>Upload</button>
       </div>
       <div class='card'>
-        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Import Map Layers</h2>
-        <p class='text-xs text-slate-400 mb-2'>CSV columns: agency_id, name, type, lat, lng, [geojson]</p>
-        <input type='file' id='fileMapLayers' accept='.csv' class='text-sm text-slate-300 mb-2'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Locations</h2>
+        <p class='text-xs text-slate-400 mb-2'>agency, name, location_type, address, lat, lng, notes</p>
+        <a href='/import/template/locations' class='btn bg-slate-700 hover:bg-slate-600 text-white mb-2 inline-block text-center w-full' download>Download Template</a>
+        <input type='file' id='fileLocations' accept='.csv' class='text-sm text-slate-300 mb-2'>
+        <button class='btn btn-primary w-full' data-entity='locations'>Upload</button>
+      </div>
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Stations</h2>
+        <p class='text-xs text-slate-400 mb-2'>agency, name, address, lat, lng, notes (location_type set to station)</p>
+        <a href='/import/template/stations' class='btn bg-slate-700 hover:bg-slate-600 text-white mb-2 inline-block text-center w-full' download>Download Template</a>
+        <input type='file' id='fileStations' accept='.csv' class='text-sm text-slate-300 mb-2'>
+        <button class='btn btn-primary w-full' data-entity='stations'>Upload</button>
+      </div>
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Zones</h2>
+        <p class='text-xs text-slate-400 mb-2'>agency, name, [zone_type], [color], [geojson], [display_order], [minimum_units], [is_active]</p>
+        <a href='/import/template/zones' class='btn bg-slate-700 hover:bg-slate-600 text-white mb-2 inline-block text-center w-full' download>Download Template</a>
+        <input type='file' id='fileZones' accept='.csv' class='text-sm text-slate-300 mb-2'>
+        <button class='btn btn-primary w-full' data-entity='zones'>Upload</button>
+      </div>
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Call Types</h2>
+        <p class='text-xs text-slate-400 mb-2'>[agency], label, priority, fields</p>
+        <a href='/import/template/call-types' class='btn bg-slate-700 hover:bg-slate-600 text-white mb-2 inline-block text-center w-full' download>Download Template</a>
+        <input type='file' id='fileCall-types' accept='.csv' class='text-sm text-slate-300 mb-2'>
+        <button class='btn btn-primary w-full' data-entity='call-types'>Upload</button>
+      </div>
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>EMS Call Types</h2>
+        <p class='text-xs text-slate-400 mb-2'>[agency], label, priority, fields</p>
+        <a href='/import/template/ems-call-types' class='btn bg-slate-700 hover:bg-slate-600 text-white mb-2 inline-block text-center w-full' download>Download Template</a>
+        <input type='file' id='fileEms-call-types' accept='.csv' class='text-sm text-slate-300 mb-2'>
+        <button class='btn btn-primary w-full' data-entity='ems-call-types'>Upload</button>
+      </div>
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>EMS CHIEF Complaints</h2>
+        <p class='text-xs text-slate-400 mb-2'>[agency], label, priority, fields</p>
+        <a href='/import/template/ems-chief-complaints' class='btn bg-slate-700 hover:bg-slate-600 text-white mb-2 inline-block text-center w-full' download>Download Template</a>
+        <input type='file' id='fileEms-chief-complaints' accept='.csv' class='text-sm text-slate-300 mb-2'>
+        <button class='btn btn-primary w-full' data-entity='ems-chief-complaints'>Upload</button>
+      </div>
+      <div class='card'>
+        <h2 class='font-semibold mb-2 border-b border-slate-700 pb-2'>Map Layers</h2>
+        <p class='text-xs text-slate-400 mb-2'>agency_id, name, type, lat, lng, [geojson]</p>
+        <a href='/import/template/map-layers' class='btn bg-slate-700 hover:bg-slate-600 text-white mb-2 inline-block text-center w-full' download>Download Template</a>
+        <input type='file' id='fileMap-layers' accept='.csv' class='text-sm text-slate-300 mb-2'>
         <button class='btn btn-primary w-full' data-entity='map-layers'>Upload</button>
       </div>
     </div>

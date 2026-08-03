@@ -150,6 +150,7 @@ class Personnel(Base):
 class Location(Base):
     __tablename__ = 'locations'
     id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey('customers.id'), nullable=True)
     agency_id = Column(Integer, ForeignKey('agencies.id'))
     name = Column(String(255))
     location_type = Column(String(50))
@@ -517,6 +518,7 @@ class IncidentReport(Base):
 class PostZone(Base):
     __tablename__ = 'post_zones'
     id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey('customers.id'), nullable=True)
     agency_id = Column(Integer, ForeignKey('agencies.id'))
     name = Column(String(100))
     zone_type = Column(String(50), default='post')
@@ -4900,15 +4902,146 @@ def _agency_customer_id(db, agency_id, customer_id):
         return agency.customer_id if agency else None
     return None
 
+def _coerce_int(v, default=None):
+    try:
+        if v is None or str(v).strip() == '':
+            return default
+        return int(float(v))
+    except Exception:
+        return default
+
+def _coerce_float(v, default=None):
+    try:
+        if v is None or str(v).strip() == '':
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+def _coerce_bool(v, default=False):
+    if v is None or str(v).strip() == '':
+        return default
+    return str(v).lower() in ('true','yes','1','y','on')
+
+def _parse_fields(v):
+    if not v:
+        return []
+    if isinstance(v, list):
+        return v
+    s = str(v).strip()
+    if s.startswith('['):
+        try:
+            return json.loads(s)
+        except Exception:
+            pass
+    return [x.strip() for x in s.split(',') if x.strip()]
+
+def _resolve_agency(db, customer_id, value):
+    if not value:
+        return None
+    if isinstance(value, int):
+        return db.query(Agency).filter(Agency.customer_id == customer_id, Agency.id == value).first()
+    if str(value).isdigit():
+        return db.query(Agency).filter(Agency.customer_id == customer_id, Agency.id == int(value)).first()
+    v = str(value).strip()
+    return db.query(Agency).filter(Agency.customer_id == customer_id, or_(Agency.name == v, Agency.domain == v)).first()
+
+def _resolve_unit_by_call_sign(db, customer_id, value):
+    if not value:
+        return None
+    return db.query(Unit).filter(Unit.customer_id == customer_id, Unit.call_sign == str(value).strip()).first()
+
+def _ensure_customer_config(db, customer_id, agency_id, category, value):
+    cfg = db.query(CustomerConfig).filter_by(customer_id=customer_id, agency_id=agency_id, category=category, key='defaults').first()
+    if cfg:
+        cfg.value = value
+        cfg.updated_at = tz_now()
+    else:
+        cfg = CustomerConfig(customer_id=customer_id, agency_id=agency_id, category=category, key='defaults', value=value)
+        db.add(cfg)
+    return cfg
+
+def _build_csv_template(rows: List[dict]) -> str:
+    import csv, io
+    if not rows:
+        return ''
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=rows[0].keys())
+    writer.writeheader()
+    for r in rows:
+        writer.writerow(r)
+    return out.getvalue()
+
+CSV_TEMPLATES = {
+    'agencies': _build_csv_template([
+        {'name':'Metro Police','agency_type':'police','city':'Columbus','state':'OH','domain':'police.example.com'},
+        {'name':'Metro Fire','agency_type':'fire','city':'Columbus','state':'OH','domain':'fire.example.com'},
+    ]),
+    'units': _build_csv_template([
+        {'agency':'Metro Police','call_sign':'A12','name':'Adam-12','unit_type':'patrol','lat':'39.9608','lng':'-82.998','taip_id':'A12','taip_destination_url':'','taip_port':'','camera_url':''},
+        {'agency':'Metro Fire','call_sign':'E1','name':'Engine 1','unit_type':'engine','lat':'39.959','lng':'-83.0','taip_id':'','taip_destination_url':'','taip_port':'','camera_url':''},
+    ]),
+    'crew-members': _build_csv_template([
+        {'agency':'Metro Police','first_name':'John','last_name':'Doe','email':'john.doe@example.com','phone':'+16145551001','sms_phone':'+16145551001','unit':'A12','duty_status':'on_duty','provider_level':'officer','radio_id':'RP001'},
+        {'agency':'County EMS','first_name':'Sarah','last_name':'Lee','email':'sarah.lee@example.com','phone':'+16145551004','sms_phone':'+16145551004','unit':'M1','duty_status':'on_duty','provider_level':'paramedic','radio_id':'MED01'},
+    ]),
+    'personnel': _build_csv_template([
+        {'agency':'Metro Police','first_name':'John','last_name':'Doe','email':'john.doe@example.com','phone':'+16145551001','sms_phone':'+16145551001','unit':'A12','duty_status':'on_duty','provider_level':'officer','radio_id':'RP001'},
+    ]),
+    'incidents': _build_csv_template([
+        {'agency':'Metro Police','call_number':'2024-00001','call_type':'Traffic Accident','priority':'2','location_text':'Main St & 1st Ave','lat':'39.961','lng':'-82.999','status':'open','caller_name':'Jane Smith','callback':'+16145551000','narrative':'Two vehicle accident'},
+    ]),
+    'map-layers': _build_csv_template([
+        {'agency_id':'1','name':'Hydrant 1','type':'hydrant','lat':'39.961','lng':'-82.999','geojson':''},
+    ]),
+    'locations': _build_csv_template([
+        {'agency':'Metro Police','name':'Police Headquarters','location_type':'station','address':'1200 Patrol Rd','lat':'39.961','lng':'-82.998','notes':'Admin building'},
+        {'agency':'Metro Police','name':'Courthouse','location_type':'address','address':'345 Justice Blvd','lat':'39.960','lng':'-82.997','notes':'Frequent pickup'},
+    ]),
+    'stations': _build_csv_template([
+        {'agency':'Metro Fire','name':'Station 1','address':'1000 Firehouse Ln','lat':'39.959','lng':'-83.001','notes':'Headquarters'},
+        {'agency':'County EMS','name':'Medic Station','address':'2000 EMS Way','lat':'39.962','lng':'-82.996','notes':'Bays 1-4'},
+    ]),
+    'zones': _build_csv_template([
+        {'agency':'Metro Police','name':'North Patrol','zone_type':'post','color':'#3b82f6','geojson':'{"type":"Polygon","coordinates":[[[-83.0,39.96],[-82.99,39.96],[-82.99,39.965],[-83.0,39.965],[-83.0,39.96]]]}','display_order':'0','minimum_units':'1','is_active':'true'},
+    ]),
+    'call-types': _build_csv_template([
+        {'agency':'Metro Police','label':'Traffic Accident','priority':'2','fields':'vehicles,injuries'},
+        {'agency':'Metro Police','label':'Domestic','priority':'2','fields':'weapons,children'},
+    ]),
+    'ems-call-types': _build_csv_template([
+        {'agency':'County EMS','label':'Cardiac Arrest','priority':'1','fields':'age,conscious'},
+        {'agency':'County EMS','label':'Fall','priority':'2','fields':'age,conscious'},
+    ]),
+    'ems-chief-complaints': _build_csv_template([
+        {'agency':'County EMS','label':'Chest Pain','priority':'1','fields':'age,conscious'},
+        {'agency':'County EMS','label':'Respiratory Distress','priority':'1','fields':'age,conscious'},
+    ]),
+}
+
+@app.get('/import/template/{name}')
+def download_template(name: str):
+    name = name.replace('.csv','')
+    template = CSV_TEMPLATES.get(name)
+    if not template:
+        raise HTTPException(status_code=404, detail='Template not found')
+    return Response(template, media_type='text/csv', headers={'Content-Disposition': f'attachment; filename="{name}.csv"'})
+
 @app.post('/import/{entity}', response_model=dict)
 def import_csv(entity: str, file: UploadFile = File(...), current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     import csv, io
-    if entity not in ('agencies', 'units', 'personnel', 'incidents', 'map-layers'):
-        raise HTTPException(status_code=400, detail='Entity must be agencies, units, personnel, incidents, or map-layers')
+    if entity == 'crew-members':
+        entity = 'personnel'
+    valid_entities = ('agencies','units','personnel','incidents','map-layers','locations','stations','zones','call-types','ems-call-types','ems-chief-complaints')
+    if entity not in valid_entities:
+        raise HTTPException(status_code=400, detail=f'Entity must be one of {valid_entities}')
     content = file.file.read().decode('utf-8')
     reader = csv.DictReader(io.StringIO(content))
     count = 0; errors = []
     default_customer_id = current_user.get('customer_id')
+    if not default_customer_id:
+        raise HTTPException(status_code=403, detail='Customer not set')
+
     if entity == 'map-layers':
         layers = []
         for idx, row in enumerate(reader, start=1):
@@ -4917,7 +5050,7 @@ def import_csv(entity: str, file: UploadFile = File(...), current_user: dict = D
                 if row.get('geojson'):
                     try: geojson = json.loads(row['geojson'])
                     except Exception: pass
-                layers.append({'name': row['name'], 'type': row.get('type', 'hydrant'), 'lat': float(row['lat']) if row.get('lat') else None, 'lng': float(row['lng']) if row.get('lng') else None, 'agency_id': int(row['agency_id']) if row.get('agency_id') else None, 'geojson': geojson})
+                layers.append({'name': row['name'], 'type': row.get('type', 'hydrant'), 'lat': _coerce_float(row.get('lat')), 'lng': _coerce_float(row.get('lng')), 'agency_id': _coerce_int(row.get('agency_id')), 'geojson': geojson})
             except Exception as e:
                 errors.append(f'row {idx}: {e}')
         if layers:
@@ -4929,22 +5062,197 @@ def import_csv(entity: str, file: UploadFile = File(...), current_user: dict = D
             db.commit()
             _log_event(db, 'csv_imported', 'system', 0, user_id=current_user.get('user_id'), data={'entity': 'map-layers', 'imported': len(layers), 'errors': len(errors)}, agency_id=None)
         return {'imported': len(layers), 'errors': errors[:10]}
+
+    if entity in ('call-types','ems-call-types','ems-chief-complaints'):
+        category = {'call-types':'call_types','ems-call-types':'ems_call_types','ems-chief-complaints':'ems_chief_complaints'}[entity]
+        groups = {}
+        for idx, row in enumerate(reader, start=1):
+            try:
+                agency = _resolve_agency(db, default_customer_id, row.get('agency') or row.get('agency_id'))
+                agency_id = agency.id if agency else None
+                customer_id = agency.customer_id if agency else default_customer_id
+                group = (customer_id, agency_id)
+                groups.setdefault(group, [])
+                item = {'label': row.get('label') or row.get('name'), 'priority': _coerce_int(row.get('priority'), 2), 'fields': _parse_fields(row.get('fields'))}
+                if not item['label']:
+                    raise ValueError('label is required')
+                groups[group].append(item)
+                count += 1
+            except Exception as e:
+                errors.append(f'row {idx}: {e}')
+        for (customer_id, agency_id), items in groups.items():
+            _ensure_customer_config(db, customer_id, agency_id, category, items)
+        db.commit()
+        _log_event(db, 'csv_imported', 'system', 0, user_id=current_user.get('user_id'), data={'entity': entity, 'imported': count, 'errors': len(errors)}, agency_id=None)
+        return {'imported': count, 'errors': errors[:10]}
+
     for idx, row in enumerate(reader, start=1):
         try:
             if entity == 'agencies':
-                db.add(Agency(customer_id=default_customer_id, name=row['name'], agency_type=row.get('agency_type', 'fire'), city=row.get('city'), state=row.get('state'), domain=row.get('domain')))
+                domain = row.get('domain')
+                name = row['name']
+                a = None
+                if domain:
+                    a = db.query(Agency).filter_by(customer_id=default_customer_id, domain=domain).first()
+                if not a and name:
+                    a = db.query(Agency).filter_by(customer_id=default_customer_id, name=name).first()
+                fields = {
+                    'customer_id': default_customer_id,
+                    'name': name,
+                    'agency_type': row.get('agency_type','fire'),
+                    'city': row.get('city'),
+                    'state': row.get('state'),
+                    'domain': domain,
+                    'address': row.get('address'),
+                }
+                if a:
+                    for k,v in fields.items():
+                        if v is not None:
+                            setattr(a,k,v)
+                else:
+                    db.add(Agency(**fields))
             elif entity == 'units':
-                agency_id = int(row['agency_id'])
-                customer_id = _agency_customer_id(db, agency_id, default_customer_id)
-                db.add(Unit(customer_id=customer_id, agency_id=agency_id, name=row.get('name', row['call_sign']), call_sign=row['call_sign'], unit_type=row.get('unit_type', 'patrol'), lat=float(row['lat']) if row.get('lat') else None, lng=float(row['lng']) if row.get('lng') else None, taip_id=row.get('taip_id'), taip_destination_url=row.get('taip_destination_url'), taip_port=int(row['taip_port']) if row.get('taip_port') else None, camera_url=row.get('camera_url'), current_status='AQ', in_service_at=tz_now(), accumulated_call_seconds=0))
+                agency = _resolve_agency(db, default_customer_id, row.get('agency') or row.get('agency_id'))
+                if not agency:
+                    raise ValueError('agency not found')
+                call_sign = row.get('call_sign')
+                if not call_sign:
+                    raise ValueError('call_sign is required')
+                unit = db.query(Unit).filter(Unit.customer_id == default_customer_id, Unit.call_sign == call_sign).first()
+                fields = {
+                    'customer_id': agency.customer_id,
+                    'agency_id': agency.id,
+                    'name': row.get('name') or call_sign,
+                    'call_sign': call_sign,
+                    'unit_type': row.get('unit_type','patrol'),
+                    'lat': _coerce_float(row.get('lat')),
+                    'lng': _coerce_float(row.get('lng')),
+                    'taip_id': row.get('taip_id'),
+                    'taip_destination_url': row.get('taip_destination_url'),
+                    'taip_port': _coerce_int(row.get('taip_port')),
+                    'camera_url': row.get('camera_url'),
+                    'current_status': 'AQ',
+                    'in_service_at': tz_now(),
+                    'accumulated_call_seconds': 0,
+                }
+                if unit:
+                    for k,v in fields.items():
+                        if k in ('current_status','in_service_at','accumulated_call_seconds'):
+                            continue
+                        if v is not None:
+                            setattr(unit,k,v)
+                else:
+                    db.add(Unit(**fields))
             elif entity == 'personnel':
-                agency_id = int(row['agency_id'])
-                customer_id = _agency_customer_id(db, agency_id, default_customer_id)
-                db.add(Personnel(customer_id=customer_id, agency_id=agency_id, first_name=row['first_name'], last_name=row['last_name'], email=row.get('email'), phone=row.get('phone'), sms_phone=row.get('sms_phone'), current_unit_id=int(row['current_unit_id']) if row.get('current_unit_id') else None, duty_status=row.get('duty_status', 'off_duty')))
+                agency = _resolve_agency(db, default_customer_id, row.get('agency') or row.get('agency_id'))
+                if not agency:
+                    raise ValueError('agency not found')
+                first_name = row.get('first_name')
+                last_name = row.get('last_name')
+                if not first_name or not last_name:
+                    raise ValueError('first_name and last_name are required')
+                email = row.get('email')
+                unit = _resolve_unit_by_call_sign(db, default_customer_id, row.get('unit'))
+                current_unit_id = _coerce_int(row.get('current_unit_id')) or (unit.id if unit else None)
+                p = None
+                if email:
+                    p = db.query(Personnel).filter(Personnel.customer_id == default_customer_id, Personnel.email == email).first()
+                if not p:
+                    p = db.query(Personnel).filter(Personnel.customer_id == default_customer_id, Personnel.first_name == first_name, Personnel.last_name == last_name, Personnel.agency_id == agency.id).first()
+                fields = {
+                    'customer_id': agency.customer_id,
+                    'agency_id': agency.id,
+                    'first_name': first_name,
+                    'last_name': last_name,
+                    'email': email,
+                    'phone': row.get('phone'),
+                    'sms_phone': row.get('sms_phone'),
+                    'radio_id': row.get('radio_id'),
+                    'provider_level': row.get('provider_level'),
+                    'current_unit_id': current_unit_id,
+                    'duty_status': row.get('duty_status','off_duty'),
+                }
+                if p:
+                    for k,v in fields.items():
+                        if v is not None:
+                            setattr(p,k,v)
+                else:
+                    db.add(Personnel(**fields))
+            elif entity in ('locations','stations'):
+                agency = _resolve_agency(db, default_customer_id, row.get('agency') or row.get('agency_id'))
+                if not agency:
+                    raise ValueError('agency not found')
+                name = row.get('name')
+                if not name:
+                    raise ValueError('name is required')
+                location_type = row.get('location_type','address') if entity == 'locations' else 'station'
+                loc = db.query(Location).filter(Location.customer_id == agency.customer_id, Location.agency_id == agency.id, Location.name == name, Location.location_type == location_type).first()
+                fields = {
+                    'customer_id': agency.customer_id,
+                    'agency_id': agency.id,
+                    'name': name,
+                    'location_type': location_type,
+                    'address': row.get('address'),
+                    'lat': _coerce_float(row.get('lat')),
+                    'lng': _coerce_float(row.get('lng')),
+                    'notes': row.get('notes'),
+                }
+                if loc:
+                    for k,v in fields.items():
+                        if v is not None:
+                            setattr(loc,k,v)
+                else:
+                    db.add(Location(**fields))
+            elif entity == 'zones':
+                agency = _resolve_agency(db, default_customer_id, row.get('agency') or row.get('agency_id'))
+                if not agency:
+                    raise ValueError('agency not found')
+                name = row.get('name')
+                if not name:
+                    raise ValueError('name is required')
+                geojson = None
+                if row.get('geojson'):
+                    try: geojson = json.loads(row['geojson'])
+                    except: pass
+                pz = db.query(PostZone).filter(PostZone.customer_id == default_customer_id, PostZone.agency_id == agency.id, PostZone.name == name).first()
+                fields = {
+                    'customer_id': default_customer_id,
+                    'agency_id': agency.id,
+                    'name': name,
+                    'zone_type': row.get('zone_type','post'),
+                    'color': row.get('color','#3b82f6'),
+                    'geojson': geojson,
+                    'display_order': _coerce_int(row.get('display_order'),0),
+                    'minimum_units': _coerce_int(row.get('minimum_units'),0),
+                    'is_active': _coerce_bool(row.get('is_active'),True),
+                }
+                if pz:
+                    for k,v in fields.items():
+                        if v is not None:
+                            setattr(pz,k,v)
+                else:
+                    db.add(PostZone(**fields))
             elif entity == 'incidents':
-                agency_id = int(row['agency_id'])
-                customer_id = _agency_customer_id(db, agency_id, default_customer_id)
-                db.add(Incident(customer_id=customer_id, agency_id=agency_id, call_number=row.get('call_number'), incident_number=row.get('incident_number'), call_type=row.get('call_type', 'Unknown'), priority=int(row['priority']) if row.get('priority') else 2, location_text=row.get('location_text'), lat=float(row['lat']) if row.get('lat') else None, lng=float(row['lng']) if row.get('lng') else None, status=row.get('status', 'open'), caller_name=row.get('caller_name'), callback=row.get('callback'), narrative=row.get('narrative')))
+                agency = _resolve_agency(db, default_customer_id, row.get('agency') or row.get('agency_id'))
+                if not agency:
+                    raise ValueError('agency not found')
+                inc_count = db.query(Incident).filter(Incident.customer_id == agency.customer_id, Incident.agency_id == agency.id).count()
+                inc = Incident(
+                    customer_id=agency.customer_id,
+                    agency_id=agency.id,
+                    call_number=row.get('call_number') or f"{agency.id}-{inc_count+1:05d}",
+                    incident_number=row.get('incident_number') or f"{agency.id}-{inc_count+1:05d}",
+                    call_type=row.get('call_type','Unknown'),
+                    priority=_coerce_int(row.get('priority'),2),
+                    location_text=row.get('location_text'),
+                    lat=_coerce_float(row.get('lat')),
+                    lng=_coerce_float(row.get('lng')),
+                    status=row.get('status','open'),
+                    caller_name=row.get('caller_name'),
+                    callback=row.get('callback'),
+                    narrative=row.get('narrative'),
+                )
+                db.add(inc)
             count += 1
             if count % 100 == 0:
                 db.commit()
@@ -5346,14 +5654,17 @@ def delete_scheduled_event(se_id: int, current_user: dict = Depends(get_current_
 
 @app.get('/post-zones', response_model=List[PostZoneOut])
 def list_post_zones(agency_id: Optional[int] = None, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    customer_id = current_user.get('customer_id')
     q = db.query(PostZone)
+    if customer_id:
+        q = q.filter(PostZone.customer_id == customer_id)
     if agency_id:
         q = q.filter(PostZone.agency_id == agency_id)
     return q.order_by(PostZone.display_order.asc(), PostZone.name.asc()).all()
 
 @app.post('/post-zones', response_model=PostZoneOut)
 def create_post_zone(body: PostZoneCreate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    pz = PostZone(**body.dict())
+    pz = PostZone(customer_id=current_user.get('customer_id'), **body.dict())
     db.add(pz); db.commit(); db.refresh(pz)
     _log_event(db, 'post_zone_created', 'post_zone', pz.id, user_id=current_user.get('user_id'), data=body.dict(), agency_id=pz.agency_id)
     return pz
@@ -5367,8 +5678,11 @@ def get_post_zone(pz_id: int, current_user: dict = Depends(get_current_user), db
 
 @app.put('/post-zones/{pz_id}', response_model=PostZoneOut)
 def update_post_zone(pz_id: int, body: PostZoneUpdate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    customer_id = current_user.get('customer_id')
     pz = db.query(PostZone).get(pz_id)
     if not pz:
+        raise HTTPException(status_code=404, detail='Post zone not found')
+    if customer_id and pz.customer_id is not None and pz.customer_id != customer_id:
         raise HTTPException(status_code=404, detail='Post zone not found')
     for k, v in body.dict(exclude_unset=True).items():
         setattr(pz, k, v)
@@ -5378,8 +5692,11 @@ def update_post_zone(pz_id: int, body: PostZoneUpdate, current_user: dict = Depe
 
 @app.delete('/post-zones/{pz_id}', response_model=PostZoneOut)
 def delete_post_zone(pz_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    customer_id = current_user.get('customer_id')
     pz = db.query(PostZone).get(pz_id)
     if not pz:
+        raise HTTPException(status_code=404, detail='Post zone not found')
+    if customer_id and pz.customer_id is not None and pz.customer_id != customer_id:
         raise HTTPException(status_code=404, detail='Post zone not found')
     db.delete(pz); db.commit()
     _log_event(db, 'post_zone_deleted', 'post_zone', pz.id, user_id=current_user.get('user_id'), data={}, agency_id=pz.agency_id)
