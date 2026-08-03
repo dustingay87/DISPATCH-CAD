@@ -9,6 +9,7 @@
 <link rel='stylesheet' href='/static/branding.css'>
 <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
 <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' crossorigin=''></script>
+<link rel='stylesheet' href='/static/app.css'>
 <script>
 function showJSError(err){
   const el = document.getElementById('callList') || document.getElementById('main') || document.body;
@@ -19,7 +20,7 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
 </script>
 <style>
   * { box-sizing:border-box; }
-  html,body { height:100%; margin:0; overflow:hidden; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  html,body { height:100%; margin:0; overflow:hidden; font-family: 'Inter', system-ui, sans-serif; }
   .priority-1 { background:rgba(239,68,68,0.18); border-left:5px solid #ef4444; }
   .priority-2 { background:rgba(249,115,22,0.18); border-left:5px solid #f97316; }
   .priority-3 { background:rgba(234,179,8,0.18); border-left:5px solid #eab308; }
@@ -32,110 +33,135 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
   tr.dragging { opacity:0.5; }
   tr.drop-target { outline:2px dashed #22c55e; outline-offset:-2px; background:rgba(34,197,94,0.10); }
   #incidentPanel.drop-target { outline:3px dashed #22c55e; outline-offset:-3px; background:rgba(34,197,94,0.10); }
-  .card { background:#1e293b; border:1px solid #334155; border-radius:0.25rem; overflow:hidden; display:flex; flex-direction:column; }
-  .card-head { background:#0f172a; padding:0.25rem 0.5rem; font-weight:600; border-bottom:1px solid #334155; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.03em; }
-  .card-body { padding:0.25rem; overflow:auto; flex:1; }
+  .card { background:#132240; border:1px solid #1E4B8C; border-radius:0.5rem; overflow:hidden; display:flex; flex-direction:column; }
+  .card-head { background:#0f172a; padding:0.4rem 0.65rem; font-weight:700; border-bottom:1px solid #1E4B8C; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.03em; color:#F1FAF8; display:flex; justify-content:space-between; align-items:center; }
+  .card-body { padding:0.5rem; overflow:auto; flex:1; }
   .tbl { width:100%; border-collapse:collapse; font-size:0.7rem; }
   .tbl th { background:#0f172a; padding:0.2rem 0.35rem; text-align:left; text-transform:uppercase; font-size:0.6rem; color:#94a3b8; }
   .tbl td { padding:0.25rem 0.35rem; border-bottom:1px solid #334155; vertical-align:top; }
   .tbl tr { cursor:pointer; }
-  .tbl tr:hover { background:rgba(255,255,255,0.05); }
+  .tbl tr:hover { background:rgba(0,184,255,0.08); }
+  html.light .card { background:#ffffff; border-color:#e2e8f0; }
+  html.light .card-head { background:#f1f5f9; color:#0f172a; border-bottom-color:#e2e8f0; }
+  html.light .tbl th { background:#f1f5f9; color:#475569; }
+  html.light .tbl td { border-bottom-color:#e2e8f0; }
   .timer { font-variant-numeric:tabular-nums; }
-  .selected { outline:2px solid #3b82f6; }
+  .selected { outline:2px solid #00B8FF; }
   #map { width:100%; height:100%; background:#0f172a; }
   #crewModal { z-index:10000 !important; }
   #crewModal > div { position:relative; z-index:10001; }
   .legend { background:rgba(15,23,42,0.9); color:#e2e8f0; padding:0.5rem; border-radius:0.375rem; border:1px solid #334155; font-size:0.7rem; }
   .legend .dot { display:inline-block; width:0.6rem; height:0.6rem; border-radius:50%; margin-right:0.3rem; }
   .resizer { width:4px; background:#475569; cursor:col-resize; transition:background 0.1s; }
-  .resizer:hover { background:#3b82f6; }
+  .resizer:hover { background:#00B8FF; }
   .resizer-h { height:4px; background:#475569; cursor:row-resize; transition:background 0.1s; }
-  .resizer-h:hover { background:#3b82f6; }
+  .resizer-h:hover { background:#00B8FF; }
   .locked .resizer, .locked .resizer-h { display:none; }
   ::-webkit-scrollbar { width:6px; height:6px; }
   ::-webkit-scrollbar-track { background:#0f172a; }
   ::-webkit-scrollbar-thumb { background:#475569; border-radius:3px; }
+  html.light ::-webkit-scrollbar-track { background:#f1f5f9; }
+  html.light ::-webkit-scrollbar-thumb { background:#cbd5e1; }
 </style>
 
 <link rel='stylesheet' href='/static/theme.css'>
 <script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
-<body class='bg-slate-900 text-slate-200 text-xs h-screen flex flex-col d2d-font-body'>
-  <header class='h-auto min-h-12 d2d-header flex flex-wrap items-center px-2 gap-2 shrink-0'>
-    <div class='flex items-center gap-2'>
+<body class='app-shell'>
+  <aside class='app-sidebar' id='appSidebar'>
+    <div class='app-sidebar-header'>
+      <img src='/static/d2d-logo.png' class='h-8 w-8' alt=''>
+    </div>
+    <nav class='app-nav'>
+      <a href='/dashboard_v6' title='Dashboard'><span class='icon'>📊</span><span class='label'>Dashboard</span></a>
+      <a href='/call-entry' title='Call Entry'><span class='icon'>📝</span><span class='label'>Call Entry</span></a>
+      <a href='/mdt?unit_id=1' target='_blank' title='MDT'><span class='icon'>📱</span><span class='label'>MDT</span></a>
+      <a href='/avl' target='_blank' title='AVL'><span class='icon'>🚗</span><span class='label'>AVL</span></a>
+      <a href='/admin' id='adminLink' class='hidden' title='Admin'><span class='icon'>⚙️</span><span class='label'>Admin</span></a>
+      <button onclick='logout()' title='Logout'><span class='icon'>🚪</span><span class='label'>Logout</span></button>
+    </nav>
+  </aside>
+  <div class='app-main'>
+    <header class='app-header'>
+      <button class='app-btn-outline px-2 py-1' onclick='document.getElementById("appSidebar").classList.toggle("open")' title='Menu'>☰</button>
       <img id='brandLogo' src='/static/d2d-logo.png' class='h-8 w-8' alt=''>
-      <span id='brandTitle' class='d2d-logo-text text-white text-lg'>Unified Response</span>
-      <span class='text-slate-400 font-normal text-xs' id='consoleLabel'>Console</span>
+      <div class='brand' id='brandTitle'>Unified Response</div>
+      <span class='text-slate-400 text-xs' id='consoleLabel'>Console</span>
+      <select id='disciplineSelect' class='bg-slate-800 border border-slate-600 rounded px-1 py-1 text-xs'><option value='all'>All Disciplines</option><option value='police'>Police</option><option value='fire'>Fire</option><option value='ems'>EMS</option></select>
+      <div class='text-slate-400 font-mono' id='clock'>--:--:--</div>
+      <label class='flex items-center space-x-1'><input id='liveToggle' type='checkbox' checked class='accent-blue-500'> <span>Live</span></label>
+      <label class='flex items-center space-x-1 text-slate-300'><input id='lockLayout' type='checkbox' class='accent-pink-500'> <span>Lock</span></label>
+      <button id='refreshBtn' class='app-btn-outline'>Refresh</button>
+      <div class='spacer'></div>
+      <button id='alertsBtn' class='hidden app-btn-outline text-red-400 border-red-400' onclick='showAlerts()'>Alerts <span id='alertsCount' class='bg-red-500 rounded-full px-1.5'>0</span></button>
+      <button class='app-btn-outline' onclick='document.documentElement.classList.toggle("light"); localStorage.setItem("ur_theme", document.documentElement.classList.contains("light")?"light":"dark")'>🌓</button>
+    </header>
+    <div class='app-kpi' id='kpiBar'>
+      <div class='app-kpi-card'><div class='icon'>📞</div><div><div class='value' id='kpiActive'>0</div><div class='label'>Active Calls</div></div></div>
+      <div class='app-kpi-card'><div class='icon' style='color:#eab308'>🚑</div><div><div class='value' id='kpiEnRoute'>0</div><div class='label'>En Route</div></div></div>
+      <div class='app-kpi-card'><div class='icon' style='color:#ef4444'>📍</div><div><div class='value' id='kpiOnScene'>0</div><div class='label'>On Scene</div></div></div>
+      <div class='app-kpi-card'><div class='icon' style='color:#22c55e'>✅</div><div><div class='value' id='kpiAvailable'>0</div><div class='label'>Available Units</div></div></div>
+      <div class='app-kpi-card'><div class='icon' style='color:#f97316'>🔔</div><div><div class='value' id='kpiUnacked'>0</div><div class='label'>Unacked Dispatches</div></div></div>
     </div>
-    <select id='disciplineSelect' class='bg-slate-800 border border-slate-600 rounded px-1 py-1 text-xs'><option value='all'>All Disciplines</option><option value='police'>Police</option><option value='fire'>Fire</option><option value='ems'>EMS</option></select>
-    <div class='text-slate-400 font-mono' id='clock'>--:--:--</div>
-    <label class='flex items-center space-x-1'><input id='liveToggle' type='checkbox' checked class='accent-blue-500'> <span>Live</span></label>
-    <label class='flex items-center space-x-1 text-slate-300'><input id='lockLayout' type='checkbox' class='accent-pink-500'> <span>Lock</span></label>
-    <button id='refreshBtn' class='bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded'>Refresh</button>
-    <a id='dashLink' href='/dashboard_v6' class='bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-white'>Dash</a>
-    <a id='adminLink' href='/admin' class='hidden bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-white'>Admin</a>
-    <a href='/call-entry' class='bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-white'>Call Entry</a>
-    <a href='/mdt?unit_id=1' target='_blank' class='bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-white'>MDT</a>
-    <a href='/avl' target='_blank' class='bg-cyan-700 hover:bg-cyan-600 px-2 py-1 rounded text-white'>AVL</a>
-    <button class='bg-red-700 hover:bg-red-600 px-2 py-1 rounded text-white' onclick='logout()'>Logout</button>
-    <button id='alertsBtn' class='hidden bg-red-800 hover:bg-red-700 px-2 py-1 rounded text-white' onclick='showAlerts()'>Alerts <span id='alertsCount' class='bg-red-500 rounded-full px-1.5'>0</span></button>
-  </header>
-  <main id='main' class='flex-1 grid p-1 overflow-hidden' style='grid-template-columns:var(--col1,25%) 4px var(--col2,45%) 4px var(--col3,30%);'>
-    <aside class='flex flex-col gap-1 min-h-0'>
-      <div class='card flex-1 min-h-0'>
-        <div class='card-head flex justify-between items-center'>
-          <div class='flex gap-1'>
-            <button id='tabActive' class='px-2 py-0.5 rounded text-xs bg-blue-600 text-white' onclick='state.showClosed=false; document.getElementById("tabActive").classList.add("bg-blue-600","text-white"); document.getElementById("tabClosed").classList.remove("bg-blue-600","text-white"); renderCalls();'>Active</button>
-            <button id='tabClosed' class='px-2 py-0.5 rounded text-xs bg-slate-700 text-slate-300' onclick='state.showClosed=true; document.getElementById("tabClosed").classList.add("bg-blue-600","text-white"); document.getElementById("tabActive").classList.remove("bg-blue-600","text-white"); renderCalls();'>Closed</button>
+    <div class='app-content'>
+      <main id='main' class='flex-1 grid p-0 overflow-hidden' style='grid-template-columns:var(--col1,25%) 4px var(--col2,45%) 4px var(--col3,30%);'>
+        <aside class='flex flex-col gap-1 min-h-0'>
+          <div class='card flex-1 min-h-0'>
+            <div class='card-head flex justify-between items-center'>
+              <div class='flex gap-1'>
+                <button id='tabActive' class='px-2 py-0.5 rounded text-xs bg-blue-600 text-white' onclick='state.showClosed=false; document.getElementById("tabActive").classList.add("bg-blue-600","text-white"); document.getElementById("tabClosed").classList.remove("bg-blue-600","text-white"); renderCalls();'>Active</button>
+                <button id='tabClosed' class='px-2 py-0.5 rounded text-xs bg-slate-700 text-slate-300' onclick='state.showClosed=true; document.getElementById("tabClosed").classList.add("bg-blue-600","text-white"); document.getElementById("tabActive").classList.remove("bg-blue-600","text-white"); renderCalls();'>Closed</button>
+              </div>
+              <span id='callCount' class='text-slate-400'>0</span>
+            </div>
+            <div id='callFilters' class='p-1 flex flex-wrap gap-1 border-b border-slate-700 text-[10px]'></div>
+            <div id='callList' class='card-body'></div>
           </div>
-          <span id='callCount' class='text-slate-400'>0</span>
+        </aside>
+        <div id='resizer1' class='resizer'></div>
+        <section id='center' class='flex flex-col gap-1 min-h-0' style='grid-template-rows:var(--rowTop,55%) 4px var(--rowBottom,45%); display:grid;'>
+          <div id='incidentPanel' class='card min-h-0 overflow-auto'>
+            <div class='card-head'>Incident Workspace</div>
+            <div class='p-2 text-slate-400'>Select a call from the left.</div>
+          </div>
+          <div id='resizerV' class='resizer-h'></div>
+          <div class='card min-h-0'>
+            <div class='card-head flex justify-between items-center'>
+              <span>Map</span>
+              <div class='flex gap-3 text-xs'>
+                <label class='flex items-center gap-1 cursor-pointer'><input id='trailToggle' type='checkbox' checked class='accent-blue-500'> Trails</label>
+                <label class='flex items-center gap-1 cursor-pointer'><input id='critToggle' type='checkbox' class='accent-red-500'> Critical</label>
+              </div>
+            </div>
+            <div class='card-body p-0'><div id='map'></div></div>
+          </div>
+        </section>
+        <div id='resizer2' class='resizer'></div>
+        <aside class='flex flex-col gap-1 min-h-0'>
+          <div class='card flex-1 min-h-0'>
+            <div class='card-head flex justify-between'><span>Unit Board</span><span id='unitCount' class='text-slate-400'>0</span></div>
+            <div id='unitList' class='card-body'></div>
+          </div>
+        </aside>
+      </main>
+      <div id='footerResizer' class='resizer-h'></div>
+      <footer id='footer' class='shrink-0 p-1 flex gap-1 min-h-0' style='height:var(--footer-h,9rem);'>
+        <div class='card w-1/2'>
+          <div class='card-head'>Event Log</div>
+          <div id='eventLog' class='card-body log font-mono text-slate-300 space-y-0.5'></div>
         </div>
-        <div id='callFilters' class='p-1 flex flex-wrap gap-1 border-b border-slate-700 text-[10px]'></div>
-        <div id='callList' class='card-body'></div>
-      </div>
-    </aside>
-    <div id='resizer1' class='resizer'></div>
-    <section id='center' class='flex flex-col gap-1 min-h-0' style='grid-template-rows:var(--rowTop,55%) 4px var(--rowBottom,45%); display:grid;'>
-      <div id='incidentPanel' class='card min-h-0 overflow-auto'>
-        <div class='card-head'>Incident Workspace</div>
-        <div class='p-2 text-slate-400'>Select a call from the left.</div>
-      </div>
-      <div id='resizerV' class='resizer-h'></div>
-      <div class='card min-h-0'>
-        <div class='card-head flex justify-between items-center'>
-          <span>Map</span>
-          <div class='flex gap-3 text-xs'>
-            <label class='flex items-center gap-1 cursor-pointer'><input id='trailToggle' type='checkbox' checked class='accent-blue-500'> Trails</label>
-            <label class='flex items-center gap-1 cursor-pointer'><input id='critToggle' type='checkbox' class='accent-red-500'> Critical</label>
+        <div class='card w-1/2 flex flex-col'>
+          <div class='card-head'>Messages</div>
+          <div id='msgList' class='card-body log text-slate-300 space-y-0.5'></div>
+          <div class='flex p-1 gap-1 border-t border-slate-700'>
+            <select id='msgUnit' class='bg-slate-800 border border-slate-600 rounded px-1 text-xs'><option value=''>All</option></select>
+            <input id='msgText' type='text' class='flex-1 bg-slate-800 border border-slate-600 rounded px-2 text-xs' placeholder='Message...'>
+            <button id='msgSend' class='bg-blue-700 hover:bg-blue-600 px-2 rounded'>Send</button>
           </div>
         </div>
-        <div class='card-body p-0'><div id='map'></div></div>
-      </div>
-    </section>
-    <div id='resizer2' class='resizer'></div>
-    <aside class='flex flex-col gap-1 min-h-0'>
-      <div class='card flex-1 min-h-0'>
-        <div class='card-head flex justify-between'><span>Unit Board</span><span id='unitCount' class='text-slate-400'>0</span></div>
-        <div id='unitList' class='card-body'></div>
-      </div>
-    </aside>
-  </main>
-  <div id='footerResizer' class='resizer-h'></div>
-  <footer id='footer' class='shrink-0 p-1 flex gap-1 min-h-0' style='height:var(--footer-h,9rem);'>
-    <div class='card w-1/2'>
-      <div class='card-head'>Event Log</div>
-      <div id='eventLog' class='card-body log font-mono text-slate-300 space-y-0.5'></div>
+      </footer>
     </div>
-    <div class='card w-1/2 flex flex-col'>
-      <div class='card-head'>Messages</div>
-      <div id='msgList' class='card-body log text-slate-300 space-y-0.5'></div>
-      <div class='flex p-1 gap-1 border-t border-slate-700'>
-        <select id='msgUnit' class='bg-slate-800 border border-slate-600 rounded px-1 text-xs'><option value=''>All</option></select>
-        <input id='msgText' type='text' class='flex-1 bg-slate-800 border border-slate-600 rounded px-2 text-xs' placeholder='Message...'>
-        <button id='msgSend' class='bg-blue-700 hover:bg-blue-600 px-2 rounded'>Send</button>
-      </div>
-    </div>
-  </footer>
+  </div>
 <script>
 const DEFAULT_CENTER = [39.9612,-82.9988];
 let state = { agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, configs:{}, postZones:[], selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false, mapLayers:[], destinations:{}, lastCallsHtml:null, lastUnitsHtml:null, showClosed:false };
@@ -1551,18 +1577,30 @@ async function load(){
     const lbl = document.getElementById('consoleLabel'); if(lbl) lbl.textContent = DISCIPLINE==='all' ? 'Console' : DISCIPLINE.toUpperCase()+' Console';
     const sel = document.getElementById('msgUnit');
     if(sel.options.length<=1){ state.units.forEach(u=>{ sel.innerHTML += `<option value='${u.id}'>${u.call_sign}</option>`; }); }
-    renderCallFilters(); renderCalls(); renderUnits(); renderMap(); renderMessages();
+    renderKPI(); renderCallFilters(); renderCalls(); renderUnits(); renderMap(); renderMessages();
     if(state.selectedIncident){ selectIncident(state.selectedIncident); }
     await loadAlerts();
   } catch(e){ log('Load error: '+e.message); const el=document.getElementById('callList'); if(el) el.innerHTML = '<div class="p-2 text-red-400">Load error: '+(e.message||e)+'</div>'; const ul=document.getElementById('unitList'); if(ul) ul.innerHTML = '<div class="p-2 text-red-400">Load error: '+(e.message||e)+'</div>'; }
 }
 
+function renderKPI(){
+  const active = state.incidents.filter(i=>i.status!=='closed');
+  const enRoute = state.units.filter(u=>['ER','en_route'].includes(u.current_status)).length;
+  const onScene = state.units.filter(u=>['OS','on_scene'].includes(u.current_status)).length;
+  const available = state.units.filter(u=>['AQ','AFR','POSTING','STAGED','AT_STATION','AVAILABLE_ON_RADIO','IN_SERVICE','ON_DUTY','AVAILABLE'].includes(u.current_status)).length;
+  const unacked = state.incidents.filter(i=>i.requires_ack && !i.acknowledged_at).length;
+  const elActive=document.getElementById('kpiActive'); if(elActive) elActive.textContent=active.length;
+  const elEn=document.getElementById('kpiEnRoute'); if(elEn) elEn.textContent=enRoute;
+  const elOn=document.getElementById('kpiOnScene'); if(elOn) elOn.textContent=onScene;
+  const elAv=document.getElementById('kpiAvailable'); if(elAv) elAv.textContent=available;
+  const elUn=document.getElementById('kpiUnacked'); if(elUn) elUn.textContent=unacked;
+}
 function updateClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 
 document.getElementById('refreshBtn').addEventListener('click', load);
 document.getElementById('msgSend').addEventListener('click', sendMessage);
 document.getElementById('msgText').addEventListener('keydown', e=>{ if(e.key==='Enter') sendMessage(); });
-document.getElementById('disciplineSelect').addEventListener('change', e=>{ DISCIPLINE = e.target.value; updateBrand(); renderCalls(); renderUnits(); renderMap(); });
+document.getElementById('disciplineSelect').addEventListener('change', e=>{ DISCIPLINE = e.target.value; updateBrand(); renderKPI(); renderCalls(); renderUnits(); renderMap(); });
 document.getElementById('trailToggle').addEventListener('change', e=>{ state.showTrails = e.target.checked; renderMap(); });
 document.getElementById('critToggle').addEventListener('change', e=>{ state.showCritical = e.target.checked; renderMap(); });
 

@@ -9,13 +9,14 @@
 <link rel='stylesheet' href='/static/branding.css'>
 <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' crossorigin=''>
 <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' crossorigin=''></script>
+<link rel='stylesheet' href='/static/app.css'>
 <style>
 * { box-sizing:border-box; }
 html,body { height:100%; margin:0; overflow:hidden; font-family: 'Inter', system-ui, sans-serif; }
-.pri-1 { background:rgba(239,68,68,0.25); border-left:4px solid #ef4444; }
-.pri-2 { background:rgba(249,115,22,0.25); border-left:4px solid #f97316; }
-.pri-3 { background:rgba(234,179,8,0.25); border-left:4px solid #eab308; }
-.pri-4 { background:rgba(34,197,94,0.25); border-left:4px solid #22c55e; }
+.pri-1 { background:rgba(239,68,68,0.18); border-left:5px solid #ef4444; }
+.pri-2 { background:rgba(249,115,22,0.18); border-left:5px solid #f97316; }
+.pri-3 { background:rgba(234,179,8,0.18); border-left:5px solid #eab308; }
+.pri-4 { background:rgba(34,197,94,0.18); border-left:5px solid #22c55e; }
 .stat-AQ { color:#22c55e; }
 .stat-OS { color:#ef4444; }
 .stat-ER,.stat-TR,.stat-DEL { color:#eab308; }
@@ -23,12 +24,16 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: 'Inter', system
 .tbl th { background:#0f172a; padding:0.25rem 0.5rem; text-align:left; text-transform:uppercase; color:#94a3b8; }
 .tbl td { padding:0.25rem 0.5rem; border-bottom:1px solid #334155; }
 .tbl tr { cursor:pointer; }
-.tbl tr:hover { background:rgba(255,255,255,0.05); }
-.tbl tr.selected { outline:2px solid #3b82f6; }
+.tbl tr:hover { background:rgba(0,184,255,0.08); }
+.tbl tr.selected { outline:2px solid #00B8FF; }
+html.light .tbl th { background:#f1f5f9; color:#475569; }
+html.light .tbl td { border-bottom-color:#e2e8f0; }
 #map { height:100%; min-height:180px; background:#0f172a; }
-.panel { background:#1e293b; border:1px solid #334155; border-radius:0.375rem; overflow:hidden; display:flex; flex-direction:column; }
-.panel-head { background:#0f172a; padding:0.35rem 0.5rem; font-weight:700; font-size:0.75rem; border-bottom:1px solid #334155; }
-.panel-body { flex:1; overflow:auto; padding:0.25rem; }
+.panel { background:#132240; border:1px solid #1E4B8C; border-radius:0.5rem; overflow:hidden; display:flex; flex-direction:column; }
+.panel-head { background:#0f172a; padding:0.4rem 0.65rem; font-weight:700; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.03em; border-bottom:1px solid #1E4B8C; color:#F1FAF8; display:flex; justify-content:space-between; align-items:center; }
+.panel-body { flex:1; overflow:auto; padding:0.5rem; }
+html.light .panel { background:#ffffff; border-color:#e2e8f0; }
+html.light .panel-head { background:#f1f5f9; color:#0f172a; border-bottom-color:#e2e8f0; }
 @keyframes flashRed { 0%,100% { background:rgba(239,68,68,0.15); } 50% { background:rgba(239,68,68,0.55); } }
 .flash-urgent { animation:flashRed 1.2s infinite; }
 .overdue { color:#f87171; font-weight:bold; }
@@ -37,53 +42,69 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: 'Inter', system
 <link rel='stylesheet' href='/static/theme.css'>
 <script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
 </head>
-<body class='bg-slate-900 text-slate-200 text-xs h-screen flex flex-col d2d-font-body'>
-  <header class='min-h-14 h-auto d2d-header flex flex-wrap items-center justify-between px-4 py-1 shrink-0 gap-2'>
-    <div class='flex items-center gap-2'>
+<body class='app-shell'>
+  <aside class='app-sidebar' id='appSidebar'>
+    <div class='app-sidebar-header'>
+      <img src='/static/d2d-logo.png' class='h-8 w-8' alt=''>
+    </div>
+    <nav class='app-nav'>
+      <a href='/console' title='Console'><span class='icon'>🖥️</span><span class='label'>Console</span></a>
+      <a href='/call-entry' title='Call Entry'><span class='icon'>📝</span><span class='label'>Call Entry</span></a>
+      <a id='scheduledLink' href='/scheduled-transports-page' title='Scheduled'><span class='icon'>📅</span><span class='label'>Scheduled</span></a>
+      <a href='/coverage-page?v=2' title='Coverage'><span class='icon'>🗺️</span><span class='label'>Coverage</span></a>
+      <a href='/reports-page' title='Reports'><span class='icon'>📊</span><span class='label'>Reports</span></a>
+      <a href='/mdt' title='MDT'><span class='icon'>📱</span><span class='label'>MDT</span></a>
+      <a href='/mobile-mdt' title='Mobile MDT'><span class='icon'>📲</span><span class='label'>Mobile MDT</span></a>
+      <a href='/avl' title='AVL'><span class='icon'>🚗</span><span class='label'>AVL</span></a>
+      <a href='/admin' id='adminLink' class='hidden' title='Admin'><span class='icon'>⚙️</span><span class='label'>Admin</span></a>
+      <button class='app-nav-logout' onclick='logout()' title='Logout'><span class='icon'>🚪</span><span class='label'>Logout</span></button>
+    </nav>
+  </aside>
+  <div class='app-main'>
+    <header class='app-header'>
+      <button class='app-btn-outline px-2 py-1' onclick='document.getElementById("appSidebar").classList.toggle("open")' title='Menu'>☰</button>
       <img id='brandLogo' src='/static/d2d-logo.png' class='h-8 w-8' alt=''>
-      <div class='font-bold text-lg text-white d2d-logo-text' id='brandTitle'>Unified Response</div>
+      <div class='brand' id='brandTitle'>Unified Response</div>
+      <span class='text-slate-400' id='moduleLabel'>Command</span>
       <select id='moduleSelect' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden'></select>
+      <div class='spacer'></div>
+      <button id='layoutBtn' class='app-btn-outline' onclick='openLayoutEditor()'>Edit Layout</button>
+      <button class='app-btn-outline' onclick='document.documentElement.classList.toggle("light"); localStorage.setItem("ur_theme", document.documentElement.classList.contains("light")?"light":"dark")'>🌓</button>
+    </header>
+    <div class='app-kpi' id='kpiBar'>
+      <div class='app-kpi-card'><div class='icon'>📞</div><div><div class='value' id='kpiActive'>0</div><div class='label'>Active Calls</div></div></div>
+      <div class='app-kpi-card'><div class='icon' style='color:#eab308'>🚑</div><div><div class='value' id='kpiEnRoute'>0</div><div class='label'>En Route</div></div></div>
+      <div class='app-kpi-card'><div class='icon' style='color:#ef4444'>📍</div><div><div class='value' id='kpiOnScene'>0</div><div class='label'>On Scene</div></div></div>
+      <div class='app-kpi-card'><div class='icon' style='color:#22c55e'>✅</div><div><div class='value' id='kpiAvailable'>0</div><div class='label'>Available Units</div></div></div>
+      <div class='app-kpi-card'><div class='icon' style='color:#f97316'>⏰</div><div><div class='value' id='kpiOverdue'>0</div><div class='label'>Overdue Scheduled</div></div></div>
     </div>
-    <div class='flex flex-wrap items-center gap-2'>
-      <a href='/console' class='bg-blue-700 hover:bg-blue-600 px-2 py-1 rounded text-xs'>Console</a>
-      <a href='/call-entry' class='bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-xs'>Call Entry</a>
-      <a id='scheduledLink' href='/scheduled-transports-page' class='bg-indigo-700 hover:bg-indigo-600 px-2 py-1 rounded text-xs'>Scheduled</a>
-      <a href='/coverage-page?v=2' class='bg-teal-700 hover:bg-teal-600 px-2 py-1 rounded text-xs'>Coverage</a>
-      <a href='/reports-page' class='bg-orange-700 hover:bg-orange-600 px-2 py-1 rounded text-xs'>Reports</a>
-      <a href='/mdt' class='bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-xs'>MDT</a>
-      <a href='/mobile-mdt' class='bg-purple-800 hover:bg-purple-700 px-2 py-1 rounded text-xs'>Mobile MDT</a>
-      <a href='/avl' class='bg-cyan-700 hover:bg-cyan-600 px-2 py-1 rounded text-xs'>AVL</a>
-      <button id='layoutBtn' class='bg-pink-700 hover:bg-pink-600 px-2 py-1 rounded text-xs' onclick='openLayoutEditor()'>Edit Layout</button>
-      <a href='/admin' id='adminLink' class='hidden bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-xs'>Admin</a>
-      <button class='bg-red-700 hover:bg-red-600 px-2 py-1 rounded text-xs' onclick='logout()'>Logout</button>
-    </div>
-  </header>
-  <main class='flex-1 grid grid-cols-12 gap-1 p-1 overflow-hidden'>
-    <section id='leftSection' class='col-span-8 flex flex-col gap-1 min-h-0'>
-      <div id='activeCallsPanel' class='panel flex-1 min-h-0'>
-        <div class='panel-head flex justify-between'><span>Active Calls</span><span id='callCount' class='text-slate-400'>0</span></div>
-        <div id='openWork' class='panel-body p-0'></div>
-      </div>
-      <div id='mapPanel' class='panel h-2/5 min-h-0'>
-        <div class='panel-head'>Map</div>
-        <div class='panel-body p-0'><div id='map'></div></div>
-      </div>
-    </section>
-    <section id='rightSection' class='col-span-4 flex flex-col gap-1 min-h-0'>
-      <div id='scheduledPanel' class='panel h-1/3 min-h-0'>
-        <div class='panel-head flex justify-between'><span>Scheduled Transports</span><span id='scheduledCount' class='text-slate-400'>0</span></div>
-        <div id='scheduledList' class='panel-body p-0'></div>
-      </div>
-      <div id='unitsPanel' class='panel flex-1 min-h-0'>
-        <div class='panel-head flex justify-between'><span>On Duty Units</span><span id='unitCount' class='text-slate-400'>0</span></div>
-        <div id='vehicleInfo' class='panel-body p-0'></div>
-      </div>
-      <div id='summaryPanel' class='panel h-2/5 min-h-0'>
-        <div class='panel-head'>Trip / Vehicle Summary</div>
-        <div id='tripSummary' class='panel-body'></div>
-      </div>
-    </section>
-  </main>
+    <main id='main' class='app-content grid grid-cols-12 gap-2'>
+      <section id='leftSection' class='col-span-8 flex flex-col gap-2 min-h-0'>
+        <div id='activeCallsPanel' class='panel flex-1 min-h-0'>
+          <div class='panel-head flex justify-between'><span>Active Calls</span><span id='callCount' class='text-slate-400'>0</span></div>
+          <div id='openWork' class='panel-body p-0'></div>
+        </div>
+        <div id='mapPanel' class='panel h-2/5 min-h-0'>
+          <div class='panel-head'>Map</div>
+          <div class='panel-body p-0'><div id='map'></div></div>
+        </div>
+      </section>
+      <section id='rightSection' class='col-span-4 flex flex-col gap-2 min-h-0'>
+        <div id='scheduledPanel' class='panel h-1/3 min-h-0'>
+          <div class='panel-head flex justify-between'><span>Scheduled Transports</span><span id='scheduledCount' class='text-slate-400'>0</span></div>
+          <div id='scheduledList' class='panel-body p-0'></div>
+        </div>
+        <div id='unitsPanel' class='panel flex-1 min-h-0'>
+          <div class='panel-head flex justify-between'><span>On Duty Units</span><span id='unitCount' class='text-slate-400'>0</span></div>
+          <div id='vehicleInfo' class='panel-body p-0'></div>
+        </div>
+        <div id='summaryPanel' class='panel h-2/5 min-h-0'>
+          <div class='panel-head'>Trip / Vehicle Summary</div>
+          <div id='tripSummary' class='panel-body'></div>
+        </div>
+      </section>
+    </main>
+  </div>
 
   <div id='layoutModal' class='fixed inset-0 bg-slate-950/80 z-50 hidden items-center justify-center'>
     <div class='bg-slate-900 border border-slate-700 rounded p-4 w-full max-w-sm shadow-lg'>
@@ -327,7 +348,21 @@ async function load(){
   state.postZones=postZones||[];state.unitPostings=unitPostings||[];state.postingMap={};
   (state.unitPostings||[]).forEach(p=>{ if(p.is_current) state.postingMap[p.unit_id]=p.post_zone; });
   applyDashboardLayout();
-  renderOpenWork();renderVehicleInfo();renderMap();renderTripSummary();renderScheduled();
+  renderKPI();renderOpenWork();renderVehicleInfo();renderMap();renderTripSummary();renderScheduled();
+}
+function renderKPI(){
+  const active = state.incidents.filter(i=>i.status!=='closed');
+  const enRoute = state.units.filter(u=>['ER','en_route'].includes(u.current_status)).length;
+  const onScene = state.units.filter(u=>['OS','on_scene'].includes(u.current_status)).length;
+  const available = state.units.filter(u=>['AQ','Available','AFR'].includes(u.current_status)).length;
+  const now = Date.now();
+  const overdue = (state.scheduled||[]).filter(s=>{ const t=s.scheduled_at?new Date(s.scheduled_at).getTime():0; return t>0 && t<now; }).length
+               + (state.scheduledEvents||[]).filter(s=>{ const t=s.scheduled_at?new Date(s.scheduled_at).getTime():0; return t>0 && t<now; }).length;
+  document.getElementById('kpiActive').textContent=active.length;
+  document.getElementById('kpiEnRoute').textContent=enRoute;
+  document.getElementById('kpiOnScene').textContent=onScene;
+  document.getElementById('kpiAvailable').textContent=available;
+  document.getElementById('kpiOverdue').textContent=overdue;
 }
 function initMap(){if(map)return;map=L.map('map');L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap'}).addTo(map);layers={units:L.layerGroup().addTo(map),incidents:L.layerGroup().addTo(map),zones:L.layerGroup().addTo(map)};}
 
