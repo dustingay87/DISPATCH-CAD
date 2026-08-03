@@ -723,12 +723,13 @@ class UserMe(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     customer_id: Optional[int] = None
+    customer_name: Optional[str] = None
     agency_id: Optional[int] = None
     modules: List[str] = []
     selected_module: Optional[str] = None
     personnel_id: Optional[int] = None
     cross_discipline_agencies: List[int] = []
-    preferences: Optional[dict] = None
+    preferences: Optional[Any] = None
 
 class UserModuleUpdate(BaseModel):
     module: str
@@ -1443,8 +1444,13 @@ def me(request: Request, db: Session = Depends(get_db)):
     selected = None
     personnel_id = None
     cross_ids = []
-    customer_id = user.get('customer_id') if user.get('customer_id') is not None else (u.customer_id if u else None)
-    agency_id = user.get('agency_id') if user.get('agency_id') is not None else (u.agency_id if u else None)
+    customer_id = user.get('customer_id') if user.get('customer_id') else (u.customer_id if u and u.customer_id else None)
+    agency_id = user.get('agency_id') if user.get('agency_id') else (u.agency_id if u and u.agency_id else None)
+    customer_name = None
+    if customer_id:
+        cust = db.query(Customer).get(customer_id)
+        if cust:
+            customer_name = cust.name
     if u and customer_id:
         if agency_id:
             modules_val = _customer_config_value(db, customer_id, agency_id, 'modules', 'defaults')
@@ -1461,7 +1467,8 @@ def me(request: Request, db: Session = Depends(get_db)):
         p = db.query(Personnel).filter(Personnel.user_id == u.id).first()
         if p:
             personnel_id = p.id
-    return {'user_id': user['user_id'], 'email': u.email if u else None, 'first_name': u.first_name if u else None, 'last_name': u.last_name if u else None, 'role': user['role'], 'customer_id': customer_id, 'agency_id': agency_id, 'modules': modules, 'selected_module': selected, 'personnel_id': personnel_id, 'cross_discipline_agencies': cross_ids, 'preferences': u.preferences if u else None}
+    prefs = u.preferences if u and isinstance(u.preferences, dict) else None
+    return {'user_id': user['user_id'], 'email': u.email if u else None, 'first_name': u.first_name if u else None, 'last_name': u.last_name if u else None, 'role': user['role'], 'customer_id': customer_id, 'customer_name': customer_name, 'agency_id': agency_id, 'modules': modules, 'selected_module': selected, 'personnel_id': personnel_id, 'cross_discipline_agencies': cross_ids, 'preferences': prefs}
 
 @app.put('/me/module')
 def set_user_module(body: UserModuleUpdate, request: Request, db: Session = Depends(get_db)):

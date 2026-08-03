@@ -23,7 +23,7 @@
 <body class='p-4'>
   <div class='max-w-3xl mx-auto space-y-4'>
     <div class='flex flex-wrap justify-between items-center gap-2'>
-      <h1 class='text-2xl font-bold'>Unified Response - <span class='text-slate-400 font-normal'>Call Entry</span></h1>
+      <h1 class='text-2xl font-bold'>Unified Response - <span class='text-slate-400 font-normal' id='pageSubtitle'>Call Entry</span><span id='customerName' class='ml-2 text-sm font-normal text-cyan-400'></span></h1>
       <div class='space-x-2'>
         <a href='/console' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Console</a>
         <a href='/admin' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Admin</a>
@@ -468,6 +468,10 @@ async function init(){
     const params = new URLSearchParams(window.location.search);
     const d = params.get('discipline');
     const user = await api('/me'); state.user = user;
+    if(user && user.customer_name){
+      document.getElementById('customerName').textContent = user.customer_name;
+      document.title = `Unified Response - ${user.customer_name} - Call Entry`;
+    }
     state.agencies = await api('/agencies');
     state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
     const userAgency = user?.agency_id ? state.agencyMap[user.agency_id] : null;
