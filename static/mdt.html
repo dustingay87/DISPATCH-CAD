@@ -89,11 +89,11 @@
 const CONFIG = {
   police: { statuses: [{label:'AQ', code:'AQ'},{label:'CAN', code:'CAN'},{label:'Lunch', code:'LUN'},{label:'AFR', code:'AFR'},{label:'OS', code:'OS'},{label:'ER', code:'ER'},{label:'TR', code:'TR'}] },
   fire: { statuses: [{label:'AQ', code:'AQ'},{label:'CAN', code:'CAN'},{label:'OS', code:'OS'},{label:'ER', code:'ER'},{label:'OOS', code:'OOS'},{label:'AFR', code:'AFR'},{label:'Maint', code:'MAINT'}] },
-  ems: { statuses: [{label:'AQ', code:'AQ'},{label:'ER', code:'ER'},{label:'OS', code:'OS'},{label:'AP', code:'AP'},{label:'TR', code:'TR'},{label:'TH', code:'TH'},{label:'AD', code:'AD'},{label:'CAN', code:'CAN'},{label:'NPF', code:'NPF'},{label:'DEL', code:'DEL'},{label:'AFR', code:'AFR'}] },
+  ems: { statuses: [{label:'AQ', code:'AQ'},{label:'ER', code:'ER'},{label:'OS', code:'OS'},{label:'AP', code:'AP'},{label:'TR', code:'TR'},{label:'TH', code:'TH'},{label:'AD', code:'AD'},{label:'CAN', code:'CAN'},{label:'NPF', code:'NPF'},{label:'NO_TRANSPORT', code:'NO_TRANSPORT'},{label:'PATIENT_REFUSAL', code:'PATIENT_REFUSAL'},{label:'DEL', code:'DEL'},{label:'AFR', code:'AFR'}] },
 };
 function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
 function elapsed(iso){ return iso ? (Date.now()-new Date(iso).getTime())/1000 : 0; }
-function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul',IN_SERVICE:'In Service',ON_DUTY:'On Duty',OFF_DUTY:'Off Duty',AP:'At Patient',TH:'Transporting to Hospital',AD:'At Destination'}; return M[code]||code; }
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',NO_TRANSPORT:'No Transport',PATIENT_REFUSAL:'Patient Refusal',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul',IN_SERVICE:'In Service',ON_DUTY:'On Duty',OFF_DUTY:'Off Duty',AP:'At Patient',TH:'Transporting to Hospital',AD:'At Destination'}; return M[code]||code; }
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
 
 const url = new URL(window.location.href);
@@ -238,7 +238,7 @@ function render(){
     if(s.code==='OS'||s.code==='AD'||s.code==='AP') color='bg-red-700 hover:bg-red-600';
     else if(s.code==='ER'||s.code==='TR'||s.code==='DEL'||s.code==='TH'||s.code==='HEMS') color='bg-yellow-700 hover:bg-yellow-600';
     else if(s.code==='AQ') color='bg-green-700 hover:bg-green-600';
-    else if(s.code==='CAN'||s.code==='NPF'||s.code==='OOS'||s.code==='MAINT'||s.code==='LUN'||s.code==='AFR') color='bg-slate-600 hover:bg-slate-500';
+    else if(s.code==='CAN'||s.code==='NPF'||s.code==='NO_TRANSPORT'||s.code==='PATIENT_REFUSAL'||s.code==='OOS'||s.code==='MAINT'||s.code==='LUN'||s.code==='AFR') color='bg-slate-600 hover:bg-slate-500';
     return `<button class='mdt-btn ${color} text-white' onclick='setStatus("${s.code}")'>${statusLabel(s.code)}</button>`;
   }).join('') + `<button class='mdt-btn bg-indigo-700 hover:bg-indigo-600 text-white' onclick='toggleShift()'>Start/End Shift</button>`;
 
@@ -348,7 +348,7 @@ window.setStatus = async function(code){
   let extra={status_code:code};
   if(code==='TR' || code==='TH' || code==='CAN'){ const pc=prompt('Passenger/Patient count?'); if(pc) extra.passenger_count=parseInt(pc); }
   const cfg=state.config;
-  if(code==='CAN' || code==='TR' || code==='NPF'){ const d=prompt('Disposition?\n'+(cfg.dispositions||[]).join('\n')); if(d) extra.disposition=d; }
+  if(code==='CAN' || code==='TR' || code==='NPF' || code==='NO_TRANSPORT' || code==='PATIENT_REFUSAL'){ const d=prompt('Disposition?\n'+(cfg.dispositions||[]).join('\n')); if(d) extra.disposition=d; }
   if(u.current_incident_id && ['OS','ER','TR','TH','ED','DEL','AD','AQ'].includes(code)){
     const m = prompt('Mileage (odometer)?'); if(m && !isNaN(parseFloat(m))) extra.mileage = parseFloat(m);
   }

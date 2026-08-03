@@ -294,7 +294,7 @@ function unitClass(st){
   if(st==='AQ' || st==='AFR') return 'unit-aq';
   return 'unit-oth';
 }
-function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transporting',TH:'Transporting to HEMS',AD:'Arrived at Destination',TRP:'Transporting',ED:'En Route to Destination',CAN:'Cancelled',NPF:'No Transport',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Out for Maintenance',OFF_DUTY:'Off Duty',IN_SERVICE:'In Service',ON_DUTY:'On Duty',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',intake:'Intake',cleared:'Cleared',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul',AP:'At Patient',HEMS:'Transfer to HEMS',DECEASED:'PT Deceased',INVEST:'Officer Investigating',REPORT:'Taking Report',SEARCH:'Searching for Suspect',WORK_TRAFFIC:'Working Traffic',PA:'Public Assist',CLEARED:'Cleared',REPORT_TAKEN:'Report Taken',FIRE_ATTACK:'Fire Attack',NO_FIRE:'No Fire Found',EXTRICATION:'Extrication',CBY_CALLER:'Cancelled by Caller',CBY_OTHER:'Cancelled by Other Agency',CBY_DISPATCH:'Cancelled by Dispatch'}; return M[code]||code; }
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transporting',TH:'Transporting to HEMS',AD:'Arrived at Destination',TRP:'Transporting',ED:'En Route to Destination','CAN':'Cancelled','NPF':'No Patient Found','NO_TRANSPORT':'No Transport','PATIENT_REFUSAL':'Patient Refusal','DEL':'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Out for Maintenance',OFF_DUTY:'Off Duty',IN_SERVICE:'In Service',ON_DUTY:'On Duty',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',intake:'Intake',cleared:'Cleared',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul',AP:'At Patient',HEMS:'Transfer to HEMS',DECEASED:'PT Deceased',INVEST:'Officer Investigating',REPORT:'Taking Report',SEARCH:'Searching for Suspect',WORK_TRAFFIC:'Working Traffic',PA:'Public Assist',CLEARED:'Cleared',REPORT_TAKEN:'Report Taken',FIRE_ATTACK:'Fire Attack',NO_FIRE:'No Fire Found',EXTRICATION:'Extrication',CBY_CALLER:'Cancelled by Caller',CBY_OTHER:'Cancelled by Other Agency',CBY_DISPATCH:'Cancelled by Dispatch'}; return M[code]||code; }
 const AVAILABLE_STATUS_OPTIONS = [
   {code:'IN_SERVICE', label:'In Service'},
   {code:'ON_DUTY', label:'On Duty'},
@@ -345,6 +345,8 @@ const UNIT_STATUS_OPTIONS = {
     {code:'CBY_CALLER', label:'Cancelled by Caller'},
     {code:'CBY_OTHER', label:'Cancelled by Other Agency'},
     {code:'CBY_DISPATCH', label:'Cancelled by Dispatch'},
+    {code:'NO_TRANSPORT', label:'No Transport'},
+    {code:'PATIENT_REFUSAL', label:'Patient Refusal'},
     {code:'OOS', label:'Out of Service'}
   ]
 };

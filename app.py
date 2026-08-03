@@ -1712,7 +1712,7 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
             'dispositions': ['Extinguished','Controlled','Under Control','False Alarm','No Fire','Cancelled']
         },
         'ems': {
-            'statuses': [{'code':'AQ','label':'Available'},{'code':'AK','label':'Dispatched'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TR','label':'Transporting'},{'code':'TH','label':'Transporting to HEMS'},{'code':'AD','label':'Arrived at Destination'},{'code':'CBY_CALLER','label':'Cancelled by Caller'},{'code':'CBY_OTHER','label':'Cancelled by Other Agency'},{'code':'CBY_DISPATCH','label':'Cancelled by Dispatch'},{'code':'OOS','label':'Out of Service'}],
+            'statuses': [{'code':'AQ','label':'Available'},{'code':'AK','label':'Dispatched'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TR','label':'Transporting'},{'code':'TH','label':'Transporting to HEMS'},{'code':'AD','label':'Arrived at Destination'},{'code':'CBY_CALLER','label':'Cancelled by Caller'},{'code':'CBY_OTHER','label':'Cancelled by Other Agency'},{'code':'CBY_DISPATCH','label':'Cancelled by Dispatch'},{'code':'NO_TRANSPORT','label':'No Transport'},{'code':'PATIENT_REFUSAL','label':'Patient Refusal'},{'code':'OOS','label':'Out of Service'}],
             'modules': ['ems'],
             'unit_types': ['ambulance','medic','supervisor','air','rescue'],
             'call_types': [
@@ -3317,7 +3317,7 @@ def _unit_status_time(status_events, codes):
 def _status_label(code):
     return {
         'AQ':'Available','AFR':'Available for Response','OS':'On Scene','ER':'En Route','TR':'Transport','TRP':'Transport','ED':'En Route to Destination','TH':'Transport to HEMS','AD':'Arrived at Destination',
-        'DEL':'Delivered','NPF':'No Patient Found','CAN':'Cancelled','LUN':'Lunch','MAINT':'Out for Maintenance','OOS':'Out of Service','OFF_DUTY':'Off Duty','off_duty':'Off Duty','IN_SERVICE':'In Service','ON_DUTY':'On Duty',
+        'DEL':'Delivered','NPF':'No Patient Found','NO_TRANSPORT':'No Transport','PATIENT_REFUSAL':'Patient Refusal','CAN':'Cancelled','LUN':'Lunch','MAINT':'Out for Maintenance','OOS':'Out of Service','OFF_DUTY':'Off Duty','off_duty':'Off Duty','IN_SERVICE':'In Service','ON_DUTY':'On Duty',
         'AK':'Dispatched','dispatched':'Dispatched','open':'Open','closed':'Closed','en_route':'En Route','on_scene':'On Scene',
         'TC':'Traffic Control','CT':'Citation','ARR':'Arrest','BK':'Booking','WATER':'Water on Fire','EXT':'Extinguished','OVER':'Overhaul'
     }.get(code, code or '')
@@ -3393,7 +3393,7 @@ def _build_after_call_summary(db, incident):
         arrived_at = _unit_status_time(unit_status_events, ['OS','on_scene','AP','WATER','EXT','OVER'])
         transport_at = _unit_status_time(unit_status_events, ['TR','ED','HEMS','TRP','TH'])
         dest_arrived_at = _unit_status_time(unit_status_events, ['AD','DEL','delivered','at_destination'])
-        clear_at = iu.cleared_at.isoformat() if iu.cleared_at else _unit_status_time(unit_status_events, ['AQ','AFR','Available','CAN','NPF','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'])
+        clear_at = iu.cleared_at.isoformat() if iu.cleared_at else _unit_status_time(unit_status_events, ['AQ','AFR','Available','CAN','NPF','NO_TRANSPORT','PATIENT_REFUSAL','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'])
         miles = db.query(MileageReading).filter_by(incident_id=incident.id, unit_id=unit.id).order_by(MileageReading.recorded_at.asc()).all()
         mileage = {}
         if miles:
@@ -4077,7 +4077,7 @@ def update_unit_status(request: Request, incident_id: int, unit_id: int, body: S
         iu.cleared_at = ts
         iu.assignment_status = 'cleared'
         unit.current_incident_id = None
-        unit.current_status = 'AQ' if body.status_code in ('CAN','NPF','CBY_CALLER','CBY_OTHER','CBY_DISPATCH') else body.status_code
+        unit.current_status = 'AQ' if body.status_code in ('CAN','NPF','NO_TRANSPORT','PATIENT_REFUSAL','CBY_CALLER','CBY_OTHER','CBY_DISPATCH') else body.status_code
         _advance_stacked_call(db, unit, get_current_user(request))
     incident = db.query(Incident).get(incident_id)
     refresh_incident_status(db, incident)
@@ -4602,7 +4602,7 @@ def set_unit_status(request: Request, unit_id: int, body: UnitStatus, db: Sessio
                     iu.cleared_at = ts
                     iu.assignment_status = 'cleared'
                     unit.current_incident_id = None
-                    unit.current_status = 'AQ' if body.status_code in ('CAN','NPF','CBY_CALLER','CBY_OTHER','CBY_DISPATCH') else body.status_code
+                    unit.current_status = 'AQ' if body.status_code in ('CAN','NPF','NO_TRANSPORT','PATIENT_REFUSAL','CBY_CALLER','CBY_OTHER','CBY_DISPATCH') else body.status_code
                     _advance_stacked_call(db, unit, get_current_user(request))
             refresh_incident_status(db, incident)
             # Transport leg lifecycle
@@ -4915,7 +4915,7 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
             'dispositions': ['Extinguished','Controlled','Under Control','False Alarm','No Fire','Cancelled']
         },
         'ems': {
-            'statuses': [{'code':'AQ','label':'Available'},{'code':'AK','label':'Dispatched'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TR','label':'Transporting'},{'code':'TH','label':'Transporting to HEMS'},{'code':'AD','label':'Arrived at Destination'},{'code':'CBY_CALLER','label':'Cancelled by Caller'},{'code':'CBY_OTHER','label':'Cancelled by Other Agency'},{'code':'CBY_DISPATCH','label':'Cancelled by Dispatch'},{'code':'OOS','label':'Out of Service'}],
+            'statuses': [{'code':'AQ','label':'Available'},{'code':'AK','label':'Dispatched'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TR','label':'Transporting'},{'code':'TH','label':'Transporting to HEMS'},{'code':'AD','label':'Arrived at Destination'},{'code':'CBY_CALLER','label':'Cancelled by Caller'},{'code':'CBY_OTHER','label':'Cancelled by Other Agency'},{'code':'CBY_DISPATCH','label':'Cancelled by Dispatch'},{'code':'NO_TRANSPORT','label':'No Transport'},{'code':'PATIENT_REFUSAL','label':'Patient Refusal'},{'code':'OOS','label':'Out of Service'}],
             'modules': ['ems'],
             'unit_types': ['ambulance','medic','supervisor','air','rescue'],
             'call_types': [
