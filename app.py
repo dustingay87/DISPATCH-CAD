@@ -72,9 +72,30 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # ORM Models
+class Customer(Base):
+    __tablename__ = 'customers'
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    slug = Column(String(100), unique=True, index=True)
+    domain = Column(String(100), unique=True, nullable=True)
+    config = Column(JSON)
+    approved = Column(Boolean, default=False)
+    approved_at = Column(DateTime)
+    created_at = Column(DateTime, default=tz_now)
+
+class CustomerShare(Base):
+    __tablename__ = 'customer_shares'
+    id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey('customers.id'), nullable=False)
+    shared_customer_id = Column(Integer, ForeignKey('customers.id'), nullable=False)
+    share_avl = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=tz_now)
+    __table_args__ = (UniqueConstraint('customer_id', 'shared_customer_id', name='uix_customer_share'),)
+
 class Agency(Base):
     __tablename__ = 'agencies'
     id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey('customers.id'), nullable=True)
     name = Column(String(255), nullable=False)
     agency_type = Column(String(50), default='fire')
     domain = Column(String(100), unique=True, index=True)
@@ -94,6 +115,7 @@ class Agency(Base):
 class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey('customers.id'), nullable=True)
     email = Column(String(255), unique=True, index=True)
     hashed_password = Column(String(255))
     first_name = Column(String(100))
@@ -103,10 +125,12 @@ class User(Base):
     agency_id = Column(Integer, ForeignKey('agencies.id'))
     preferences = Column(JSON)
     created_at = Column(DateTime, default=tz_now)
+    customer = relationship('Customer')
 
 class Personnel(Base):
     __tablename__ = 'personnel'
     id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey('customers.id'), nullable=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     agency_id = Column(Integer, ForeignKey('agencies.id'))
     first_name = Column(String(100))
@@ -137,6 +161,7 @@ class Location(Base):
 class Unit(Base):
     __tablename__ = 'units'
     id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey('customers.id'), nullable=True)
     agency_id = Column(Integer, ForeignKey('agencies.id'))
     name = Column(String(100))
     call_sign = Column(String(50), index=True)
@@ -166,6 +191,7 @@ class Unit(Base):
 class Incident(Base):
     __tablename__ = 'incidents'
     id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey('customers.id'), nullable=True)
     agency_id = Column(Integer, ForeignKey('agencies.id'))
     incident_number = Column(String(50), index=True)
     call_type = Column(String(100))
@@ -519,13 +545,14 @@ class UnitPosting(Base):
 class CustomerConfig(Base):
     __tablename__ = 'customer_config'
     id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey('customers.id'), nullable=True)
     agency_id = Column(Integer, ForeignKey('agencies.id'), nullable=True)
     category = Column(String(50))
     key = Column(String(100))
     value = Column(JSON)
     created_at = Column(DateTime, default=tz_now)
     updated_at = Column(DateTime, default=tz_now, onupdate=tz_now)
-    __table_args__ = (UniqueConstraint('agency_id', 'category', 'key', name='uix_customer_config'),)
+    __table_args__ = (UniqueConstraint('customer_id', 'agency_id', 'category', 'key', name='uix_customer_config'),)
 
 class EpcrExport(Base):
     __tablename__ = 'epcr_exports'
@@ -564,6 +591,25 @@ def _db_type(col, is_sqlite=True):
         return f'VARCHAR({t.length or 255})'
     return 'TEXT'
 
+def _ensure_default_customer(conn):
+    try:
+        customer_id = conn.execute(text('SELECT id FROM customers WHERE slug = :slug'), {'slug': 'default'}).scalar()
+        if not customer_id:
+            conn.execute(text('''
+                INSERT INTO customers (name, slug, approved, created_at)
+                VALUES (:name, :slug, 1, :ts)
+            '''), {'name': 'Default Customer', 'slug': 'default', 'ts': tz_now()})
+            customer_id = conn.execute(text('SELECT id FROM customers WHERE slug = :slug'), {'slug': 'default'}).scalar()
+        if customer_id:
+            for table in ('agencies', 'users', 'personnel', 'units', 'incidents', 'customer_config'):
+                try:
+                    conn.execute(text(f'UPDATE {table} SET customer_id = :cid WHERE customer_id IS NULL'), {'cid': customer_id})
+                except Exception as e:
+                    print(f'DB backfill warning for {table}.customer_id: {e}')
+            conn.commit()
+    except Exception as e:
+        print(f'DB backfill warning for default customer: {e}')
+
 def ensure_db_columns():
     if not DATABASE_URL:
         return
@@ -597,6 +643,7 @@ def ensure_db_columns():
             conn.commit()
         except Exception as e:
             print(f'DB backfill warning for last_status_at: {e}')
+        _ensure_default_customer(conn)
 
 def init_sqlite_db():
     Base.metadata.create_all(bind=engine)
@@ -624,6 +671,8 @@ def get_db():
 class LoginRequest(BaseModel):
     email: str
     password: str
+    customer_id: Optional[int] = None
+    customer_slug: Optional[str] = None
 
 class UserMe(BaseModel):
     user_id: int
@@ -631,6 +680,7 @@ class UserMe(BaseModel):
     email: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    customer_id: Optional[int] = None
     agency_id: Optional[int] = None
     modules: List[str] = []
     selected_module: Optional[str] = None
@@ -647,6 +697,7 @@ class UserCreate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     role: str = 'responder'
+    customer_id: Optional[int] = None
     agency_id: Optional[int] = None
 
 class UserOut(BaseModel):
@@ -656,6 +707,7 @@ class UserOut(BaseModel):
     last_name: Optional[str] = None
     role: str
     is_active: bool
+    customer_id: Optional[int] = None
     agency_id: Optional[int] = None
     preferences: Optional[dict] = None
     created_at: Optional[datetime] = None
@@ -668,6 +720,7 @@ class UserUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     role: Optional[str] = None
+    customer_id: Optional[int] = None
     agency_id: Optional[int] = None
     is_active: Optional[bool] = None
     preferences: Optional[dict] = None
@@ -1078,6 +1131,7 @@ class EpcrExportOut(BaseModel):
         from_attributes = True
 
 class CustomerConfigCreate(BaseModel):
+    customer_id: Optional[int] = None
     agency_id: Optional[int] = None
     category: str
     key: str
@@ -1099,7 +1153,8 @@ def hash_password(password):
 
 def make_session(user):
     exp = int(time.time()) + 86400
-    msg = f'{user.id}:{user.role}:{exp}'
+    cid = user.customer_id if user.customer_id is not None else ''
+    msg = f'{user.id}:{user.role}:{cid}:{exp}'
     sig = hmac.new(SECRET_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
     return f'{msg}:{sig}'
 
@@ -1107,15 +1162,27 @@ def verify_session(token):
     if not token:
         return None
     parts = token.split(':')
-    if len(parts) != 4:
+    if len(parts) < 4:
         return None
-    uid, role, exp, sig = parts
-    expected = hmac.new(SECRET_KEY.encode(), f'{uid}:{role}:{exp}'.encode(), hashlib.sha256).hexdigest()
+    sig = parts[-1]
+    msg = ':'.join(parts[:-1])
+    expected = hmac.new(SECRET_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected):
         return None
+    msg_parts = msg.split(':')
+    if len(msg_parts) not in (3, 4):
+        return None
+    uid = msg_parts[0]
+    role = msg_parts[1]
+    if len(msg_parts) == 4:
+        customer_id = int(msg_parts[2]) if msg_parts[2].isdigit() else None
+        exp = msg_parts[3]
+    else:
+        customer_id = None
+        exp = msg_parts[2]
     if time.time() > int(exp):
         return None
-    return {'user_id': int(uid), 'role': role, 'exp': int(exp)}
+    return {'user_id': int(uid), 'role': role, 'customer_id': customer_id, 'exp': int(exp)}
 
 def get_current_user(request: Request):
     session = request.cookies.get('session')
@@ -1124,10 +1191,10 @@ def get_current_user(request: Request):
         try:
             u = db.query(User).filter(User.role == 'admin').first()
             if u:
-                return {'user_id': u.id, 'role': u.role, 'email': u.email, 'agency_id': u.agency_id}
+                return {'user_id': u.id, 'role': u.role, 'email': u.email, 'customer_id': u.customer_id, 'agency_id': u.agency_id}
         finally:
             db.close()
-        return {'user_id': 0, 'role': 'admin', 'email': 'dev@example.com', 'agency_id': None}
+        return {'user_id': 0, 'role': 'admin', 'email': 'dev@example.com', 'customer_id': None, 'agency_id': None}
     payload = verify_session(session)
     if not payload:
         raise HTTPException(status_code=401, detail='Not authenticated')
@@ -1158,9 +1225,13 @@ def seed_default_admin():
     db = SessionLocal()
     try:
         if db.query(User).count() == 0:
+            customer = db.query(Customer).filter(Customer.slug == 'default').first()
+            if not customer:
+                customer = Customer(name='Default Customer', slug='default')
+                db.add(customer); db.flush()
             email = os.getenv('ADMIN_EMAIL', 'dustin@dispatchtodiscipleship.net')
             password = os.getenv('ADMIN_PASSWORD', 'Warrior/202601!')
-            db.add(User(email=email, first_name='Admin', last_name='User', hashed_password=hash_password(password), role='admin', is_active=True))
+            db.add(User(email=email, first_name='Admin', last_name='User', customer_id=customer.id, hashed_password=hash_password(password), role='admin', is_active=True))
             db.commit()
     finally:
         db.close()
@@ -1235,19 +1306,51 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
     attempts = [t for t in attempts if now - t < 900]
     if len(attempts) >= 5:
         raise HTTPException(status_code=429, detail='Too many login attempts. Try again later.')
-    user = db.query(User).filter(User.email == body.email).first()
+
+    requested_customer_id = body.customer_id
+    if not requested_customer_id and body.customer_slug:
+        customer = db.query(Customer).filter(Customer.slug == body.customer_slug).first()
+        requested_customer_id = customer.id if customer else None
+
+    q = db.query(User).filter(User.email == body.email)
+    if requested_customer_id:
+        q = q.filter(User.customer_id == requested_customer_id)
+    user = q.first()
+
     if not user or user.hashed_password != hash_password(body.password):
         attempts.append(now)
         login_attempts[ip] = attempts
         raise HTTPException(status_code=401, detail='Invalid credentials')
     login_attempts.pop(ip, None)
+
+    # Default the user's customer to the requested one if not already set
+    if requested_customer_id and user.customer_id is None:
+        user.customer_id = requested_customer_id
+        db.add(user)
+        db.commit()
+
     response.set_cookie(key='session', value=make_session(user), httponly=True, samesite='lax' if INSECURE_DEV else 'strict', secure=not INSECURE_DEV, path='/', max_age=86400)
-    return {'email': user.email, 'role': user.role, 'agency_id': user.agency_id}
+    return {'email': user.email, 'role': user.role, 'customer_id': user.customer_id, 'agency_id': user.agency_id}
 
 @app.post('/logout')
 def logout(response: Response):
     response.delete_cookie(key='session', path='/')
     return {'ok': True}
+
+def _customer_config_value(db, customer_id, agency_id, category, key):
+    # Most specific: agency-level within this customer
+    if agency_id and customer_id:
+        cfg = db.query(CustomerConfig).filter_by(customer_id=customer_id, agency_id=agency_id, category=category, key=key).first()
+        if cfg:
+            return cfg.value
+    # Customer-level default (agency-agnostic)
+    if customer_id:
+        cfg = db.query(CustomerConfig).filter_by(customer_id=customer_id, agency_id=None, category=category, key=key).first()
+        if cfg:
+            return cfg.value
+    # Legacy global default (pre-customer data)
+    cfg = db.query(CustomerConfig).filter_by(customer_id=None, agency_id=agency_id, category=category, key=key).first()
+    return cfg.value if cfg else None
 
 @app.get('/me', response_model=UserMe)
 def me(request: Request, db: Session = Depends(get_db)):
@@ -1257,21 +1360,24 @@ def me(request: Request, db: Session = Depends(get_db)):
     selected = None
     personnel_id = None
     cross_ids = []
-    if u:
+    customer_id = u.customer_id if u else user.get('customer_id')
+    if u and customer_id:
         if u.agency_id:
-            cfg = db.query(CustomerConfig).filter_by(agency_id=u.agency_id, category='modules', key='defaults').first()
-            if cfg and cfg.value:
-                modules = cfg.value if isinstance(cfg.value, list) else []
-            coop = db.query(CustomerConfig).filter_by(agency_id=u.agency_id, category='cooperating_agencies', key='defaults').first()
-            if coop and coop.value:
-                cross_ids = coop.value if isinstance(coop.value, list) else []
-        sel = db.query(CustomerConfig).filter_by(category='user_module', key=str(u.id)).first()
+            modules_val = _customer_config_value(db, customer_id, u.agency_id, 'modules', 'defaults')
+            if modules_val:
+                modules = modules_val if isinstance(modules_val, list) else []
+            coop_val = _customer_config_value(db, customer_id, u.agency_id, 'cooperating_agencies', 'defaults')
+            if coop_val:
+                cross_ids = coop_val if isinstance(coop_val, list) else []
+        sel = db.query(CustomerConfig).filter_by(customer_id=customer_id, category='user_module', key=str(u.id)).first()
+        if not sel:
+            sel = db.query(CustomerConfig).filter_by(customer_id=None, category='user_module', key=str(u.id)).first()
         if sel:
             selected = sel.value
         p = db.query(Personnel).filter(Personnel.user_id == u.id).first()
         if p:
             personnel_id = p.id
-    return {'user_id': user['user_id'], 'email': u.email if u else None, 'first_name': u.first_name if u else None, 'last_name': u.last_name if u else None, 'role': user['role'], 'agency_id': u.agency_id if u else None, 'modules': modules, 'selected_module': selected, 'personnel_id': personnel_id, 'cross_discipline_agencies': cross_ids, 'preferences': u.preferences if u else None}
+    return {'user_id': user['user_id'], 'email': u.email if u else None, 'first_name': u.first_name if u else None, 'last_name': u.last_name if u else None, 'role': user['role'], 'customer_id': customer_id, 'agency_id': u.agency_id if u else None, 'modules': modules, 'selected_module': selected, 'personnel_id': personnel_id, 'cross_discipline_agencies': cross_ids, 'preferences': u.preferences if u else None}
 
 @app.put('/me/module')
 def set_user_module(body: UserModuleUpdate, request: Request, db: Session = Depends(get_db)):
@@ -1279,18 +1385,18 @@ def set_user_module(body: UserModuleUpdate, request: Request, db: Session = Depe
     u = db.query(User).get(user['user_id'])
     if not u:
         raise HTTPException(status_code=404, detail='User not found')
+    customer_id = u.customer_id or user.get('customer_id')
     if u.agency_id:
-        agency_modules = []
-        cfg = db.query(CustomerConfig).filter_by(agency_id=u.agency_id, category='modules', key='defaults').first()
-        if cfg and cfg.value:
-            agency_modules = cfg.value if isinstance(cfg.value, list) else []
+        agency_modules = _customer_config_value(db, customer_id, u.agency_id, 'modules', 'defaults') or []
+        if not isinstance(agency_modules, list):
+            agency_modules = []
         if agency_modules and body.module not in agency_modules and body.module != 'all':
             raise HTTPException(status_code=400, detail='Module not enabled for agency')
         if not agency_modules:
             body.module = 'all'
-    sel = db.query(CustomerConfig).filter_by(category='user_module', key=str(u.id)).first()
+    sel = db.query(CustomerConfig).filter_by(customer_id=customer_id, category='user_module', key=str(u.id)).first()
     if not sel:
-        sel = CustomerConfig(category='user_module', key=str(u.id), value=body.module)
+        sel = CustomerConfig(customer_id=customer_id, category='user_module', key=str(u.id), value=body.module)
         db.add(sel)
     else:
         sel.value = body.module
@@ -1398,8 +1504,12 @@ def call_entry():
     return FileResponse('static/call-entry.html')
 
 @app.get('/config', response_model=List[CustomerConfigOut])
-def list_config(agency_id: Optional[int] = Query(None), category: Optional[str] = Query(None), db: Session = Depends(get_db)):
+def list_config(request: Request, agency_id: Optional[int] = Query(None), category: Optional[str] = Query(None), db: Session = Depends(get_db)):
+    user = get_current_user(request)
+    customer_id = user.get('customer_id')
     q = db.query(CustomerConfig)
+    if customer_id:
+        q = q.filter(CustomerConfig.customer_id == customer_id)
     if agency_id:
         q = q.filter(CustomerConfig.agency_id == agency_id)
     if category:
@@ -1408,7 +1518,8 @@ def list_config(agency_id: Optional[int] = Query(None), category: Optional[str] 
 
 @app.post('/config', response_model=CustomerConfigOut)
 def create_config(body: CustomerConfigCreate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
-    existing = db.query(CustomerConfig).filter_by(agency_id=body.agency_id, category=body.category, key=body.key).first()
+    customer_id = body.customer_id or current_user.get('customer_id')
+    existing = db.query(CustomerConfig).filter_by(customer_id=customer_id, agency_id=body.agency_id, category=body.category, key=body.key).first()
     if existing:
         for k, v in body.model_dump(exclude_unset=True).items():
             setattr(existing, k, v)
@@ -1416,7 +1527,7 @@ def create_config(body: CustomerConfigCreate, current_user: dict = Depends(requi
         db.commit()
         db.refresh(existing)
         return existing
-    cfg = CustomerConfig(**body.model_dump())
+    cfg = CustomerConfig(customer_id=customer_id, **body.model_dump(exclude={'customer_id'}))
     db.add(cfg)
     db.commit()
     db.refresh(cfg)
@@ -1427,6 +1538,7 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
     agency = db.query(Agency).get(body.agency_id)
     if not agency:
         raise HTTPException(status_code=404, detail='Agency not found')
+    customer_id = agency.customer_id or current_user.get('customer_id')
     templates = {
         'police': {
             'statuses': [{'code':'AQ','label':'Available'},{'code':'AK','label':'Dispatched'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TRP','label':'Transporting'},{'code':'TC','label':'Traffic Control'},{'code':'CT','label':'Citation'},{'code':'ARR','label':'Arrest'},{'code':'BK','label':'Booking'},{'code':'CBY_CALLER','label':'Cancelled by Caller'},{'code':'CBY_OTHER','label':'Cancelled by Other Agency'},{'code':'CBY_DISPATCH','label':'Cancelled by Dispatch'},{'code':'OOS','label':'Out of Service'}],
@@ -1532,12 +1644,12 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
     if not cfg:
         raise HTTPException(status_code=400, detail='Template not found')
     for category, value in cfg.items():
-        existing = db.query(CustomerConfig).filter_by(agency_id=body.agency_id, category=category, key='defaults').first()
+        existing = db.query(CustomerConfig).filter_by(customer_id=customer_id, agency_id=body.agency_id, category=category, key='defaults').first()
         if existing:
             existing.value = value
             existing.updated_at = tz_now()
         else:
-            db.add(CustomerConfig(agency_id=body.agency_id, category=category, key='defaults', value=value))
+            db.add(CustomerConfig(customer_id=customer_id, agency_id=body.agency_id, category=category, key='defaults', value=value))
     db.commit()
     return {'status': 'seeded', 'agency_id': body.agency_id, 'template': body.template}
 
@@ -1547,6 +1659,7 @@ def health():
 
 # Pydantic schemas
 class AgencyCreate(BaseModel):
+    customer_id: Optional[int] = None
     name: str
     agency_type: str = 'fire'
     domain: Optional[str] = None
@@ -1565,6 +1678,7 @@ class AgencyOut(AgencyCreate):
         from_attributes = True
 
 class AgencyUpdate(BaseModel):
+    customer_id: Optional[int] = None
     name: Optional[str] = None
     agency_type: Optional[str] = None
     domain: Optional[str] = None
@@ -1646,6 +1760,7 @@ class UnitUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class PersonnelCreate(BaseModel):
+    customer_id: Optional[int] = None
     agency_id: int
     first_name: str
     last_name: str
@@ -1665,6 +1780,7 @@ class PersonnelOut(PersonnelCreate):
         from_attributes = True
 
 class PersonnelUpdate(BaseModel):
+    customer_id: Optional[int] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     radio_id: Optional[str] = None
@@ -2111,10 +2227,10 @@ def _incident_milestone_events(db, incident_id):
 
 def _response_goals(db, incident):
     agency = db.query(Agency).get(incident.agency_id)
-    goals_cfg = db.query(CustomerConfig).filter_by(agency_id=agency.id, category='response_goals', key='defaults').first() if agency else None
-    goals = (goals_cfg.value or {}) if goals_cfg and goals_cfg.value else {}
+    customer_id = incident.customer_id or (agency.customer_id if agency else None)
+    goals = _customer_config_value(db, customer_id, agency.id if agency else None, 'response_goals', 'defaults') or {}
     defaults = {'dispatch_seconds':60,'en_route_seconds':120,'on_scene_city_seconds':480,'on_scene_county_seconds':1800}
-    defaults.update(goals)
+    defaults.update(goals if isinstance(goals, dict) else {})
     return defaults
 
 def _incident_timers(db, incident):
@@ -2348,8 +2464,10 @@ def health():
     return {'status': 'ok'}
 
 @app.post('/agencies', response_model=AgencyOut)
-def create_agency(body: AgencyCreate, db: Session = Depends(get_db)):
+def create_agency(body: AgencyCreate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     agency = Agency(**body.model_dump())
+    if agency.customer_id is None:
+        agency.customer_id = current_user.get('customer_id')
     fill_agency_lat_lng(agency)
     db.add(agency)
     db.commit()
@@ -2357,8 +2475,13 @@ def create_agency(body: AgencyCreate, db: Session = Depends(get_db)):
     return agency
 
 @app.get('/agencies', response_model=List[AgencyOut])
-def list_agencies(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    return db.query(Agency).offset(skip).limit(limit).all()
+def list_agencies(request: Request, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    user = get_current_user(request)
+    customer_id = user.get('customer_id')
+    q = db.query(Agency)
+    if customer_id:
+        q = q.filter(Agency.customer_id == customer_id)
+    return q.offset(skip).limit(limit).all()
 
 @app.put('/agencies/{agency_id}', response_model=AgencyOut)
 def update_agency(agency_id: int, body: AgencyUpdate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
@@ -2379,43 +2502,73 @@ def delete_agency(agency_id: int, current_user: dict = Depends(require_admin), d
     db.delete(a); db.commit()
     return {'deleted': agency_id}
 
+def _shared_owner_customer_ids(db, customer_id):
+    if not customer_id:
+        return []
+    return [r.customer_id for r in db.query(CustomerShare.customer_id).filter(
+        CustomerShare.shared_customer_id == customer_id,
+        CustomerShare.share_avl == True
+    ).all()]
+
 @app.post('/units', response_model=UnitOut)
-def create_unit(body: UnitCreate, db: Session = Depends(get_db)):
-    unit = Unit(**body.model_dump())
+def create_unit(body: UnitCreate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    agency = db.query(Agency).get(body.agency_id)
+    customer_id = agency.customer_id if agency else current_user.get('customer_id')
+    unit = Unit(**body.model_dump(), customer_id=customer_id)
     db.add(unit)
     db.commit()
     db.refresh(unit)
     return unit
 
 @app.get('/units', response_model=List[UnitOut])
-def list_units(agency_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
+def list_units(request: Request, agency_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
+    user = get_current_user(request)
+    customer_id = user.get('customer_id')
     q = db.query(Unit)
+    if customer_id:
+        owner_ids = _shared_owner_customer_ids(db, customer_id)
+        q = q.filter(or_(Unit.customer_id == customer_id, Unit.customer_id.in_(owner_ids)))
     if agency_id:
         q = q.filter(Unit.agency_id == agency_id)
     return q.all()
 
 @app.get('/units/{unit_id}', response_model=UnitOut)
-def get_unit(unit_id: int, db: Session = Depends(get_db)):
+def get_unit(request: Request, unit_id: int, db: Session = Depends(get_db)):
+    user = get_current_user(request)
+    customer_id = user.get('customer_id')
     unit = db.query(Unit).get(unit_id)
     if not unit:
         raise HTTPException(status_code=404, detail='Unit not found')
+    if customer_id and unit.customer_id != customer_id:
+        if unit.customer_id not in _shared_owner_customer_ids(db, customer_id):
+            raise HTTPException(status_code=404, detail='Unit not found')
     return unit
 
 @app.put('/units/{unit_id}', response_model=UnitOut)
 def update_unit(unit_id: int, body: UnitUpdate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    customer_id = current_user.get('customer_id')
     unit = db.query(Unit).get(unit_id)
     if not unit:
         raise HTTPException(status_code=404, detail='Unit not found')
+    if customer_id and unit.customer_id is not None and unit.customer_id != customer_id:
+        raise HTTPException(status_code=403, detail='Cross-customer unit modification is not allowed')
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(unit, k, v)
+    if body.agency_id:
+        agency = db.query(Agency).get(body.agency_id)
+        if agency:
+            unit.customer_id = agency.customer_id
     db.commit(); db.refresh(unit)
     return unit
 
 @app.delete('/units/{unit_id}')
 def delete_unit(unit_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    customer_id = current_user.get('customer_id')
     unit = db.query(Unit).get(unit_id)
     if not unit:
         raise HTTPException(status_code=404, detail='Unit not found')
+    if customer_id and unit.customer_id is not None and unit.customer_id != customer_id:
+        raise HTTPException(status_code=403, detail='Cross-customer unit deletion is not allowed')
     db.delete(unit); db.commit()
     return {'deleted': unit_id}
 
@@ -2600,15 +2753,23 @@ def record_mileage(incident_id: int, unit_id: int, body: MileageReadingCreate, d
 
 @app.post('/personnel', response_model=PersonnelOut)
 def create_personnel(body: PersonnelCreate, db: Session = Depends(get_db)):
-    p = Personnel(**body.model_dump())
+    data = body.model_dump()
+    if not data.get('customer_id'):
+        agency = db.query(Agency).get(data.get('agency_id'))
+        data['customer_id'] = agency.customer_id if agency else None
+    p = Personnel(**data)
     db.add(p)
     db.commit()
     db.refresh(p)
     return p
 
 @app.get('/personnel', response_model=List[PersonnelOut])
-def list_personnel(agency_id: Optional[int] = Query(None), unit_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
+def list_personnel(request: Request, agency_id: Optional[int] = Query(None), unit_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
+    user = get_current_user(request)
+    customer_id = user.get('customer_id')
     q = db.query(Personnel)
+    if customer_id:
+        q = q.filter(Personnel.customer_id == customer_id)
     if agency_id:
         q = q.filter(Personnel.agency_id == agency_id)
     if unit_id:
@@ -2620,6 +2781,8 @@ def get_my_personnel(current_user: dict = Depends(get_current_user), db: Session
     p = db.query(Personnel).filter(Personnel.user_id == current_user['user_id']).first()
     if not p:
         raise HTTPException(status_code=404, detail='No personnel record linked to this user')
+    if current_user.get('customer_id') and p.customer_id != current_user.get('customer_id'):
+        raise HTTPException(status_code=404, detail='No personnel record linked to this user')
     return p
 
 @app.put('/personnel/{personnel_id}', response_model=PersonnelOut)
@@ -2627,6 +2790,9 @@ def update_personnel(personnel_id: int, body: PersonnelUpdate, current_user: dic
     p = db.query(Personnel).get(personnel_id)
     if not p:
         raise HTTPException(status_code=404, detail='Personnel not found')
+    customer_id = current_user.get('customer_id')
+    if customer_id and p.customer_id is not None and p.customer_id != customer_id:
+        raise HTTPException(status_code=403, detail='Not authorized')
     # allow self or admin/dispatch
     u = db.query(User).get(current_user['user_id'])
     is_admin = u and u.role in ('admin','super_admin')
@@ -2635,11 +2801,16 @@ def update_personnel(personnel_id: int, body: PersonnelUpdate, current_user: dic
         raise HTTPException(status_code=403, detail='Not authorized')
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(p, k, v)
+    if body.agency_id:
+        agency = db.query(Agency).get(body.agency_id)
+        if agency:
+            p.customer_id = agency.customer_id
     db.commit(); db.refresh(p)
     return p
 
 @app.delete('/personnel/{personnel_id}')
 def delete_personnel(personnel_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    customer_id = current_user.get('customer_id')
     p = db.query(Personnel).get(personnel_id)
     if not p:
         raise HTTPException(status_code=404, detail='Personnel not found')
@@ -2653,8 +2824,10 @@ def delete_personnel(personnel_id: int, current_user: dict = Depends(get_current
 def create_incident(request: Request, body: IncidentCreate, db: Session = Depends(get_db)):
     check_role(request, CALL_TAKER_ROLES)
     data = body.model_dump()
+    agency = db.query(Agency).get(data.get('agency_id'))
+    data['customer_id'] = agency.customer_id if agency else None
     if not data.get('incident_number'):
-        count = db.query(Incident).filter(Incident.agency_id == data['agency_id']).count()
+        count = db.query(Incident).filter(Incident.customer_id == data['customer_id'], Incident.agency_id == data['agency_id']).count()
         data['incident_number'] = f"{data['agency_id']}-{count + 1:05d}"
     if not data.get('call_number'):
         data['call_number'] = data['incident_number']
@@ -2674,8 +2847,12 @@ def create_incident(request: Request, body: IncidentCreate, db: Session = Depend
     return incident
 
 @app.get('/incidents', response_model=List[IncidentOut])
-def list_incidents(agency_id: Optional[int] = Query(None), status: Optional[str] = Query(None), call_type: Optional[str] = Query(None), search: Optional[str] = Query(None), from_date: Optional[datetime] = Query(None), to_date: Optional[datetime] = Query(None), db: Session = Depends(get_db)):
+def list_incidents(request: Request, agency_id: Optional[int] = Query(None), status: Optional[str] = Query(None), call_type: Optional[str] = Query(None), search: Optional[str] = Query(None), from_date: Optional[datetime] = Query(None), to_date: Optional[datetime] = Query(None), db: Session = Depends(get_db)):
+    user = get_current_user(request)
+    customer_id = user.get('customer_id')
     q = db.query(Incident)
+    if customer_id:
+        q = q.filter(Incident.customer_id == customer_id)
     if agency_id:
         q = q.filter(Incident.agency_id == agency_id)
     if status:
@@ -2692,17 +2869,21 @@ def list_incidents(agency_id: Optional[int] = Query(None), status: Optional[str]
     return q.order_by(Incident.created_at.desc()).all()
 
 @app.get('/incidents/{incident_id}', response_model=IncidentOut)
-def get_incident(incident_id: int, db: Session = Depends(get_db)):
+def get_incident(request: Request, incident_id: int, db: Session = Depends(get_db)):
+    user = get_current_user(request)
+    customer_id = user.get('customer_id')
     incident = db.query(Incident).get(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail='Incident not found')
+    if customer_id and incident.customer_id is not None and incident.customer_id != customer_id:
+        raise HTTPException(status_code=404, detail='Incident not found')
     return incident
 
-def _get_response_profile(db, agency_id, call_type):
-    cfg = db.query(CustomerConfig).filter_by(agency_id=agency_id, category='response_profiles', key='defaults').first()
-    if not cfg:
-        cfg = db.query(CustomerConfig).filter_by(agency_id=agency_id, category='response_plans', key='defaults').first()
-    profiles = (cfg.value or {}) if cfg else {}
+def _get_response_profile(db, customer_id, agency_id, call_type):
+    profile = _customer_config_value(db, customer_id, agency_id, 'response_profiles', 'defaults')
+    if profile is None:
+        profile = _customer_config_value(db, customer_id, agency_id, 'response_plans', 'defaults')
+    profiles = profile or {}
     return profiles.get(call_type) if isinstance(profiles, dict) else None
 
 def _profile_slots(profile):
@@ -2723,7 +2904,9 @@ def _profile_slots(profile):
     return slots
 
 def _incident_resource_status(db, incident):
-    profile = _get_response_profile(db, incident.agency_id, incident.call_type)
+    agency = db.query(Agency).get(incident.agency_id)
+    customer_id = incident.customer_id or (agency.customer_id if agency else None)
+    profile = _get_response_profile(db, customer_id, incident.agency_id, incident.call_type)
     slots = _profile_slots(profile)
     assigned = db.query(IncidentUnit, Unit).join(Unit, IncidentUnit.unit_id == Unit.id).filter(IncidentUnit.incident_id == incident.id).all()
     assigned_by_type = {}
@@ -2767,9 +2950,9 @@ def recommend_units(incident_id: int, limit: int = Query(10), db: Session = Depe
     if not incident:
         raise HTTPException(status_code=404, detail='Incident not found')
     agency = db.query(Agency).get(incident.agency_id)
-    profile = _get_response_profile(db, incident.agency_id, incident.call_type)
-    plan_cfg = db.query(CustomerConfig).filter_by(agency_id=incident.agency_id, category='response_plans', key='defaults').first()
-    plan = (plan_cfg.value or {}) if plan_cfg else {}
+    customer_id = incident.customer_id or (agency.customer_id if agency else None)
+    profile = _get_response_profile(db, customer_id, incident.agency_id, incident.call_type)
+    plan = _customer_config_value(db, customer_id, incident.agency_id, 'response_plans', 'defaults') or {}
     slots = _profile_slots(profile)
     if slots:
         recommended_types = [s.get('unit_type') for s in slots]
@@ -3648,7 +3831,9 @@ def dispatch_recommended(request: Request, incident_id: int, db: Session = Depen
     if not incident:
         raise HTTPException(status_code=404, detail='Incident not found')
     user = get_current_user(request)
-    profile = _get_response_profile(db, incident.agency_id, incident.call_type)
+    agency = db.query(Agency).get(incident.agency_id)
+    customer_id = incident.customer_id or (agency.customer_id if agency else None) or user.get('customer_id')
+    profile = _get_response_profile(db, customer_id, incident.agency_id, incident.call_type)
     slots = _profile_slots(profile)
     max_units = profile.get('max_units') if profile and not slots else None
     recs = recommend_units(incident_id=incident_id, limit=25, db=db)
@@ -4535,10 +4720,11 @@ def alert_incident_crew(incident_id: int, body: AlertCrew, db: Session = Depends
 @app.post('/seed-pilot', response_model=dict)
 def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     CENTER = (39.9612, -82.9988)
+    customer_id = current_user.get('customer_id')
     def ensure_agency(name, atype, domain, lat, lng):
         a = db.query(Agency).filter(Agency.domain == domain).first()
         if a: return a
-        a = Agency(name=name, agency_type=atype, domain=domain, city='Columbus', state='OH', lat=lat, lng=lng)
+        a = Agency(customer_id=customer_id, name=name, agency_type=atype, domain=domain, city='Columbus', state='OH', lat=lat, lng=lng)
         db.add(a); db.flush(); return a
     police = ensure_agency('City Police', 'police', 'pilot.police', CENTER[0]-0.01, CENTER[1]+0.01)
     fire = ensure_agency('Metro Fire', 'fire', 'pilot.fire', CENTER[0]+0.01, CENTER[1]-0.01)
@@ -4546,12 +4732,12 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
     db.commit()
     def ensure_config(agency, template):
         for category, value in template.items():
-            cfg = db.query(CustomerConfig).filter_by(agency_id=agency.id, category=category, key='defaults').first()
+            cfg = db.query(CustomerConfig).filter_by(customer_id=customer_id, agency_id=agency.id, category=category, key='defaults').first()
             if not cfg:
-                db.add(CustomerConfig(agency_id=agency.id, category=category, key='defaults', value=value))
-        seeded = db.query(CustomerConfig).filter_by(agency_id=agency.id, category='__seeded__', key='flag').first()
+                db.add(CustomerConfig(customer_id=customer_id, agency_id=agency.id, category=category, key='defaults', value=value))
+        seeded = db.query(CustomerConfig).filter_by(customer_id=customer_id, agency_id=agency.id, category='__seeded__', key='flag').first()
         if not seeded:
-            db.add(CustomerConfig(agency_id=agency.id, category='__seeded__', key='flag', value=True))
+            db.add(CustomerConfig(customer_id=customer_id, agency_id=agency.id, category='__seeded__', key='flag', value=True))
     templates = {
         'police': {
             'statuses': [{'code':'AQ','label':'Available'},{'code':'AK','label':'Dispatched'},{'code':'ER','label':'En Route'},{'code':'OS','label':'On Scene'},{'code':'TRP','label':'Transporting'},{'code':'TC','label':'Traffic Control'},{'code':'CT','label':'Citation'},{'code':'ARR','label':'Arrest'},{'code':'BK','label':'Booking'},{'code':'CBY_CALLER','label':'Cancelled by Caller'},{'code':'CBY_OTHER','label':'Cancelled by Other Agency'},{'code':'CBY_DISPATCH','label':'Cancelled by Dispatch'},{'code':'OOS','label':'Out of Service'}],
@@ -4706,6 +4892,14 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
     _log_event(db, 'pilot_seeded', 'system', 0, user_id=current_user.get('user_id'), data={'agencies':[police.id, fire.id, ems.id]}, agency_id=None)
     return {'status': 'seeded', 'agencies': [police.id, fire.id, ems.id], 'incident': inc.id}
 
+def _agency_customer_id(db, agency_id, customer_id):
+    if customer_id:
+        return customer_id
+    if agency_id:
+        agency = db.query(Agency).get(agency_id)
+        return agency.customer_id if agency else None
+    return None
+
 @app.post('/import/{entity}', response_model=dict)
 def import_csv(entity: str, file: UploadFile = File(...), current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     import csv, io
@@ -4714,6 +4908,7 @@ def import_csv(entity: str, file: UploadFile = File(...), current_user: dict = D
     content = file.file.read().decode('utf-8')
     reader = csv.DictReader(io.StringIO(content))
     count = 0; errors = []
+    default_customer_id = current_user.get('customer_id')
     if entity == 'map-layers':
         layers = []
         for idx, row in enumerate(reader, start=1):
@@ -4726,24 +4921,30 @@ def import_csv(entity: str, file: UploadFile = File(...), current_user: dict = D
             except Exception as e:
                 errors.append(f'row {idx}: {e}')
         if layers:
-            existing = db.query(CustomerConfig).filter_by(category='map_layers', key='all').first()
+            existing = db.query(CustomerConfig).filter_by(customer_id=default_customer_id, category='map_layers', key='all').first()
             if existing:
                 existing.value = (existing.value or []) + layers
             else:
-                db.add(CustomerConfig(category='map_layers', key='all', value=layers))
+                db.add(CustomerConfig(customer_id=default_customer_id, category='map_layers', key='all', value=layers))
             db.commit()
             _log_event(db, 'csv_imported', 'system', 0, user_id=current_user.get('user_id'), data={'entity': 'map-layers', 'imported': len(layers), 'errors': len(errors)}, agency_id=None)
         return {'imported': len(layers), 'errors': errors[:10]}
     for idx, row in enumerate(reader, start=1):
         try:
             if entity == 'agencies':
-                db.add(Agency(name=row['name'], agency_type=row.get('agency_type', 'fire'), city=row.get('city'), state=row.get('state'), domain=row.get('domain')))
+                db.add(Agency(customer_id=default_customer_id, name=row['name'], agency_type=row.get('agency_type', 'fire'), city=row.get('city'), state=row.get('state'), domain=row.get('domain')))
             elif entity == 'units':
-                db.add(Unit(agency_id=int(row['agency_id']), name=row.get('name', row['call_sign']), call_sign=row['call_sign'], unit_type=row.get('unit_type', 'patrol'), lat=float(row['lat']) if row.get('lat') else None, lng=float(row['lng']) if row.get('lng') else None, taip_id=row.get('taip_id'), taip_destination_url=row.get('taip_destination_url'), taip_port=int(row['taip_port']) if row.get('taip_port') else None, camera_url=row.get('camera_url'), current_status='AQ', in_service_at=tz_now(), accumulated_call_seconds=0))
+                agency_id = int(row['agency_id'])
+                customer_id = _agency_customer_id(db, agency_id, default_customer_id)
+                db.add(Unit(customer_id=customer_id, agency_id=agency_id, name=row.get('name', row['call_sign']), call_sign=row['call_sign'], unit_type=row.get('unit_type', 'patrol'), lat=float(row['lat']) if row.get('lat') else None, lng=float(row['lng']) if row.get('lng') else None, taip_id=row.get('taip_id'), taip_destination_url=row.get('taip_destination_url'), taip_port=int(row['taip_port']) if row.get('taip_port') else None, camera_url=row.get('camera_url'), current_status='AQ', in_service_at=tz_now(), accumulated_call_seconds=0))
             elif entity == 'personnel':
-                db.add(Personnel(agency_id=int(row['agency_id']), first_name=row['first_name'], last_name=row['last_name'], email=row.get('email'), phone=row.get('phone'), sms_phone=row.get('sms_phone'), current_unit_id=int(row['current_unit_id']) if row.get('current_unit_id') else None, duty_status=row.get('duty_status', 'off_duty')))
+                agency_id = int(row['agency_id'])
+                customer_id = _agency_customer_id(db, agency_id, default_customer_id)
+                db.add(Personnel(customer_id=customer_id, agency_id=agency_id, first_name=row['first_name'], last_name=row['last_name'], email=row.get('email'), phone=row.get('phone'), sms_phone=row.get('sms_phone'), current_unit_id=int(row['current_unit_id']) if row.get('current_unit_id') else None, duty_status=row.get('duty_status', 'off_duty')))
             elif entity == 'incidents':
-                db.add(Incident(agency_id=int(row['agency_id']), call_number=row.get('call_number'), incident_number=row.get('incident_number'), call_type=row.get('call_type', 'Unknown'), priority=int(row['priority']) if row.get('priority') else 2, location_text=row.get('location_text'), lat=float(row['lat']) if row.get('lat') else None, lng=float(row['lng']) if row.get('lng') else None, status=row.get('status', 'open'), caller_name=row.get('caller_name'), callback=row.get('callback'), narrative=row.get('narrative')))
+                agency_id = int(row['agency_id'])
+                customer_id = _agency_customer_id(db, agency_id, default_customer_id)
+                db.add(Incident(customer_id=customer_id, agency_id=agency_id, call_number=row.get('call_number'), incident_number=row.get('incident_number'), call_type=row.get('call_type', 'Unknown'), priority=int(row['priority']) if row.get('priority') else 2, location_text=row.get('location_text'), lat=float(row['lat']) if row.get('lat') else None, lng=float(row['lng']) if row.get('lng') else None, status=row.get('status', 'open'), caller_name=row.get('caller_name'), callback=row.get('callback'), narrative=row.get('narrative')))
             count += 1
             if count % 100 == 0:
                 db.commit()
@@ -4763,13 +4964,21 @@ def reports():
 
 @app.get('/users', response_model=List[UserOut])
 def list_users(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
-    return db.query(User).order_by(User.created_at.desc()).all()
+    customer_id = current_user.get('customer_id')
+    q = db.query(User)
+    if customer_id:
+        q = q.filter(User.customer_id == customer_id)
+    return q.order_by(User.created_at.desc()).all()
 
 @app.post('/users', response_model=UserOut)
 def create_user(body: UserCreate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status_code=400, detail='Email already exists')
-    u = User(email=body.email, hashed_password=hash_password(body.password), first_name=body.first_name, last_name=body.last_name, role=body.role, agency_id=body.agency_id, is_active=True)
+    customer_id = body.customer_id or current_user.get('customer_id')
+    if not customer_id and body.agency_id:
+        agency = db.query(Agency).get(body.agency_id)
+        customer_id = agency.customer_id if agency else None
+    u = User(email=body.email, customer_id=customer_id, hashed_password=hash_password(body.password), first_name=body.first_name, last_name=body.last_name, role=body.role, agency_id=body.agency_id, is_active=True)
     db.add(u); db.commit(); db.refresh(u)
     _log_event(db, 'user_created', 'system', 0, user_id=current_user.get('user_id'), data={'new_user': u.id, 'role': u.role}, agency_id=body.agency_id)
     return u
@@ -4779,18 +4988,28 @@ def update_user(user_id: int, body: UserUpdate, current_user: dict = Depends(req
     u = db.query(User).get(user_id)
     if not u:
         raise HTTPException(status_code=404, detail='User not found')
+    customer_id = current_user.get('customer_id')
+    if customer_id and u.customer_id is not None and u.customer_id != customer_id:
+        raise HTTPException(status_code=404, detail='User not found')
     data = body.model_dump(exclude_unset=True)
     if 'password' in data:
         u.hashed_password = hash_password(data.pop('password'))
     for k, v in data.items():
         setattr(u, k, v)
+    if body.agency_id:
+        agency = db.query(Agency).get(body.agency_id)
+        if agency:
+            u.customer_id = agency.customer_id
     db.commit(); db.refresh(u)
     return u
 
 @app.delete('/users/{user_id}')
 def delete_user(user_id: int, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    customer_id = current_user.get('customer_id')
     u = db.query(User).get(user_id)
     if not u:
+        raise HTTPException(status_code=404, detail='User not found')
+    if customer_id and u.customer_id is not None and u.customer_id != customer_id:
         raise HTTPException(status_code=404, detail='User not found')
     db.delete(u); db.commit()
     return {'deleted': user_id}

@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import json
+import re
 import hashlib
 import subprocess
 from datetime import datetime
@@ -29,12 +30,12 @@ def load_customer(path):
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
-def insert_config(session, agency_id, category, key, value):
-    cfg = session.query(app.CustomerConfig).filter_by(agency_id=agency_id, category=category, key=key).first()
+def insert_config(session, customer_id, agency_id, category, key, value):
+    cfg = session.query(app.CustomerConfig).filter_by(customer_id=customer_id, agency_id=agency_id, category=category, key=key).first()
     if cfg:
         cfg.value = value
     else:
-        session.add(app.CustomerConfig(agency_id=agency_id, category=category, key=key, value=value))
+        session.add(app.CustomerConfig(customer_id=customer_id, agency_id=agency_id, category=category, key=key, value=value))
 
 def main():
     parser = argparse.ArgumentParser(description='Seed or update a customer configuration without destroying existing data.')
@@ -53,12 +54,27 @@ def main():
     session = app.SessionLocal()
 
     try:
-        # Global configuration (agency_id = NULL)
+        # Upsert customer
+        customer_name = data.get('customer_name') or data.get('name') or 'Customer'
+        customer_slug = data.get('customer_slug') or data.get('slug') or re.sub(r'[^a-z0-9]+', '-', customer_name.lower()).strip('-')
+        if not customer_slug:
+            customer_slug = 'customer'
+        customer = session.query(app.Customer).filter(app.Customer.slug == customer_slug).first()
+        if not customer:
+            customer = app.Customer(name=customer_name, slug=customer_slug)
+            session.add(customer)
+            session.flush()
+        customer.config = data.get('config')
+        customer.approved = True
+        customer.approved_at = app.tz_now()
+        customer_id = customer.id
+
+        # Customer-level configuration (agency_id = NULL)
         config = data.get('config', {})
         for cat, items in config.items():
             if isinstance(items, dict):
                 for key, value in items.items():
-                    insert_config(session, None, cat, key, value)
+                    insert_config(session, customer_id, None, cat, key, value)
             elif isinstance(items, list):
                 for item in items:
                     if isinstance(item, dict):
@@ -67,7 +83,7 @@ def main():
                     else:
                         key = item
                         value = {'name': item}
-                    insert_config(session, None, cat, key, value)
+                    insert_config(session, customer_id, None, cat, key, value)
 
         # Insert agencies and keep id map
         agency_map = {}
@@ -77,6 +93,7 @@ def main():
             if not a:
                 a = app.Agency()
                 session.add(a)
+            a.customer_id = customer_id
             a.name = agency.get('name')
             a.agency_type = agency.get('agency_type', 'fire')
             a.domain = agency.get('domain')
@@ -96,12 +113,12 @@ def main():
             for cat, items in a_config.items():
                 if isinstance(items, dict):
                     for key, value in items.items():
-                        insert_config(session, a.id, cat, key, value)
+                        insert_config(session, customer_id, a.id, cat, key, value)
                 elif isinstance(items, list):
                     for item in items:
                         key = item if isinstance(item, str) else item.get('name') or item.get('key')
                         value = item if not isinstance(item, str) else {'name': item}
-                        insert_config(session, a.id, cat, key, value)
+                        insert_config(session, customer_id, a.id, cat, key, value)
 
         # Insert users and keep id map
         user_map = {}
@@ -116,6 +133,7 @@ def main():
             u.hashed_password = hash_password(pwd)
             u.role = user.get('role', 'responder')
             u.is_active = user.get('is_active', True)
+            u.customer_id = customer_id
             u.agency_id = agency_id
             session.flush()
             user_map[user.get('email')] = u.id
@@ -132,6 +150,7 @@ def main():
             if not u:
                 u = app.Unit(call_sign=unit.get('call_sign'))
                 session.add(u)
+            u.customer_id = customer_id
             u.agency_id = agency_id
             u.name = unit.get('name')
             u.unit_type = unit.get('unit_type')
@@ -157,7 +176,7 @@ def main():
                 q = q.filter(app.Personnel.first_name == p.get('first_name'), app.Personnel.last_name == p.get('last_name'))
             pe = q.first()
             if not pe:
-                pe = app.Personnel(agency_id=agency_id)
+                pe = app.Personnel(customer_id=customer_id, agency_id=agency_id)
                 session.add(pe)
             pe.user_id = user_id
             pe.first_name = p.get('first_name')
@@ -171,6 +190,7 @@ def main():
 
         session.commit()
         print('Customer setup complete.')
+        print(f'Customer: {customer_name} ({customer_slug}) id={customer_id}')
         print(f'Agencies: {len(agencies)}, Users: {len(users)}, Units: {len(units)}, Personnel: {len(personnel)}')
     except Exception as e:
         session.rollback()

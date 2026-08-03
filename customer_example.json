@@ -1,4 +1,6 @@
 {
+  "customer_name": "Metro County CAD",
+  "customer_slug": "metro-county-cad",
   "config": {
     "branding": {
       "logo_url": "https://example.com/logo.png",

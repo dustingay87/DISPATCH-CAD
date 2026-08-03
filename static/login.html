@@ -28,21 +28,32 @@
         <label class='block text-sm text-slate-300 mb-1'>Password</label>
         <input id='password' type='password' required class='w-full bg-slate-900 border border-slate-600 rounded p-3 text-white'>
       </div>
+      <div>
+        <label class='block text-sm text-slate-300 mb-1'>Customer ID (optional)</label>
+        <input id='customer' type='text' placeholder='your-customer' class='w-full bg-slate-900 border border-slate-600 rounded p-3 text-white'>
+      </div>
       <button type='submit' class='w-full d2d-btn py-3'>Log In</button>
     </form>
     <div id='error' class='mt-4 text-red-400 text-sm text-center hidden'></div>
   </div>
 <script>
+const customerInput = document.getElementById('customer');
+const urlParams = new URLSearchParams(window.location.search);
+const urlCustomer = urlParams.get('customer');
+if (urlCustomer) customerInput.value = urlCustomer;
+
 document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   e.preventDefault();
   const email = document.getElementById('email').value;
   const password = document.getElementById('password').value;
+  const customer_slug = customerInput.value.trim() || undefined;
+  const payload = customer_slug ? {email, password, customer_slug} : {email, password};
   try {
     const res = await fetch('/login', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       credentials: 'include',
-      body: JSON.stringify({email, password})
+      body: JSON.stringify(payload)
     });
     if (!res.ok) { throw new Error('Invalid credentials'); }
     window.location.href = '/';
