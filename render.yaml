@@ -5,6 +5,8 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
+    domains:
+      - cad.dispatchtodiscipleship.net
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
