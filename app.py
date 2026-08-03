@@ -611,7 +611,10 @@ def _ensure_default_customer(conn):
         if customer_id:
             for table in ('agencies', 'users', 'personnel', 'units', 'incidents', 'customer_config'):
                 try:
-                    conn.execute(text(f'UPDATE {table} SET customer_id = :cid WHERE customer_id IS NULL'), {'cid': customer_id})
+                    if table == 'users':
+                        conn.execute(text(f"UPDATE {table} SET customer_id = :cid WHERE customer_id IS NULL AND (role IS NULL OR role != 'superadmin')"), {'cid': customer_id})
+                    else:
+                        conn.execute(text(f'UPDATE {table} SET customer_id = :cid WHERE customer_id IS NULL'), {'cid': customer_id})
                 except Exception as e:
                     print(f'DB backfill warning for {table}.customer_id: {e}')
             conn.commit()
