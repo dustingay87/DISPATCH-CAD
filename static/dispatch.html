@@ -224,7 +224,7 @@ function updateBrand(){
   document.title = user.customer_name ? `${user.customer_name} - ${cfg.name}` : cfg.name;
 }
 
-const LAYOUT_PANELS = ['callsCard','incidentPanel','mapCard','unitBoardCard','messagesCard','kpiBar'];
+const LAYOUT_PANELS = ['callsCard','mapCard','unitBoardCard','messagesCard','kpiBar'];
 const LAYOUT_DEFAULT = {col1:'25%',col2:'35%',col3:'40%',rowTop:'100%',rowBottom:'0%',footer:'14rem',locked:true,autoRefresh:true,hidden:[],undocked:[]};
 function loadLayout(){
   try{ const raw=localStorage.getItem(LAYOUT_KEY); if(raw){ const l=JSON.parse(raw); return {...LAYOUT_DEFAULT, ...l}; } }catch(e){}
@@ -249,6 +249,7 @@ function applyLayout(l){
   if(center){ center.style.setProperty('--rowTop', l.rowTop); center.style.setProperty('--rowBottom', l.rowBottom); }
   if(footer){ footer.style.height = l.footer; }
   LAYOUT_PANELS.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display = (l.hidden||[]).includes(id) ? 'none' : ''; });
+  const incidentPanel = document.getElementById('incidentPanel'); if(incidentPanel) incidentPanel.style.display = '';
   applyUndockedPanels(l.undocked||[]);
   setLayoutLocked(!!l.locked);
   state.layout = l;
@@ -331,7 +332,7 @@ function renderLayoutEditor(){
   document.getElementById('layoutAutoRefresh').checked=!!l.autoRefresh;
   document.getElementById('layoutLock').checked=!!l.locked;
   const list=document.getElementById('layoutPanels');
-  const labels={callsCard:'Active Calls',incidentPanel:'Incident Workspace',mapCard:'Map',unitBoardCard:'Unit Board',messagesCard:'Messages',kpiBar:'KPI Bar'};
+  const labels={callsCard:'Active Calls',mapCard:'Map',unitBoardCard:'Unit Board',messagesCard:'Messages',kpiBar:'KPI Bar'};
   list.innerHTML=LAYOUT_PANELS.map(id=>`
     <label class="layout-row"><span>${labels[id]}</span><input type="checkbox" data-panel="${id}" ${(l.hidden||[]).includes(id)?'':'checked'} onchange="togglePanel('${id}')"></label>
   `).join('');
@@ -349,7 +350,7 @@ function toggleLayoutAutoRefresh(){
   const l=loadLayout(); l.autoRefresh=document.getElementById('layoutAutoRefresh').checked; saveLayout(l); state.layout=l;
 }
 function toggleLayoutLock(){
-  const l=loadLayout(); l.locked=document.getElementById('layoutLock').checked; saveLayout(l); applyLayout(l);
+  const l=loadLayout(); l.locked=document.getElementById('layoutLock').checked; saveLayout(l); setLayoutLocked(!!l.locked); state.layout=l;
 }
 function resetLayout(){
   if(!confirm('Reset console layout to default?')) return;
@@ -555,6 +556,7 @@ function serviceAreaColor(type){
   const M = {primary:'#22c55e', secondary:'#3b82f6', mutual:'#eab308', post:'#64748b', zone:'#a855f7', beat:'#f97316', staging:'#ec4899', coverage:'#06b6d4', water:'#0ea5e9', district:'#8b5cf6'};
   return M[type] || '#3b82f6';
 }
+function zoneColor(z){ const t = serviceAreaColor(z.zone_type); return (z.color && z.color.toLowerCase() !== '#3b82f6') ? z.color : t; }
 function matchesDiscipline(t){ return DISCIPLINE==='all' || t===DISCIPLINE; }
 function log(msg){ state.logs.unshift(`${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${msg}`); if(state.logs.length>100) state.logs.pop(); console.log(msg); }
 
@@ -1570,7 +1572,7 @@ function renderMap(){
     (state.postZones || []).forEach(z=>{
       if(!z.geojson) return;
       try{
-        const c = z.color || serviceAreaColor(z.zone_type);
+        const c = zoneColor(z);
         const gj = L.geoJSON(z.geojson, {style:{color:c, fillColor:c, fillOpacity:0.1, weight:2}}).addTo(layers.serviceAreas);
         gj.bindPopup(`<b>${z.name}</b><br>${z.zone_type}`);
         if(gj.getBounds && gj.getBounds().isValid()) bounds.extend(gj.getBounds());

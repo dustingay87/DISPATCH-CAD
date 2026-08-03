@@ -505,6 +505,7 @@ function serviceAreaColor(type){
   const M = {primary:'#22c55e', secondary:'#3b82f6', mutual:'#eab308', post:'#64748b', zone:'#a855f7', beat:'#f97316', staging:'#ec4899', coverage:'#06b6d4', water:'#0ea5e9', district:'#8b5cf6'};
   return M[type] || '#3b82f6';
 }
+function zoneColor(z){ const t = serviceAreaColor(z.zone_type); return (z.color && z.color.toLowerCase() !== '#3b82f6') ? z.color : t; }
 function renderMap(){
   initMap();
   state.map.eachLayer(l=>{ if(l instanceof L.Marker || l instanceof L.CircleMarker) state.map.removeLayer(l); });
@@ -514,7 +515,7 @@ function renderMap(){
   (state.zones||[]).forEach(z=>{
     if(!z.geojson) return;
     try{
-      const c = z.color || serviceAreaColor(z.zone_type);
+      const c = zoneColor(z);
       const gj = L.geoJSON(z.geojson, {style:{color:c, fillColor:c, fillOpacity:0.1, weight:2}}).addTo(state.zonesLayer);
       gj.bindPopup(`<b>${z.name}</b><br>${z.zone_type}`);
       if(gj.getBounds && gj.getBounds().isValid()) bounds.extend(gj.getBounds());

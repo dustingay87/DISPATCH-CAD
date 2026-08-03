@@ -2577,24 +2577,32 @@ def _validate_incident_location(db, incident, force=False):
     if not force and loc.verification_status == 'verified' and loc.latitude is not None and loc.longitude is not None:
         return loc
     extra = _load_extra(incident.extra)
-    g = _geocode_structured(incident.location_text) if incident.location_text else None
-    if g:
-        loc.standardized_address = g.get('display_name')
-        a = g.get('address') or {}
-        loc.city = a.get('city')
-        loc.state = a.get('state')
-        loc.postal_code = a.get('postcode')
-        loc.latitude = g['lat']
-        loc.longitude = g['lng']
-        loc.geocoded_at = tz_now()
+    if incident.lat is not None and incident.lng is not None and not force:
+        # Call taker verified coordinates. Use them rather than re-geocoding the address.
+        loc.latitude = incident.lat
+        loc.longitude = incident.lng
         loc.verification_status = 'verified'
-        incident.lat = g['lat']
-        incident.lng = g['lng']
+        loc.geocoded_at = tz_now()
         extra['verification_status'] = 'verified'
-        extra['standardized_address'] = loc.standardized_address
     else:
-        loc.verification_status = 'unverified'
-        extra['verification_status'] = 'unverified'
+        g = _geocode_structured(incident.location_text) if incident.location_text else None
+        if g:
+            loc.standardized_address = g.get('display_name')
+            a = g.get('address') or {}
+            loc.city = a.get('city')
+            loc.state = a.get('state')
+            loc.postal_code = a.get('postcode')
+            loc.latitude = g['lat']
+            loc.longitude = g['lng']
+            loc.geocoded_at = tz_now()
+            loc.verification_status = 'verified'
+            incident.lat = g['lat']
+            incident.lng = g['lng']
+            extra['verification_status'] = 'verified'
+            extra['standardized_address'] = loc.standardized_address
+        else:
+            loc.verification_status = 'unverified'
+            extra['verification_status'] = 'unverified'
     zone = _find_zone_for_point(db, loc.latitude, loc.longitude, incident.agency_id) if (loc.latitude and loc.longitude) else None
     loc.zone_id = zone.id if zone else None
     extra['zone_name'] = zone.name if zone else None

@@ -93,8 +93,9 @@ let map, drawnItems, zonesLayer, drawControl;
 
 function defaultColor(type){
   const M = {primary:'#22c55e', secondary:'#3b82f6', mutual:'#eab308', post:'#64748b', zone:'#a855f7', beat:'#f97316', staging:'#ec4899', coverage:'#06b6d4', water:'#0ea5e9', district:'#8b5cf6'};
-  return M[type] || document.getElementById('zoneColor')?.value || '#3b82f6';
+  return M[type] || '#3b82f6';
 }
+function effectiveColor(z){ const t = defaultColor(z.zone_type); return (z.color && z.color.toLowerCase() !== '#3b82f6') ? z.color : t; }
 function styleLayer(layer, type){ const c=defaultColor(type); if(layer.setStyle) layer.setStyle({color:c, fillColor:c, fillOpacity:0.15, weight:2}); }
 
 function initMap(){
@@ -115,7 +116,7 @@ function initMap(){
 
 function setDefaultColor(){
   const type = document.getElementById('zoneType').value;
-  if(['primary','secondary','mutual'].includes(type)) document.getElementById('zoneColor').value = defaultColor(type);
+  document.getElementById('zoneColor').value = defaultColor(type);
 }
 
 function updateDrawControl(){
@@ -146,7 +147,7 @@ function renderZonesMap(){
   state.zones.forEach(z=>{
     if(!z.geojson) return;
     try{
-      const c = z.color || defaultColor(z.zone_type);
+      const c = effectiveColor(z);
       const gj = L.geoJSON(z.geojson, {style:{color:c, fillColor:c, fillOpacity:0.1, weight:2}}).addTo(zonesLayer);
       gj.bindPopup(`<b>${z.name}</b><br>${z.zone_type}`);
       if(gj.getBounds && gj.getBounds().isValid()) bounds.extend(gj.getBounds());
@@ -194,7 +195,7 @@ function renderZones(errors){
   el.innerHTML = errorHtml + (state.zones.map(z=>`
     <div class='bg-slate-800 rounded p-2 border border-slate-700 flex justify-between items-start'>
       <div>
-        <div class='font-bold text-white flex items-center gap-2'><span class='w-3 h-3 rounded-full' style='background:${z.color || defaultColor(z.zone_type)}'></span>${z.name}</div>
+        <div class='font-bold text-white flex items-center gap-2'><span class='w-3 h-3 rounded-full' style='background:${effectiveColor(z)}'></span>${z.name}</div>
         <div class='text-xs text-slate-400'>${z.zone_type} • min ${z.minimum_units || 0}</div>
       </div>
       <div class='flex gap-1'>
@@ -212,7 +213,7 @@ function clearZoneForm(){
   document.getElementById('zoneId').value='';
   document.getElementById('zoneName').value='';
   document.getElementById('zoneType').value='post';
-  document.getElementById('zoneColor').value='#3b82f6';
+  document.getElementById('zoneColor').value=defaultColor('post');
   document.getElementById('zoneMin').value='0';
   document.getElementById('zoneGeojson').value='';
   if(drawnItems){ drawnItems.clearLayers(); } syncGeojson();
@@ -224,7 +225,7 @@ async function saveZone(){
   const raw = document.getElementById('zoneGeojson').value.trim();
   if(raw){ try { geo = JSON.parse(raw); } catch(e){ alert('Invalid GeoJSON: '+e.message); return; } }
   const type = document.getElementById('zoneType').value;
-  if(['primary','secondary','mutual'].includes(type) && !document.getElementById('zoneColor').value){ document.getElementById('zoneColor').value = defaultColor(type); }
+  if(!document.getElementById('zoneColor').value){ document.getElementById('zoneColor').value = defaultColor(type); }
   const payload = {
     agency_id: parseInt(document.getElementById('zoneAgency').value),
     name: document.getElementById('zoneName').value,
@@ -248,7 +249,7 @@ function editZone(id){
   document.getElementById('zoneAgency').value = z.agency_id;
   document.getElementById('zoneName').value = z.name||'';
   document.getElementById('zoneType').value = z.zone_type||'post';
-  document.getElementById('zoneColor').value = z.color||defaultColor(z.zone_type);
+  document.getElementById('zoneColor').value = effectiveColor(z);
   document.getElementById('zoneMin').value = z.minimum_units||0;
   document.getElementById('zoneGeojson').value = z.geojson ? JSON.stringify(z.geojson) : '';
   loadGeojsonToDrawn(z.geojson, z.zone_type);
