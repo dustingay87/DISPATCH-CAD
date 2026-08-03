@@ -3826,6 +3826,21 @@ def validate_incident_location_endpoint(incident_id: int, db: Session = Depends(
 
 def _dispatch_one_unit(db, incident, unit, user, notes=None, reassign=False):
     now = tz_now()
+    # If the unit was previously assigned and cleared, reuse the cleared record.
+    existing_cleared = db.query(IncidentUnit).filter_by(incident_id=incident.id, unit_id=unit.id, assignment_status='cleared').first()
+    if existing_cleared:
+        existing_cleared.assignment_status = 'assigned'
+        existing_cleared.cleared_at = None
+        existing_cleared.assigned_at = now
+        existing_cleared.notes = notes or existing_cleared.notes
+        unit.current_incident_id = incident.id
+        unit.last_assigned_at = now
+        unit.current_status = 'AK'
+        db.add(existing_cleared); db.flush()
+        refresh_incident_status(db, incident)
+        _log_event(db, 'unit_dispatched', 'incident', incident.id, user_id=user.get('user_id'), data={'unit_id': unit.id, 'notes': notes}, agency_id=incident.agency_id)
+        db.add(StatusEvent(unit_id=unit.id, incident_id=incident.id, status_code='AK', reason='Dispatched to incident'))
+        return existing_cleared
     # Re-dispatch to the same incident is only allowed if the previous assignment was cleared,
     # unless we are promoting an existing stacked assignment or reassigning to this incident.
     existing = db.query(IncidentUnit).filter_by(incident_id=incident.id, unit_id=unit.id).filter(IncidentUnit.assignment_status != 'cleared').first()
