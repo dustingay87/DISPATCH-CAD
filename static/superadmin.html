@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>Unified Response - Super Admin</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
+.card { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1rem; }
+.btn { padding:0.5rem 1rem; border-radius:0.375rem; font-size:0.875rem; }
+.btn-primary { background:#2563eb; }
+.btn-primary:hover { background:#1d4ed8; }
+input, select { background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:0.5rem; border-radius:0.25rem; font-size:0.875rem; }
+</style>
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
+</head>
+<body class='p-4'>
+  <div class='max-w-2xl mx-auto space-y-4'>
+    <div class='flex flex-wrap justify-between items-center gap-2'>
+      <h1 class='text-2xl font-bold'>Super Admin <span class='text-slate-400 font-normal'>Customer Switcher</span></h1>
+      <button class='btn btn-danger bg-red-600 hover:bg-red-700 text-white' onclick='logout()'>Logout</button>
+    </div>
+
+    <div id='current' class='card text-sm text-slate-400'>
+      Loading...
+    </div>
+
+    <div class='card space-y-3'>
+      <h2 class='font-semibold'>Select customer & agency</h2>
+      <label class='block text-sm text-slate-400'>Customer</label>
+      <select id='customerSelect' class='w-full' onchange='customerChanged()'>
+        <option value=''>-- choose customer --</option>
+      </select>
+
+      <label class='block text-sm text-slate-400'>Agency</label>
+      <select id='agencySelect' class='w-full'>
+        <option value=''>-- choose agency --</option>
+      </select>
+
+      <div class='flex gap-2'>
+        <button id='switchBtn' class='btn btn-primary text-white' onclick='switchCustomer()'>Switch into customer</button>
+        <button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='window.location="/"'>Go to dashboard</button>
+      </div>
+      <p id='message' class='text-sm min-h-[1.25rem]'></p>
+    </div>
+
+    <div class='card'>
+      <h2 class='font-semibold mb-2'>Quick links</h2>
+      <div class='flex flex-wrap gap-2'>
+        <a href='/admin' class='btn bg-slate-700 hover:bg-slate-600 text-white'>System Admin</a>
+        <a href='/customer-admin' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Customer Admin</a>
+        <a href='/import' class='btn bg-slate-700 hover:bg-slate-600 text-white'>CSV Import</a>
+      </div>
+    </div>
+  </div>
+
+<script>
+let customers = [];
+let agencies = [];
+
+async function load() {
+  try {
+    const me = await fetch('/me').then(r => r.json());
+    if (me.role !== 'superadmin') {
+      document.getElementById('current').innerHTML = '<span class="text-red-400">Not a superadmin account.</span>';
+      return;
+    }
+    document.getElementById('current').innerHTML = `<b>${me.email}</b> &middot; role: ${me.role}<br>Current customer: ${me.customer_id || 'none'} / agency: ${me.agency_id || 'none'}`;
+
+    const data = await fetch('/me/customers').then(r => r.json());
+    customers = data.customers || [];
+    agencies = data.agencies || [];
+
+    const csel = document.getElementById('customerSelect');
+    customers.forEach(c => {
+      const o = document.createElement('option');
+      o.value = c.id;
+      o.textContent = c.name + ' (' + c.slug + ')';
+      csel.appendChild(o);
+    });
+    customerChanged();
+  } catch (e) {
+    document.getElementById('current').innerHTML = '<span class="text-red-400">Error loading superadmin data. <a href="/login" class="underline">Log in</a></span>';
+  }
+}
+
+function customerChanged() {
+  const customerId = document.getElementById('customerSelect').value;
+  const asel = document.getElementById('agencySelect');
+  asel.innerHTML = '<option value="">-- choose agency --</option>';
+  const filtered = agencies.filter(a => String(a.customer_id) === customerId);
+  filtered.forEach(a => {
+    const o = document.createElement('option');
+    o.value = a.id;
+    o.textContent = a.name + ' (' + a.agency_type + ')';
+    asel.appendChild(o);
+  });
+}
+
+async function switchCustomer() {
+  const customerId = document.getElementById('customerSelect').value || null;
+  const agencyId = document.getElementById('agencySelect').value || null;
+  if (!customerId) {
+    document.getElementById('message').textContent = 'Select a customer first.';
+    return;
+  }
+  try {
+    const res = await fetch('/me/switch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({customer_id: customerId ? parseInt(customerId) : null, agency_id: agencyId ? parseInt(agencyId) : null})
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    document.getElementById('message').textContent = 'Switched. Going to dashboard...';
+    window.location.href = '/';
+  } catch (e) {
+    document.getElementById('message').textContent = 'Error: ' + e.message;
+  }
+}
+
+async function logout() {
+  await fetch('/logout', {method: 'POST'});
+  window.location.href = '/login';
+}
+
+load();
+</script>
+</body>
+</html>

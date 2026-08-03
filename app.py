@@ -680,6 +680,10 @@ class LoginRequest(BaseModel):
     customer_id: Optional[int] = None
     customer_slug: Optional[str] = None
 
+class SwitchRequest(BaseModel):
+    customer_id: Optional[int] = None
+    agency_id: Optional[int] = None
+
 class UserMe(BaseModel):
     user_id: int
     role: str
@@ -1160,7 +1164,8 @@ def hash_password(password):
 def make_session(user):
     exp = int(time.time()) + 86400
     cid = user.customer_id if user.customer_id is not None else ''
-    msg = f'{user.id}:{user.role}:{cid}:{exp}'
+    aid = user.agency_id if user.agency_id is not None else ''
+    msg = f'{user.id}:{user.role}:{cid}:{aid}:{exp}'
     sig = hmac.new(SECRET_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
     return f'{msg}:{sig}'
 
@@ -1168,7 +1173,7 @@ def verify_session(token):
     if not token:
         return None
     parts = token.split(':')
-    if len(parts) < 4:
+    if len(parts) < 5:
         return None
     sig = parts[-1]
     msg = ':'.join(parts[:-1])
@@ -1176,19 +1181,16 @@ def verify_session(token):
     if not hmac.compare_digest(sig, expected):
         return None
     msg_parts = msg.split(':')
-    if len(msg_parts) not in (3, 4):
+    if len(msg_parts) not in (4, 5):
         return None
     uid = msg_parts[0]
     role = msg_parts[1]
-    if len(msg_parts) == 4:
-        customer_id = int(msg_parts[2]) if msg_parts[2].isdigit() else None
-        exp = msg_parts[3]
-    else:
-        customer_id = None
-        exp = msg_parts[2]
+    customer_id = int(msg_parts[2]) if len(msg_parts) > 2 and msg_parts[2].isdigit() else None
+    agency_id = int(msg_parts[3]) if len(msg_parts) > 3 and msg_parts[3].isdigit() else None
+    exp = msg_parts[-1]
     if time.time() > int(exp):
         return None
-    return {'user_id': int(uid), 'role': role, 'customer_id': customer_id, 'exp': int(exp)}
+    return {'user_id': int(uid), 'role': role, 'customer_id': customer_id, 'agency_id': agency_id, 'exp': int(exp)}
 
 def get_current_user(request: Request):
     session = request.cookies.get('session')
@@ -1204,11 +1206,20 @@ def get_current_user(request: Request):
     payload = verify_session(session)
     if not payload:
         raise HTTPException(status_code=401, detail='Not authenticated')
-    return payload
+    db = SessionLocal()
+    try:
+        u = db.query(User).get(payload['user_id'])
+        if not u or not u.is_active:
+            raise HTTPException(status_code=401, detail='Not authenticated')
+        customer_id = payload.get('customer_id') if payload.get('customer_id') is not None else u.customer_id
+        agency_id = payload.get('agency_id') if payload.get('agency_id') is not None else u.agency_id
+        return {'user_id': u.id, 'role': payload['role'], 'email': u.email, 'customer_id': customer_id, 'agency_id': agency_id, 'first_name': u.first_name, 'last_name': u.last_name, 'exp': payload['exp']}
+    finally:
+        db.close()
 
 def require_admin(request: Request):
     user = get_current_user(request)
-    if user.get('role') != 'admin':
+    if user.get('role') not in ('admin', 'superadmin'):
         raise HTTPException(status_code=403, detail='Admin required')
     return user
 
@@ -1218,7 +1229,7 @@ FIELD_ROLES = {'responder','dispatcher','admin'}
 
 def check_role(request: Request, allowed: set):
     user = get_current_user(request)
-    if user.get('role') not in allowed and user.get('role') != 'admin':
+    if user.get('role') not in allowed and user.get('role') not in ('admin', 'superadmin'):
         raise HTTPException(status_code=403, detail='Role required')
     return user
 
@@ -1286,6 +1297,7 @@ async def auth_middleware(request: Request, call_next):
         '/hud': DISPATCHER_ROLES,
         '/reports': DISPATCHER_ROLES,
         '/dashboard': DISPATCHER_ROLES,
+        '/superadmin': {'superadmin'},
     }
     session = request.cookies.get('session')
     payload = verify_session(session)
@@ -1294,13 +1306,13 @@ async def auth_middleware(request: Request, call_next):
         if allowed:
             if not payload:
                 return _security_headers(JSONResponse(status_code=401, content={'detail': 'Not authenticated'}, headers={'Location':'/login'}))
-            if payload.get('role') not in allowed and payload.get('role') != 'admin':
+            if payload.get('role') not in allowed and payload.get('role') not in ('admin', 'superadmin'):
                 return _security_headers(JSONResponse(status_code=403, content={'detail': 'Role required'}))
         return _security_headers(await call_next(request))
     # Non-GET endpoints
     if not payload:
         return _security_headers(JSONResponse(status_code=401, content={'detail': 'Not authenticated'}))
-    if request.url.path == '/config' and request.method in ('POST', 'PUT', 'DELETE') and payload.get('role') != 'admin':
+    if request.url.path == '/config' and request.method in ('POST', 'PUT', 'DELETE') and payload.get('role') not in ('admin', 'superadmin'):
         return _security_headers(JSONResponse(status_code=403, content={'detail': 'Admin required'}))
     return _security_headers(await call_next(request))
 
@@ -1323,6 +1335,10 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
         q = q.filter(User.customer_id == requested_customer_id)
     user = q.first()
 
+    # Superadmin can log in with any customer slug (or none)
+    if not user and requested_customer_id:
+        user = db.query(User).filter(User.email == body.email, User.role == 'superadmin').first()
+
     if not user or user.hashed_password != hash_password(body.password):
         attempts.append(now)
         login_attempts[ip] = attempts
@@ -1330,7 +1346,7 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
     login_attempts.pop(ip, None)
 
     # Default the user's customer to the requested one if not already set
-    if requested_customer_id and user.customer_id is None:
+    if requested_customer_id and user.customer_id is None and user.role != 'superadmin':
         user.customer_id = requested_customer_id
         db.add(user)
         db.commit()
@@ -1366,13 +1382,14 @@ def me(request: Request, db: Session = Depends(get_db)):
     selected = None
     personnel_id = None
     cross_ids = []
-    customer_id = u.customer_id if u else user.get('customer_id')
+    customer_id = user.get('customer_id') if user.get('customer_id') is not None else (u.customer_id if u else None)
+    agency_id = user.get('agency_id') if user.get('agency_id') is not None else (u.agency_id if u else None)
     if u and customer_id:
-        if u.agency_id:
-            modules_val = _customer_config_value(db, customer_id, u.agency_id, 'modules', 'defaults')
+        if agency_id:
+            modules_val = _customer_config_value(db, customer_id, agency_id, 'modules', 'defaults')
             if modules_val:
                 modules = modules_val if isinstance(modules_val, list) else []
-            coop_val = _customer_config_value(db, customer_id, u.agency_id, 'cooperating_agencies', 'defaults')
+            coop_val = _customer_config_value(db, customer_id, agency_id, 'cooperating_agencies', 'defaults')
             if coop_val:
                 cross_ids = coop_val if isinstance(coop_val, list) else []
         sel = db.query(CustomerConfig).filter_by(customer_id=customer_id, category='user_module', key=str(u.id)).first()
@@ -1383,7 +1400,7 @@ def me(request: Request, db: Session = Depends(get_db)):
         p = db.query(Personnel).filter(Personnel.user_id == u.id).first()
         if p:
             personnel_id = p.id
-    return {'user_id': user['user_id'], 'email': u.email if u else None, 'first_name': u.first_name if u else None, 'last_name': u.last_name if u else None, 'role': user['role'], 'customer_id': customer_id, 'agency_id': u.agency_id if u else None, 'modules': modules, 'selected_module': selected, 'personnel_id': personnel_id, 'cross_discipline_agencies': cross_ids, 'preferences': u.preferences if u else None}
+    return {'user_id': user['user_id'], 'email': u.email if u else None, 'first_name': u.first_name if u else None, 'last_name': u.last_name if u else None, 'role': user['role'], 'customer_id': customer_id, 'agency_id': agency_id, 'modules': modules, 'selected_module': selected, 'personnel_id': personnel_id, 'cross_discipline_agencies': cross_ids, 'preferences': u.preferences if u else None}
 
 @app.put('/me/module')
 def set_user_module(body: UserModuleUpdate, request: Request, db: Session = Depends(get_db)):
@@ -1420,6 +1437,46 @@ def set_user_preferences(body: UserUpdate, request: Request, db: Session = Depen
     db.commit(); db.refresh(u)
     return u
 
+@app.get('/me/customers')
+def me_customers(request: Request, db: Session = Depends(get_db)):
+    user = require_admin(request)
+    if user.get('role') != 'superadmin':
+        raise HTTPException(status_code=403, detail='Superadmin required')
+    customers = db.query(Customer).order_by(Customer.name).all()
+    agencies = db.query(Agency).order_by(Agency.name).all()
+    return {
+        'customers': [{'id': c.id, 'name': c.name, 'slug': c.slug} for c in customers],
+        'agencies': [{'id': a.id, 'name': a.name, 'customer_id': a.customer_id, 'agency_type': a.agency_type} for a in agencies]
+    }
+
+@app.post('/me/switch')
+def me_switch(body: SwitchRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    user = require_admin(request)
+    if user.get('role') != 'superadmin':
+        raise HTTPException(status_code=403, detail='Superadmin required')
+    u = db.query(User).get(user['user_id'])
+    if not u:
+        raise HTTPException(status_code=404, detail='User not found')
+    # Validate customer exists if provided
+    if body.customer_id is not None:
+        customer = db.query(Customer).get(body.customer_id)
+        if not customer:
+            raise HTTPException(status_code=404, detail='Customer not found')
+    # Validate agency exists if provided
+    if body.agency_id is not None:
+        agency = db.query(Agency).get(body.agency_id)
+        if not agency:
+            raise HTTPException(status_code=404, detail='Agency not found')
+    # Build a session-only user context with selected customer/agency
+    session_user = type('SessionUser', (), {
+        'id': u.id,
+        'role': u.role,
+        'customer_id': body.customer_id,
+        'agency_id': body.agency_id
+    })()
+    response.set_cookie(key='session', value=make_session(session_user), httponly=True, samesite='lax' if INSECURE_DEV else 'strict', secure=not INSECURE_DEV, path='/', max_age=86400)
+    return {'customer_id': body.customer_id, 'agency_id': body.agency_id}
+
 @app.get('/login')
 def login_page():
     return FileResponse('static/login.html')
@@ -1427,6 +1484,8 @@ def login_page():
 def _select_home_page(request: Request):
     try:
         user = get_current_user(request)
+        if user.get('role') == 'superadmin' and (user.get('customer_id') is None or user.get('agency_id') is None):
+            return FileResponse('static/superadmin.html')
         if user.get('role') == 'dispatcher':
             return FileResponse('static/dispatch.html')
         return FileResponse('static/dashboard_v6.html')
@@ -1496,6 +1555,10 @@ def admin():
 @app.get('/customer-admin')
 def customer_admin():
     return FileResponse('static/customer-admin.html')
+
+@app.get('/superadmin')
+def superadmin():
+    return FileResponse('static/superadmin.html')
 
 @app.get('/hud')
 def hud():
