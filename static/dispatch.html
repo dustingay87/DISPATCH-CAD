@@ -627,8 +627,24 @@ async function selectIncident(id){
             return `<div class='flex flex-wrap gap-2 items-center text-xs'>
               <span class='font-bold text-white'>${u.call_sign}${ack}</span>
               <select id='incUStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onchange='handleIncidentUnitStatusChange(${i.id},${u.id})'>${unitStatusOptions(discipline, i.agency_id, u.current_status)}</select>
+              <input id='incUDestSearch_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-28 hidden' placeholder='Type destination' oninput='filterIncidentDestinations(${u.id})'>
+              <div id='incUDestResults_${u.id}' class='w-full bg-slate-800 border border-slate-600 rounded mt-1 max-h-32 overflow-auto hidden'></div>
               <select id='incUDest_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden' onchange='incidentUnitStatusChanged(${i.id},${u.id})'>${getTransportDestinationOptions(i.agency_id, a.agency_type)}</select>
               <input id='incUDestOther_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-24 hidden' placeholder='Destination name'>
+              <select id='incUPatCount_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden'>
+                <option value=''>Patients</option>
+                <option value='0'>0</option>
+                <option value='1' selected>1</option>
+                <option value='2'>2</option>
+                <option value='3'>3</option>
+                <option value='4'>4</option>
+                <option value='5'>5</option>
+                <option value='6'>6</option>
+                <option value='7'>7</option>
+                <option value='8'>8</option>
+                <option value='9'>9</option>
+                <option value='10'>10</option>
+              </select>
               <input id='incUMile_${u.id}' type='number' step='0.1' class='${mileageClass} bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-20 hidden' placeholder='Miles'>
               <input id='incUTime_${u.id}' type='datetime-local' step='1' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-36' placeholder='Time'>
               <button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='setIncidentUnitStatus(${i.id},${u.id})'>Set</button>
@@ -843,7 +859,8 @@ async function loadTransportLegs(id){
       const dest = l.destination ? l.destination.name : 'Unknown';
       const pickup = l.pickup_mileage != null ? l.pickup_mileage.toFixed(1) : '-';
       const dropoff = l.dropoff_mileage != null ? l.dropoff_mileage.toFixed(1) : '-';
-      return `<div class='text-xs text-slate-300'><b>${unitMap[l.unit_id]||'Unit '+l.unit_id}</b> -> ${dest} <span class='text-slate-400'>${statusLabel(l.status)}</span> <span class='text-slate-500'>pickup ${pickup} drop ${dropoff}</span></div>`;
+      const patients = l.passenger_count != null ? `pts ${l.passenger_count}` : 'pts -';
+      return `<div class='text-xs text-slate-300'><b>${unitMap[l.unit_id]||'Unit '+l.unit_id}</b> -> ${dest} <span class='text-slate-400'>${statusLabel(l.status)}</span> <span class='text-slate-500'>pickup ${pickup} drop ${dropoff} ${patients}</span></div>`;
     }).join('');
     el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Transport Legs</div>${rows || '<div class="text-slate-500">No transport legs</div>'}`;
   } catch(e){ el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Transport Legs</div><div class='text-xs text-slate-500'>No transport legs</div>`; }
@@ -873,7 +890,7 @@ function getDestinationOptions(agencyId){
 }
 function getTransportDestinationOptions(agencyId, agencyType){
   let opts = getDestinationOptions(agencyId);
-  if(agencyType === 'police') opts += `<option value='other'>Other</option>`;
+  opts += `<option value='other'>Other (type name)</option>`;
   return opts;
 }
 
@@ -885,10 +902,58 @@ function incidentUnitStatusChanged(incidentId, unitId){
   const needsMile = needsMileage(status) && a.agency_type === 'ems';
   const dest = document.getElementById(`incUDest_${unitId}`);
   const other = document.getElementById(`incUDestOther_${unitId}`);
+  const search = document.getElementById(`incUDestSearch_${unitId}`);
+  const results = document.getElementById(`incUDestResults_${unitId}`);
+  const pat = document.getElementById(`incUPatCount_${unitId}`);
   const mile = document.getElementById(`incUMile_${unitId}`);
   if(dest) dest.classList.toggle('hidden', !needsDest);
   if(other) other.classList.toggle('hidden', !(needsDest && dest && dest.value==='other'));
+  if(search) { search.classList.toggle('hidden', !needsDest); if(!needsDest && search) search.value=''; }
+  if(results) { results.innerHTML=''; results.classList.add('hidden'); }
+  if(pat) pat.classList.toggle('hidden', !needsDest);
   if(mile) mile.classList.toggle('hidden', !needsMile);
+}
+
+function filterIncidentDestinations(unitId){
+  const u = state.units.find(x=>x.id===unitId);
+  const a = state.agencyMap[u?.agency_id]||{};
+  const searchEl = document.getElementById(`incUDestSearch_${unitId}`);
+  const resultsEl = document.getElementById(`incUDestResults_${unitId}`);
+  const destEl = document.getElementById(`incUDest_${unitId}`);
+  const otherEl = document.getElementById(`incUDestOther_${unitId}`);
+  const q = (searchEl ? searchEl.value.trim().toLowerCase() : '');
+  destEl.value = '';
+  if(otherEl){ otherEl.value=''; otherEl.classList.add('hidden'); }
+  if(!q){ resultsEl.innerHTML=''; resultsEl.classList.add('hidden'); return; }
+  const list = (state.destinationsList && state.destinationsList[a.id]) || [];
+  const matches = list.filter(d=>d.name.toLowerCase().includes(q));
+  if(matches.length){
+    resultsEl.innerHTML = matches.map(d=>`<div class='px-2 py-1 text-xs text-slate-200 hover:bg-slate-700 cursor-pointer' onclick='selectIncidentDestination(${unitId},${d.id},"${d.name.replace(/"/g,'&quot;')}")'>${d.name}${d.address?'<span class="text-slate-500 ml-1">• '+d.address+'</span>':''}</div>`).join('');
+    resultsEl.classList.remove('hidden');
+  } else {
+    resultsEl.innerHTML = `<div class='px-2 py-1 text-xs text-slate-500 hover:bg-slate-700 cursor-pointer' onclick='newIncidentDestination(${unitId},"${q.replace(/"/g,'&quot;')}")'>New destination: <b>${q}</b></div>`;
+    resultsEl.classList.remove('hidden');
+  }
+}
+function selectIncidentDestination(unitId, id, name){
+  const searchEl = document.getElementById(`incUDestSearch_${unitId}`);
+  const destEl = document.getElementById(`incUDest_${unitId}`);
+  const otherEl = document.getElementById(`incUDestOther_${unitId}`);
+  const resultsEl = document.getElementById(`incUDestResults_${unitId}`);
+  if(searchEl) searchEl.value = name;
+  if(destEl) destEl.value = String(id);
+  if(otherEl){ otherEl.value=''; otherEl.classList.add('hidden'); }
+  if(resultsEl){ resultsEl.innerHTML=''; resultsEl.classList.add('hidden'); }
+}
+function newIncidentDestination(unitId, name){
+  const searchEl = document.getElementById(`incUDestSearch_${unitId}`);
+  const destEl = document.getElementById(`incUDest_${unitId}`);
+  const otherEl = document.getElementById(`incUDestOther_${unitId}`);
+  const resultsEl = document.getElementById(`incUDestResults_${unitId}`);
+  if(searchEl) searchEl.value = name;
+  if(destEl) destEl.value = 'other';
+  if(otherEl){ otherEl.value = name; otherEl.classList.remove('hidden'); }
+  if(resultsEl){ resultsEl.innerHTML=''; resultsEl.classList.add('hidden'); }
 }
 
 function handleIncidentUnitStatusChange(incidentId, unitId){
@@ -908,20 +973,27 @@ async function setIncidentUnitStatus(incidentId, unitId, silent=false){
   const a = state.agencyMap[u.agency_id] || {};
   const destEl = document.getElementById(`incUDest_${unitId}`);
   const otherEl = document.getElementById(`incUDestOther_${unitId}`);
+  const searchEl = document.getElementById(`incUDestSearch_${unitId}`);
+  const patEl = document.getElementById(`incUPatCount_${unitId}`);
   const mileEl = document.getElementById(`incUMile_${unitId}`);
   const needsDest = isTransportStatus(s);
   const needsMile = needsMileage(s) && a.agency_type === 'ems';
   const body = {status_code: s};
   const at = manualStatusTime('incUTime_'+unitId);
   if(at) body.at = at;
-  if(needsDest && destEl && destEl.value){
-    if(destEl.value === 'other'){
-      const name = otherEl ? otherEl.value.trim() : '';
-      if(!name){ if(!silent) alert('Enter destination name for Other'); return; }
-      body.destination_name = name;
-    } else {
-      body.destination_id = parseInt(destEl.value);
+  if(needsDest){
+    if(destEl && destEl.value){
+      if(destEl.value === 'other'){
+        const name = otherEl ? otherEl.value.trim() : '';
+        if(!name){ if(!silent) alert('Enter destination name for Other'); return; }
+        body.destination_name = name;
+      } else {
+        body.destination_id = parseInt(destEl.value);
+      }
+    } else if(searchEl && searchEl.value.trim()){
+      body.destination_name = searchEl.value.trim();
     }
+    if(patEl && patEl.value !== '') body.passenger_count = parseInt(patEl.value);
   }
   if(needsMile){
     if(mileEl && mileEl.value) body.mileage = parseFloat(mileEl.value);

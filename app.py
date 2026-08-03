@@ -432,6 +432,7 @@ class TransportLeg(Base):
     arrived_destination_at = Column(DateTime)
     transfer_completed_at = Column(DateTime)
     cleared_at = Column(DateTime)
+    passenger_count = Column(Integer)
     pickup_mileage = Column(Float)
     dropoff_mileage = Column(Float)
     pickup_address = Column(Text)
@@ -870,6 +871,7 @@ class TransportLegOut(BaseModel):
     cleared_at: Optional[datetime] = None
     pickup_mileage: Optional[float] = None
     dropoff_mileage: Optional[float] = None
+    passenger_count: Optional[int] = None
     pickup_address: Optional[str] = None
     dropoff_address: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -2071,6 +2073,7 @@ class UnitStatus(BaseModel):
     destination_id: Optional[int] = None
     destination_name: Optional[str] = None
     mileage: Optional[float] = None
+    passenger_count: Optional[int] = None
     at: Optional[datetime] = None
 
 class PersonnelAssign(BaseModel):
@@ -4134,7 +4137,7 @@ def update_unit_status(request: Request, incident_id: int, unit_id: int, body: S
                 if not dest_id:
                     latest = db.query(IncidentDestination).filter_by(incident_id=incident.id).order_by(IncidentDestination.created_at.desc()).first()
                     dest_id = latest.destination_id if latest else None
-                open_leg = TransportLeg(incident_id=incident.id, unit_id=unit_id, destination_id=dest_id, status='en_route', en_route_at=ts)
+                open_leg = TransportLeg(incident_id=incident.id, unit_id=unit_id, destination_id=dest_id, status='en_route', en_route_at=ts, passenger_count=body.passenger_count)
                 db.add(open_leg); db.flush()
             else:
                 open_leg.status = 'en_route'
@@ -4143,6 +4146,8 @@ def update_unit_status(request: Request, incident_id: int, unit_id: int, body: S
                 new_dest = _resolve_destination_id(db, body, incident.agency_id)
                 if new_dest:
                     open_leg.destination_id = new_dest
+            if body.passenger_count is not None:
+                open_leg.passenger_count = body.passenger_count
             if open_leg.arrived_at and (body.at is not None or not open_leg.departed_scene_at):
                 open_leg.departed_scene_at = ts
         elif body.status_code == 'OS':
@@ -4636,6 +4641,8 @@ def set_unit_status(request: Request, unit_id: int, body: UnitStatus, db: Sessio
         if incident and incident.status != 'closed':
             iu = db.query(IncidentUnit).filter_by(incident_id=incident.id, unit_id=unit_id, cleared_at=None).first()
             if iu:
+                if body.passenger_count is not None:
+                    iu.passenger_count = body.passenger_count
                 if body.status_code in _CALL_ACTIVE_STATUSES:
                     iu.assignment_status = map_status(body.status_code)
                 else:
@@ -4657,7 +4664,7 @@ def set_unit_status(request: Request, unit_id: int, body: UnitStatus, db: Sessio
                     if not dest_id:
                         latest = db.query(IncidentDestination).filter_by(incident_id=incident.id).order_by(IncidentDestination.created_at.desc()).first()
                         dest_id = latest.destination_id if latest else None
-                    open_leg = TransportLeg(incident_id=incident.id, unit_id=unit_id, destination_id=dest_id, status='en_route', en_route_at=ts)
+                    open_leg = TransportLeg(incident_id=incident.id, unit_id=unit_id, destination_id=dest_id, status='en_route', en_route_at=ts, passenger_count=body.passenger_count)
                     db.add(open_leg); db.flush()
                 else:
                     open_leg.status = 'en_route'
@@ -4666,6 +4673,8 @@ def set_unit_status(request: Request, unit_id: int, body: UnitStatus, db: Sessio
                     new_dest = _resolve_destination_id(db, body, incident.agency_id)
                     if new_dest:
                         open_leg.destination_id = new_dest
+                if body.passenger_count is not None:
+                    open_leg.passenger_count = body.passenger_count
                 if open_leg.arrived_at and (body.at is not None or not open_leg.departed_scene_at):
                     open_leg.departed_scene_at = ts
             elif body.status_code == 'OS':

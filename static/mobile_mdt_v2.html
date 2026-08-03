@@ -13,12 +13,17 @@ body { -webkit-tap-highlight-color:transparent; overscroll-behavior:none; }
 .touch-btn { min-height:56px; }
 .tab { padding:0.5rem 0.75rem; border-bottom:2px solid transparent; font-size:0.85rem; font-weight:600; color:#94a3b8; }
 .tab.active { color:#fff; border-color:#2563eb; }
+.tab.flash { color:#ef4444; border-color:#ef4444; font-weight:800; animation: tabFlash 0.8s infinite; }
+@keyframes tabFlash { 0%,100% { color:#ef4444; text-shadow:0 0 0 rgba(239,68,68,0.4); } 50% { color:#f87171; text-shadow:0 0 8px rgba(239,68,68,0.8); } }
 .tab-content { display:none; }
 .tab-content.active { display:block; }
 .card { background:#1e293b; border:1px solid #334155; border-radius:0.375rem; padding:0.5rem; margin-bottom:0.5rem; }
 .map { width:100%; height:60vh; min-height:280px; background:#0f172a; border-radius:0.375rem; }
 @keyframes flash-call { 0%,100% { background:rgba(239,68,68,0.15); border-color:#ef4444; box-shadow:0 0 0 0 rgba(239,68,68,0.4); } 50% { background:rgba(239,68,68,0.45); border-color:#f87171; box-shadow:0 0 12px 2px rgba(239,68,68,0.6); } }
 .flash-alert { animation: flash-call 1s infinite; border:2px solid #ef4444; }
+.modal { position:fixed; inset:0; background:rgba(2,6,23,0.85); z-index:100; display:none; align-items:center; justify-content:center; padding:1rem; }
+.modal.show { display:flex; }
+.modal-box { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; width:100%; max-width:28rem; max-height:90vh; overflow:auto; padding:1rem; }
 </style>
 
 <link rel='stylesheet' href='/static/theme.css'>
@@ -103,10 +108,61 @@ body { -webkit-tap-highlight-color:transparent; overscroll-behavior:none; }
 
 <div id='loading' class='fixed inset-0 bg-slate-950/90 flex items-center justify-center text-2xl font-bold z-50 hidden'>Loading...</div>
 
+<div id='statusModal' class='modal'>
+  <div class='modal-box'>
+    <div class='flex justify-between items-center mb-3'>
+      <div class='text-lg font-bold text-white' id='statusModalTitle'>Set Status</div>
+      <button class='text-slate-400 hover:text-white text-lg' onclick='closeStatusModal()'>&times;</button>
+    </div>
+    <div class='space-y-3'>
+      <div id='statusMileageWrap' class='hidden'>
+        <label class='text-xs text-slate-400 uppercase'>Odometer Mileage</label>
+        <input id='statusMileage' type='number' step='0.1' class='w-full bg-slate-800 border border-slate-600 rounded p-2 text-sm text-white' placeholder='Miles'>
+      </div>
+      <div id='statusDestWrap' class='hidden'>
+        <label class='text-xs text-slate-400 uppercase'>Transport Destination</label>
+        <input id='destSearch' type='text' class='w-full bg-slate-800 border border-slate-600 rounded p-2 text-sm text-white' placeholder='Type to search destinations' oninput='filterDestinations()'>
+        <div id='destResults' class='bg-slate-800 border border-slate-600 rounded mt-1 max-h-40 overflow-auto hidden'></div>
+        <input id='destId' type='hidden'>
+        <input id='destName' type='text' class='w-full bg-slate-800 border border-slate-600 rounded p-2 text-sm text-white mt-2 hidden' placeholder='New destination name'>
+      </div>
+      <div id='statusPatCountWrap' class='hidden'>
+        <label class='text-xs text-slate-400 uppercase'>Patients Transported</label>
+        <select id='patCount' class='w-full bg-slate-800 border border-slate-600 rounded p-2 text-sm text-white'>
+          <option value=''>Select count</option>
+          <option value='0'>0</option>
+          <option value='1' selected>1</option>
+          <option value='2'>2</option>
+          <option value='3'>3</option>
+          <option value='4'>4</option>
+          <option value='5'>5</option>
+          <option value='6'>6</option>
+          <option value='7'>7</option>
+          <option value='8'>8</option>
+          <option value='9'>9</option>
+          <option value='10'>10</option>
+        </select>
+      </div>
+      <div id='statusReasonWrap' class='hidden'>
+        <label class='text-xs text-slate-400 uppercase'>Reason / Note</label>
+        <input id='statusReason' type='text' class='w-full bg-slate-800 border border-slate-600 rounded p-2 text-sm text-white' placeholder='Note'>
+      </div>
+      <div id='statusDispositionWrap' class='hidden'>
+        <label class='text-xs text-slate-400 uppercase'>Disposition</label>
+        <select id='statusDisposition' class='w-full bg-slate-800 border border-slate-600 rounded p-2 text-sm text-white'><option value=''>Select...</option></select>
+      </div>
+    </div>
+    <div class='flex gap-2 mt-4'>
+      <button class='flex-1 touch-btn bg-blue-700 hover:bg-blue-600 rounded font-semibold text-sm' onclick='confirmStatus()'>Set Status</button>
+      <button class='touch-btn bg-slate-700 hover:bg-slate-600 rounded font-semibold text-sm px-4' onclick='closeStatusModal()'>Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const url = new URL(window.location.href);
 let unitId = parseInt(url.searchParams.get('unit_id')) || null;
-let state = { me:null, personnel:null, unit:null, agencies:[], agencyMap:{}, incidents:[], activeIncidents:[], historyIncidents:[], messages:[], allUnits:[], personnelList:[], config:{statuses:[],dispositions:[],callTypes:[]}, map:null, selectedIncident:null, crossAgencies:[] };
+let state = { me:null, personnel:null, unit:null, agencies:[], agencyMap:{}, incidents:[], activeIncidents:[], historyIncidents:[], messages:[], allUnits:[], personnelList:[], config:{statuses:[],dispositions:[],callTypes:[]}, map:null, selectedIncident:null, crossAgencies:[], destinations:[] };
 const DEFAULT_CENTER = [39.9612,-82.9988];
 
 const ROLE_BADGE = { ems:{label:'Unified Response - EMS',color:'bg-emerald-700'}, fire:{label:'Unified Response - Fire',color:'bg-red-700'}, law:{label:'Unified Response - Law',color:'bg-blue-700'}, all:{label:'Unified Response',color:'bg-purple-700'} };
@@ -201,14 +257,15 @@ async function refresh(){
 async function start(){
   showLoading();
   try {
-    const [unit, allUnits, activeIncidents, historyIncidents, messages, personnelList, cfg] = await Promise.all([
+    const [unit, allUnits, activeIncidents, historyIncidents, messages, personnelList, cfg, destinations] = await Promise.all([
       api(`/units/${unitId}`),
       api('/units'),
       api(`/incidents?agency_id=${state.me.agency_id}&status=open`),
       api(`/incidents?agency_id=${state.me.agency_id}&status=closed`),
       api(`/units/${unitId}/messages`),
       api(`/personnel?agency_id=${state.me.agency_id}`),
-      api(`/config?agency_id=${state.me.agency_id}`)
+      api(`/config?agency_id=${state.me.agency_id}`),
+      api(`/destinations?agency_id=${state.me.agency_id}`)
     ]);
     state.unit = unit;
     state.allUnits = allUnits;
@@ -216,6 +273,7 @@ async function start(){
     state.historyIncidents = historyIncidents;
     state.messages = messages;
     state.personnelList = personnelList;
+    state.destinations = destinations;
     state.config.statuses = cfg.find(c=>c.category==='statuses')?.value || [];
     state.config.callTypes = cfg.find(c=>c.category==='call_types')?.value || [];
     const disp = cfg.find(c=>c.category==='dispositions')?.value;
@@ -255,6 +313,10 @@ function render(){
   if(role==='ems'){ renderCallPanel(); renderStatusButtons(); }
   else { renderCallPanel(); }
   renderActiveCalls(); renderHistory(); renderUnitsTab(); renderNotes(); renderMap();
+  const callTab = document.querySelector('#tabNav [data-tab="call"]');
+  const shouldFlash = state.packet && state.packet.requires_ack;
+  if(callTab){ callTab.classList.toggle('flash', shouldFlash); callTab.classList.toggle('text-red-500', shouldFlash); }
+  if(shouldFlash) showTab('call');
 }
 
 function renderCallPanel(){
@@ -297,17 +359,39 @@ async function ackPacket(){
   finally { hideLoading(); }
 }
 
+function statusButtonClass(code){
+  const C = {AQ:'bg-green-700 hover:bg-green-600',AK:'bg-blue-800 hover:bg-blue-700',ER:'bg-blue-700 hover:bg-blue-600',OS:'bg-red-700 hover:bg-red-600',AP:'bg-orange-700 hover:bg-orange-600',TR:'bg-purple-700 hover:bg-purple-600',TH:'bg-purple-800 hover:bg-purple-700',HEMS:'bg-indigo-700 hover:bg-indigo-600',AD:'bg-emerald-700 hover:bg-emerald-600',CBY_CALLER:'bg-red-800 hover:bg-red-700',CBY_OTHER:'bg-red-800 hover:bg-red-700',CBY_DISPATCH:'bg-red-800 hover:bg-red-700',NPF:'bg-slate-700 hover:bg-slate-600',NO_TRANSPORT:'bg-slate-700 hover:bg-slate-600',PATIENT_REFUSAL:'bg-slate-700 hover:bg-slate-600',CAN:'bg-slate-700 hover:bg-slate-600',DECEASED:'bg-black hover:bg-slate-900',LUN:'bg-slate-700 hover:bg-slate-600',OOS:'bg-slate-700 hover:bg-slate-600',MAINT:'bg-slate-700 hover:bg-slate-600'};
+  return C[code] || 'bg-slate-700 hover:bg-slate-600';
+}
+function nextStatusCodes(u){
+  if(!u) return [];
+  const code = u.current_status;
+  const onCall = !!u.current_incident_id;
+  if(onCall){
+    const flow = {
+      AK: ['ER','OS','CAN','NO_TRANSPORT','PATIENT_REFUSAL','NPF','CBY_CALLER','CBY_OTHER','CBY_DISPATCH','OOS'],
+      ER: ['OS','CAN','NO_TRANSPORT','PATIENT_REFUSAL','NPF','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'],
+      OS: ['TR','TH','HEMS','NO_TRANSPORT','PATIENT_REFUSAL','NPF','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'],
+      TR: ['AD','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'],
+      TH: ['AD','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'],
+      HEMS:['AD','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'],
+      AD: ['AQ','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH']
+    }[code];
+    if(flow) return flow;
+    return ['AQ','OOS'];
+  }
+  const off = {AQ:['OOS','LUN','MAINT'], AFR:['OOS','LUN','MAINT'], OOS:['AQ','LUN','MAINT'], LUN:['AQ','OOS'], MAINT:['AQ','OOS']};
+  return off[code] || ['AQ','OOS'];
+}
 function renderStatusButtons(){
   const el=document.getElementById('statusButtons');
-  let statuses = state.config.statuses.length ? [...state.config.statuses] : [{code:'AQ',label:'Available'},{code:'AK',label:'Dispatched'},{code:'ER',label:'En Route'},{code:'OS',label:'On Scene'},{code:'TR',label:'Transporting'},{code:'TH',label:'Transporting to HEMS'},{code:'AD',label:'Arrived at Destination'},{code:'CBY_CALLER',label:'Cancelled by Caller'},{code:'CBY_OTHER',label:'Cancelled by Other Agency'},{code:'CBY_DISPATCH',label:'Cancelled by Dispatch'},{code:'NO_TRANSPORT',label:'No Transport'},{code:'PATIENT_REFUSAL',label:'Patient Refusal'},{code:'OOS',label:'OOS'}];
-  const agency = state.agencyMap[state.me?.agency_id] || {};
-  if(agency.agency_type === 'ems' && !statuses.find(s=>s.code==='AD')){
-    statuses.push({code:'AD', label:'Arrived at Destination'});
-  }
-  const colors = {AQ:'bg-green-700 hover:bg-green-600',AK:'bg-blue-800 hover:bg-blue-700',ER:'bg-blue-700 hover:bg-blue-600',OS:'bg-red-700 hover:bg-red-600',AP:'bg-orange-700 hover:bg-orange-600',TR:'bg-purple-700 hover:bg-purple-600',TH:'bg-purple-800 hover:bg-purple-700',HEMS:'bg-indigo-700 hover:bg-indigo-600',AD:'bg-emerald-700 hover:bg-emerald-600',CBY_CALLER:'bg-red-800 hover:bg-red-700',CBY_OTHER:'bg-red-800 hover:bg-red-700',CBY_DISPATCH:'bg-red-800 hover:bg-red-700',NPF:'bg-slate-700 hover:bg-slate-600',NO_TRANSPORT:'bg-slate-700 hover:bg-slate-600',PATIENT_REFUSAL:'bg-slate-700 hover:bg-slate-600',CAN:'bg-slate-700 hover:bg-slate-600',DECEASED:'bg-black hover:bg-slate-900',LUN:'bg-slate-700 hover:bg-slate-600',OOS:'bg-slate-700 hover:bg-slate-600',MAINT:'bg-slate-700 hover:bg-slate-600',WATER:'bg-orange-700 hover:bg-orange-600',EXT:'bg-green-800 hover:bg-green-700',OVER:'bg-teal-700 hover:bg-teal-700',TC:'bg-yellow-700 hover:bg-yellow-600',CT:'bg-yellow-700 hover:bg-yellow-600',ARR:'bg-red-800 hover:bg-red-700',BK:'bg-slate-700 hover:bg-slate-600'};
-  el.innerHTML = statuses.map(s=>{
-    const col = colors[s.code] || 'bg-slate-700 hover:bg-slate-600';
-    return `<button class='touch-btn ${col} rounded font-semibold text-sm' onclick='setStatus("${s.code}")'>${s.label||s.code}</button>`;
+  const u = state.unit;
+  if(!u){ el.innerHTML=''; return; }
+  const codes = nextStatusCodes(u);
+  if(!codes.length){ el.innerHTML=''; return; }
+  el.innerHTML = codes.map(code=>{
+    const label = statusLabel(code);
+    return `<button class='touch-btn ${statusButtonClass(code)} rounded font-semibold text-sm' onclick='setStatus("${code}")'>${label}</button>`;
   }).join('');
 }
 
@@ -454,19 +538,92 @@ function renderMap(){
   }
 }
 
-window.setStatus = async function(code){
-  const u=state.unit; if(!u) return;
-  let extra={status_code:code, lat:u.lat, lng:u.lng};
-  if(['TR','CAN','ARR','CT'].includes(code)){ const pc=prompt('Count / note:'); if(pc) extra.reason=pc; }
-  if(['CAN','TR','ARR','NPF','NO_TRANSPORT','PATIENT_REFUSAL'].includes(code) && state.config.dispositions.length){ const d=prompt('Disposition?\n'+state.config.dispositions.join('\n')); if(d) extra.disposition=d; }
-  if(u.current_incident_id && ['OS','AD'].includes(code)){
-    const promptMsg = code==='OS' ? 'Mileage at scene (odometer)?' : 'Mileage at destination (odometer)?';
-    const m=prompt(promptMsg); if(m && !isNaN(parseFloat(m))) extra.mileage=parseFloat(m);
+let pendingStatusCode = null;
+function setStatus(code){ openStatusModal(code); }
+function openStatusModal(code){
+  pendingStatusCode = code;
+  const modal = document.getElementById('statusModal');
+  document.getElementById('statusModalTitle').textContent = 'Set ' + statusLabel(code);
+  document.getElementById('statusMileageWrap').classList.add('hidden');
+  document.getElementById('statusDestWrap').classList.add('hidden');
+  document.getElementById('statusPatCountWrap').classList.add('hidden');
+  document.getElementById('statusReasonWrap').classList.add('hidden');
+  document.getElementById('statusDispositionWrap').classList.add('hidden');
+  document.getElementById('statusMileage').value = '';
+  document.getElementById('destSearch').value = '';
+  document.getElementById('destId').value = '';
+  document.getElementById('destName').value = '';
+  document.getElementById('destName').classList.add('hidden');
+  document.getElementById('patCount').value = '1';
+  document.getElementById('statusReason').value = '';
+  document.getElementById('destResults').innerHTML = '';
+  document.getElementById('destResults').classList.add('hidden');
+  const sel = document.getElementById('statusDisposition');
+  sel.innerHTML = '<option value="">Select...</option>' + (state.config.dispositions||[]).map(d=>`<option value='${d}'>${d}</option>`).join('');
+  if(['OS','AD'].includes(code)) document.getElementById('statusMileageWrap').classList.remove('hidden');
+  if(['TR','TH','HEMS'].includes(code)){
+    document.getElementById('statusDestWrap').classList.remove('hidden');
+    document.getElementById('statusPatCountWrap').classList.remove('hidden');
   }
-  if((code==='TR' || code==='ED' || code==='TH' || code==='HEMS') && u.current_incident_id){ let dest=prompt('Destination name:'); if(dest){ extra.destination={name:dest, category:'transport'}; } }
+  if(['CAN','NO_TRANSPORT','PATIENT_REFUSAL','NPF','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'].includes(code)){
+    document.getElementById('statusReasonWrap').classList.remove('hidden');
+    if(state.config.dispositions && state.config.dispositions.length) document.getElementById('statusDispositionWrap').classList.remove('hidden');
+  }
+  modal.classList.add('show');
+}
+function closeStatusModal(){ document.getElementById('statusModal').classList.remove('show'); pendingStatusCode = null; }
+function filterDestinations(){
+  const q = document.getElementById('destSearch').value.trim().toLowerCase();
+  const box = document.getElementById('destResults');
+  const newName = document.getElementById('destName');
+  document.getElementById('destId').value = '';
+  if(!q){ box.innerHTML=''; box.classList.add('hidden'); newName.classList.add('hidden'); newName.value=''; return; }
+  const matches = (state.destinations||[]).filter(d=>d.name.toLowerCase().includes(q));
+  if(matches.length){
+    box.innerHTML = matches.map(d=>`<div class='p-2 text-sm text-slate-200 hover:bg-slate-700 cursor-pointer' onclick='selectDestination(${d.id},"${d.name.replace(/"/g,'&quot;')}")'>${d.name}${d.address?'<span class="text-slate-500 text-xs ml-1">• '+d.address+'</span>':''}</div>`).join('');
+    box.classList.remove('hidden');
+    newName.classList.add('hidden');
+  } else {
+    box.innerHTML = `<div class='p-2 text-xs text-slate-500'>No match. New destination name: <b>${q}</b></div>`;
+    box.classList.remove('hidden');
+    newName.classList.remove('hidden');
+    newName.value = q;
+  }
+}
+function selectDestination(id, name){
+  document.getElementById('destId').value = id;
+  document.getElementById('destName').value = name;
+  document.getElementById('destSearch').value = name;
+  document.getElementById('destResults').innerHTML = '';
+  document.getElementById('destResults').classList.add('hidden');
+  document.getElementById('destName').classList.add('hidden');
+}
+async function confirmStatus(){
+  if(!pendingStatusCode || !state.unit) return;
+  const u = state.unit;
+  const code = pendingStatusCode;
+  const body = {status_code: code, lat: u.lat, lng: u.lng};
+  const mileage = document.getElementById('statusMileage').value;
+  if(['OS','AD'].includes(code) && mileage) body.mileage = parseFloat(mileage);
+  if(['TR','TH','HEMS'].includes(code)){
+    const destId = document.getElementById('destId').value;
+    const destName = document.getElementById('destName').value.trim();
+    if(!destId && !destName){ alert('Select or enter a destination'); return; }
+    if(destId) body.destination_id = parseInt(destId);
+    else body.destination_name = destName;
+    const pat = document.getElementById('patCount').value;
+    if(pat !== '') body.passenger_count = parseInt(pat);
+  }
+  const reason = document.getElementById('statusReason').value.trim();
+  if(reason) body.reason = reason;
+  const disposition = document.getElementById('statusDisposition').value;
+  if(disposition) body.disposition = disposition;
   const path = u.current_incident_id ? `/incidents/${u.current_incident_id}/units/${u.id}/status` : `/units/${u.id}/status`;
-  try { await api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(extra)}); await start(); } catch(e){ alert(e.message); }
-};
+  closeStatusModal();
+  showLoading('Updating...');
+  try { await api(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); await start(); } catch(e){ alert(e.message); }
+  finally { hideLoading(); }
+}
 
 window.locate = function(){
   if(!navigator.geolocation){ alert('Geolocation not supported'); return; }

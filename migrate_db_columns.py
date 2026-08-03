@@ -19,7 +19,8 @@ COLUMNS = {
     'departed_scene_at': 'TIMESTAMP' if not is_sqlite else 'TEXT',
     'arrived_destination_at': 'TIMESTAMP' if not is_sqlite else 'TEXT',
     'pickup_address': 'TEXT',
-    'dropoff_address': 'TEXT'
+    'dropoff_address': 'TEXT',
+    'passenger_count': 'INTEGER'
 }
 
 
