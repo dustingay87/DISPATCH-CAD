@@ -51,7 +51,10 @@ body { -webkit-tap-highlight-color:transparent; overscroll-behavior:none; }
   </div>
   <div class='flex justify-between items-center mt-2'>
     <div id='roleBadge' class='text-xs font-bold px-2 py-0.5 rounded bg-slate-700'>--</div>
-    <div class='text-xs text-slate-500'>Shift <span id='shiftTimer'>--</span></div>
+    <div class='flex items-center gap-2'>
+      <div class='text-xs text-slate-500'>Shift <span id='shiftTimer'>--</span></div>
+      <button class='bg-red-700 hover:bg-red-600 px-2 py-0.5 rounded text-xs text-white' onclick='logout()'>Logout</button>
+    </div>
   </div>
 </header>
 
@@ -112,6 +115,7 @@ const ROLE_LOGO = { ems:'/static/logo-ems.png', fire:'/static/logo-fire.png', la
 function showLoading(msg='Loading...'){ const el=document.getElementById('loading'); if(!el) return; el.textContent=msg; el.classList.remove('hidden'); }
 function hideLoading(){ const el=document.getElementById('loading'); if(!el) return; el.classList.add('hidden'); }
 function api(path,opts={}){ return fetch(path,{...opts,credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+async function logout(){ try { await api('/logout', {method:'POST'}); } catch(e){} window.location.href='/login'; }
 function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
 function elapsed(iso){ return iso ? (Date.now()-new Date(iso).getTime())/1000 : 0; }
 function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }

@@ -27,6 +27,7 @@
       <div class='space-x-2'>
         <a href='/console' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Console</a>
         <a href='/admin' class='btn bg-slate-700 hover:bg-slate-600 text-white'>Admin</a>
+        <button class='btn bg-red-700 hover:bg-red-600 text-white' onclick='logout()'>Logout</button>
       </div>
     </div>
 
@@ -256,6 +257,7 @@ function api(path, opts={}){
     return r.json();
   });
 }
+async function logout(){ try { await api('/logout', {method:'POST'}); } catch(e){} window.location.href='/login'; }
 
 let state = { agencies:[], agencyMap:{}, configs:{}, DISCIPLINE:'fire', user:null, callEntryStarted: new Date().toISOString() };
 const DEFAULT_CALL_TYPES = {
