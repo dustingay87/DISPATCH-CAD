@@ -709,6 +709,7 @@ class LoginRequest(BaseModel):
     password: str
     customer_id: Optional[int] = None
     customer_slug: Optional[str] = None
+    cf_turnstile_response: Optional[str] = None
 
 class SwitchRequest(BaseModel):
     customer_id: Optional[int] = None
@@ -1347,14 +1348,41 @@ async def auth_middleware(request: Request, call_next):
         return _security_headers(JSONResponse(status_code=403, content={'detail': 'Admin required'}))
     return _security_headers(await call_next(request))
 
+def _verify_turnstile(token: Optional[str], remoteip: str) -> bool:
+    secret = os.environ.get('TURNSTILE_SECRET')
+    if not secret:
+        return True
+    if not token:
+        return False
+    try:
+        payload = urllib.parse.urlencode({
+            'secret': secret,
+            'response': token,
+            'remoteip': remoteip,
+        }).encode()
+        req = urllib.request.Request(
+            'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+            data=payload,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read().decode())
+        return result.get('success') is True
+    except Exception:
+        return False
+
 @app.post('/login')
 def login(body: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
-    ip = request.client.host or 'unknown'
+    ip = request.headers.get('x-forwarded-for') or request.client.host or 'unknown'
     now = time.time()
     attempts = login_attempts.get(ip, [])
     attempts = [t for t in attempts if now - t < 900]
     if len(attempts) >= 5:
         raise HTTPException(status_code=429, detail='Too many login attempts. Try again later.')
+
+    if not _verify_turnstile(body.cf_turnstile_response, ip):
+        raise HTTPException(status_code=403, detail='Turnstile verification failed')
 
     requested_customer_id = body.customer_id
     if not requested_customer_id and body.customer_slug:

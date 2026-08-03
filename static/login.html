@@ -5,6 +5,7 @@
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
 <title>Unified Response - Login</title>
 <link rel='icon' href='/static/favicon.png' type='image/png'>
+<script src='https://challenges.cloudflare.com/turnstile/v0/api.js' async defer></script>
 <script src='https://cdn.tailwindcss.com'></script>
 <link rel='stylesheet' href='/static/branding.css'>
 <style>
@@ -32,6 +33,7 @@
         <label class='block text-sm text-slate-300 mb-1'>Customer ID (optional)</label>
         <input id='customer' type='text' placeholder='your-customer' class='w-full bg-slate-900 border border-slate-600 rounded p-3 text-white'>
       </div>
+      <div class='cf-turnstile mx-auto flex justify-center' data-sitekey='0x4AAAAAAEFTlKBnXvHfp4JC' data-action='turnstile-spin-v2'></div>
       <button type='submit' class='w-full d2d-btn py-3'>Log In</button>
     </form>
     <div id='error' class='mt-4 text-red-400 text-sm text-center hidden'></div>
@@ -47,7 +49,8 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   const email = document.getElementById('email').value;
   const password = document.getElementById('password').value;
   const customer_slug = customerInput.value.trim() || undefined;
-  const payload = customer_slug ? {email, password, customer_slug} : {email, password};
+  const tsToken = document.querySelector('[name="cf-turnstile-response"]')?.value;
+  const payload = customer_slug ? {email, password, customer_slug, cf_turnstile_response: tsToken} : {email, password, cf_turnstile_response: tsToken};
   try {
     const res = await fetch('/login', {
       method: 'POST',
@@ -58,7 +61,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
     if (!res.ok) { throw new Error('Invalid credentials'); }
     const data = await res.json();
     window.location.href = (data.role === 'mdt') ? '/mdt' : '/';
-  } catch (err) { document.getElementById('error').textContent = err.message; document.getElementById('error').classList.remove('hidden'); }
+  } catch (err) { window.turnstile?.reset(); document.getElementById('error').textContent = err.message; document.getElementById('error').classList.remove('hidden'); }
 });
 </script>
 <script src="/static/theme.js"></script>
