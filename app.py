@@ -1255,7 +1255,7 @@ def require_admin(request: Request):
 
 CALL_TAKER_ROLES = {'call_taker','dispatcher','admin'}
 DISPATCHER_ROLES = {'dispatcher','admin'}
-FIELD_ROLES = {'responder','dispatcher','admin'}
+FIELD_ROLES = {'mdt','responder','dispatcher','admin'}
 
 def check_role(request: Request, allowed: set):
     user = get_current_user(request)
@@ -1323,6 +1323,7 @@ async def auth_middleware(request: Request, call_next):
         '/scheduled': DISPATCHER_ROLES,
         '/scheduled_events': DISPATCHER_ROLES,
         '/mdt': FIELD_ROLES,
+        '/mobile-mdt': FIELD_ROLES,
         '/avl': DISPATCHER_ROLES,
         '/hud': DISPATCHER_ROLES,
         '/reports': DISPATCHER_ROLES,

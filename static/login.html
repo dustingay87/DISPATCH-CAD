@@ -56,7 +56,8 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
       body: JSON.stringify(payload)
     });
     if (!res.ok) { throw new Error('Invalid credentials'); }
-    window.location.href = '/';
+    const data = await res.json();
+    window.location.href = (data.role === 'mdt') ? '/mdt' : '/';
   } catch (err) { document.getElementById('error').textContent = err.message; document.getElementById('error').classList.remove('hidden'); }
 });
 </script>
