@@ -21,6 +21,7 @@ import urllib.parse
 import socket
 import shutil
 import threading
+import subprocess
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -65,6 +66,26 @@ if hasattr(Request, '_get_form') and getattr(Request._get_form, '__kwdefaults__'
     Request._get_form.__kwdefaults__['max_part_size'] = MAX_UPLOAD_SIZE
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _load_version():
+    """Return (version, date, message). Try git, then version.json, then env fallback."""
+    try:
+        out = subprocess.check_output(['git','log','-1','--pretty=format:%h|%ci|%s'], cwd=BASE_DIR, text=True, stderr=subprocess.DEVNULL).strip()
+        if out:
+            parts = out.split('|', 2)
+            return {'version': parts[0], 'date': parts[1] if len(parts) > 1 else '', 'message': parts[2] if len(parts) > 2 else ''}
+    except Exception:
+        pass
+    try:
+        with open(os.path.join(BASE_DIR, 'version.json')) as f:
+            data = json.load(f)
+            return {'version': data.get('version','unknown'), 'date': data.get('date',''), 'message': data.get('message','')}
+    except Exception:
+        pass
+    return {'version': os.getenv('VERSION','unknown'), 'date': os.getenv('VERSION_DATE',''), 'message': ''}
+
+APP_VERSION = _load_version()
+
 DATABASE_URL = os.getenv('SUPABASE_DB_URL') or os.getenv('DATABASE_URL')
 if not DATABASE_URL:
     DATABASE_URL = f'sqlite:///{os.path.join(BASE_DIR, "volcad.db").replace(os.sep, "/")}'
@@ -2540,6 +2561,10 @@ def geocode_missing_agencies():
 @app.get('/health')
 def health():
     return {'status': 'ok'}
+
+@app.get('/version')
+def version():
+    return APP_VERSION
 
 @app.post('/agencies', response_model=AgencyOut)
 def create_agency(body: AgencyCreate, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):

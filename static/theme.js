@@ -64,8 +64,26 @@
   }
 
   if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', insertToggle);
+    document.addEventListener('DOMContentLoaded', ()=>{ insertToggle(); showVersion(); });
   } else {
     insertToggle();
+    showVersion();
+  }
+
+  function showVersion(){
+    fetch('/version').then(r=>r.json()).then(v=>{
+      const el = document.createElement('div');
+      el.textContent = 'v' + (v.version||'dev') + ' • ' + (v.date ? new Date(v.date).toLocaleString() : '');
+      el.style.position = 'fixed';
+      el.style.bottom = '0.25rem';
+      el.style.right = '0.25rem';
+      el.style.fontSize = '10px';
+      el.style.color = '#94a3b8';
+      el.style.background = 'rgba(15,23,42,0.8)';
+      el.style.padding = '2px 6px';
+      el.style.borderRadius = '4px';
+      el.style.zIndex = '2147483647';
+      document.body.appendChild(el);
+    }).catch(()=>{});
   }
 })();

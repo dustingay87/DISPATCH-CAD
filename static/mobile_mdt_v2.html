@@ -152,7 +152,10 @@ function showUnitPicker(){
   document.getElementById('pickerSub').textContent = 'Choose the unit you are assigned to for this session.';
   const picker = document.getElementById('pickerUnit');
   const units = state.allUnits.length ? state.allUnits : [];
-  picker.innerHTML = '<option value="">-- choose unit --</option>' + units.filter(u=>u.agency_id===me.agency_id).map(u=>`<option value='${u.id}' ${state.personnel?.current_unit_id==u.id?'selected':''}>${u.call_sign} (${u.name})</option>`).join('');
+  const agencyId = me.agency_id;
+  const filtered = agencyId ? units.filter(u=>u.agency_id===agencyId) : units;
+  const opts = filtered.length ? filtered : units;
+  picker.innerHTML = '<option value="">-- choose unit --</option>' + opts.map(u=>`<option value='${u.id}' ${state.personnel?.current_unit_id==u.id?'selected':''}>${u.call_sign} (${u.name})</option>`).join('');
   document.getElementById('unitPicker').classList.remove('hidden');
 }
 
