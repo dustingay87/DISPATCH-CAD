@@ -47,6 +47,12 @@ def tz_now():
     """Return the current wall-clock time in the default timezone as a naive datetime."""
     return datetime.now(DEFAULT_TIMEZONE).replace(tzinfo=None)
 
+def _naive_local(dt):
+    """Ensure a datetime is a naive local wall-clock datetime."""
+    if dt is None or dt.tzinfo is None:
+        return dt
+    return dt.astimezone(DEFAULT_TIMEZONE).replace(tzinfo=None)
+
 taip_last_packet: Dict[str, float] = {}
 
 login_attempts = {}
@@ -1800,14 +1806,14 @@ class UnitOut(BaseModel):
     def stale(self) -> bool:
         if not self.last_seen_at:
             return True
-        return (tz_now() - self.last_seen_at).total_seconds() > TAIP_STALE_SECONDS
+        return (tz_now() - _naive_local(self.last_seen_at)).total_seconds() > TAIP_STALE_SECONDS
 
     @computed_field
     @property
     def offline(self) -> bool:
         if not self.last_seen_at:
             return True
-        return (tz_now() - self.last_seen_at).total_seconds() > TAIP_OFFLINE_SECONDS
+        return (tz_now() - _naive_local(self.last_seen_at)).total_seconds() > TAIP_OFFLINE_SECONDS
 
     class Config:
         from_attributes = True
@@ -2240,7 +2246,7 @@ def _taip_jump_ok(unit, lat, lng, reported_at):
 def _taip_stale_state(last_seen_at: Optional[datetime]):
     if not last_seen_at:
         return True, True
-    age = (tz_now() - last_seen_at).total_seconds()
+    age = (tz_now() - _naive_local(last_seen_at)).total_seconds()
     return age > TAIP_STALE_SECONDS, age > TAIP_OFFLINE_SECONDS
 
 # Active unit status codes keep a unit assigned to an incident.
