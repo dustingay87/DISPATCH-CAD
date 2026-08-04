@@ -37,7 +37,12 @@
       <input type='hidden' id='soId'>
       <div><label class='text-xs text-slate-400'>Agency</label><select id='agency' class='form-input' onchange='agencyChanged()'></select></div>
       <div><label class='text-xs text-slate-400'>Patient Name</label><input id='patientName' class='form-input'></div>
-      <div class='md:col-span-2'><label class='text-xs text-slate-400'>Pickup Address</label><input id='pickupAddress' class='form-input'></div>
+      <div class='md:col-span-2'><label class='text-xs text-slate-400'>Pickup Street Address</label><input id='pStreet' class='form-input' placeholder='Street address'></div>
+      <div class='grid grid-cols-3 gap-2 md:col-span-2'>
+        <input id='pCity' class='form-input' placeholder='City'>
+        <input id='pState' class='form-input' placeholder='ST' maxlength='2'>
+        <input id='pZip' class='form-input' placeholder='Zip'>
+      </div>
       <div class='grid grid-cols-2 gap-2'>
         <input id='pickupLat' class='form-input' placeholder='lat'>
         <input id='pickupLng' class='form-input' placeholder='lng'>
@@ -47,7 +52,12 @@
         <select id='destination' class='form-input' onchange='destChanged()'><option value=''>Select destination</option></select>
       </div>
       <div><input id='destName' class='form-input' placeholder='Destination name'></div>
-      <div><input id='destAddress' class='form-input' placeholder='Destination address'></div>
+      <div class='md:col-span-2'><input id='dStreet' class='form-input' placeholder='Destination street address'></div>
+      <div class='grid grid-cols-3 gap-2 md:col-span-2'>
+        <input id='dCity' class='form-input' placeholder='City'>
+        <input id='dState' class='form-input' placeholder='ST' maxlength='2'>
+        <input id='dZip' class='form-input' placeholder='Zip'>
+      </div>
       <div class='grid grid-cols-2 gap-2'>
         <input id='destLat' class='form-input' placeholder='lat'>
         <input id='destLng' class='form-input' placeholder='lng'>
@@ -108,12 +118,29 @@ function agencyChanged(){
   destSel.innerHTML = `<option value=''>Select destination</option>` + agencyDests.map(d=>`<option value='${d.id}'>${d.name} (${d.category||''})</option>`).join('');
 }
 
+function buildAddress(prefix){
+  const parts = [document.getElementById(prefix+'Street').value, document.getElementById(prefix+'City').value, document.getElementById(prefix+'State').value, document.getElementById(prefix+'Zip').value].map(s=>s.trim()).filter(Boolean);
+  return parts.join(', ');
+}
+function parseAddress(addr){
+  if(!addr) return {street:'', city:'', state:'', zip:''};
+  const parts = addr.split(',').map(s=>s.trim());
+  return {street:parts[0]||'', city:parts[1]||'', state:parts[2]||'', zip:parts[3]||''};
+}
+function setAddress(prefix, addr){
+  const p = parseAddress(addr);
+  document.getElementById(prefix+'Street').value = p.street;
+  document.getElementById(prefix+'City').value = p.city;
+  document.getElementById(prefix+'State').value = p.state;
+  document.getElementById(prefix+'Zip').value = p.zip;
+}
+
 function destChanged(){
   const destId = parseInt(document.getElementById('destination').value);
   const d = state.destinations.find(x=>x.id===destId);
   if(d){
     document.getElementById('destName').value = d.name||'';
-    document.getElementById('destAddress').value = d.address||'';
+    setAddress('d', d.address||'');
     document.getElementById('destLat').value = d.lat||'';
     document.getElementById('destLng').value = d.lng||'';
   }
@@ -165,12 +192,12 @@ function editOrder(id){
   document.getElementById('soId').value = o.id;
   document.getElementById('agency').value = o.agency_id; agencyChanged();
   document.getElementById('patientName').value = o.patient_name||'';
-  document.getElementById('pickupAddress').value = o.pickup_address||'';
+  setAddress('p', o.pickup_address||'');
   document.getElementById('pickupLat').value = o.pickup_lat||'';
   document.getElementById('pickupLng').value = o.pickup_lng||'';
   document.getElementById('destination').value = o.destination_id||''; destChanged();
   document.getElementById('destName').value = o.destination_name||'';
-  document.getElementById('destAddress').value = o.destination_address||'';
+  setAddress('d', o.destination_address||'');
   document.getElementById('destLat').value = o.destination_lat||'';
   document.getElementById('destLng').value = o.destination_lng||'';
   document.getElementById('callType').value = o.call_type||'Routine Transport';
@@ -194,12 +221,12 @@ function getPayload(){
   return {
     agency_id: parseInt(document.getElementById('agency').value),
     patient_name: document.getElementById('patientName').value,
-    pickup_address: document.getElementById('pickupAddress').value,
+    pickup_address: buildAddress('p'),
     pickup_lat: parseFloat(document.getElementById('pickupLat').value) || null,
     pickup_lng: parseFloat(document.getElementById('pickupLng').value) || null,
     destination_id: parseInt(document.getElementById('destination').value) || null,
     destination_name: document.getElementById('destName').value,
-    destination_address: document.getElementById('destAddress').value,
+    destination_address: buildAddress('d'),
     destination_lat: parseFloat(document.getElementById('destLat').value) || null,
     destination_lng: parseFloat(document.getElementById('destLng').value) || null,
     call_type: document.getElementById('callType').value,

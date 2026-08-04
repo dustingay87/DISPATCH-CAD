@@ -162,7 +162,11 @@ window.setStatus = async function(code){
 
 async function promptDestination(incidentId){
   const name=prompt('Destination name (hospital/jail/facility):'); if(!name) return;
-  const address=prompt('Destination address:') || '';
+  const street=prompt('Street address:') || '';
+  const city=prompt('City:') || '';
+  const state=prompt('State:') || '';
+  const zip=prompt('Zip:') || '';
+  const address=[street, city, state, zip].filter(Boolean).join(', ');
   const result = await api(`/incidents/${incidentId}/destination`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({destination:{name, address, category:'transport'}, notes:{}})});
   state.destination = result; return result;
 }

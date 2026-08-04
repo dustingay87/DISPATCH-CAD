@@ -65,16 +65,19 @@
           <option value='meeting'>Meeting</option>
           <option value='other'>Other</option>
         </select>
-        <label class='text-xs text-slate-400'>Location</label>
-        <input id='locationText' class='form-input' placeholder='Address / place'>
+        <label class='text-xs text-slate-400'>Street Address</label>
+        <input id='street' class='form-input' placeholder='Street address'>
+        <div class='grid grid-cols-3 gap-2'>
+          <input id='city' class='form-input' placeholder='City'>
+          <input id='state' class='form-input' placeholder='ST' maxlength='2'>
+          <input id='zip' class='form-input' placeholder='Zip'>
+        </div>
         <label class='text-xs text-slate-400'>Lat / Lng</label>
         <div class='grid grid-cols-2 gap-2'><input id='lat' class='form-input' placeholder='lat'><input id='lng' class='form-input' placeholder='lng'></div>
         <label class='text-xs text-slate-400'>Scheduled Date/Time</label>
         <input id='scheduledAt' type='datetime-local' class='form-input'>
         <label class='text-xs text-slate-400'>Duration (minutes)</label>
         <input id='duration' type='number' class='form-input' value='60'>
-        <label class='text-xs text-slate-400'>Assigned Unit</label>
-        <select id='unit' class='form-input'><option value=''>None</option></select>
         <label class='text-xs text-slate-400'>Notes</label>
         <textarea id='notes' class='form-input' rows='2'></textarea>
         <label class='text-xs text-slate-400'>Status</label>
@@ -98,11 +101,9 @@ function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}
 let state={agencies:[],units:[],events:[]};
 
 async function init(){
-  [state.agencies, state.units] = await Promise.all([api('/agencies'), api('/units')]);
+  state.agencies = await api('/agencies');
   const agencySel = document.getElementById('agency');
   agencySel.innerHTML = state.agencies.map(a=>`<option value='${a.id}'>${a.name}</option>`).join('');
-  const unitSel = document.getElementById('unit');
-  unitSel.innerHTML = `<option value=''>None</option>` + state.units.filter(u=>u.current_status==='AQ'||u.current_status==='AFR').map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
   await load();
 }
 
@@ -126,7 +127,6 @@ function statusClass(s){ return `tag status-${s||'scheduled'}`; }
 function renderList(){
   const el = document.getElementById('list');
   if(!state.events.length){ el.innerHTML = '<div class="text-slate-400">No scheduled events.</div>'; return; }
-  const uMap = {}; state.units.forEach(u=>uMap[u.id]=u.call_sign);
   const aMap = {}; state.agencies.forEach(a=>aMap[a.id]=a.name);
   el.innerHTML = state.events.map(e=>`
     <div class='bg-slate-800 rounded p-3 border border-slate-700'>
@@ -135,7 +135,7 @@ function renderList(){
           <div class='font-bold text-white'>${e.title} <span class='${statusClass(e.status)}'>${e.status||'scheduled'}</span></div>
           <div class='text-slate-400'>${typeLabel(e.event_type)} • ${aMap[e.agency_id]||'-'}</div>
           <div class='text-slate-300 mt-1'><b>Where:</b> ${e.location_text||'-'}</div>
-          <div class='text-slate-500 text-xs mt-1'>Scheduled ${fmtDateTime(e.scheduled_at)} • ${e.duration_minutes||60} min • Unit: ${uMap[e.unit_id]||'None'}</div>
+          <div class='text-slate-500 text-xs mt-1'>Scheduled ${fmtDateTime(e.scheduled_at)} • ${e.duration_minutes||60} min</div>
           ${e.notes?`<div class='text-slate-500 text-xs mt-1'>${e.notes}</div>`:''}
         </div>
         <div class='flex gap-1'>
@@ -147,18 +147,27 @@ function renderList(){
   `).join('');
 }
 
+function buildLocationText(){
+  const parts = [document.getElementById('street').value, document.getElementById('city').value, document.getElementById('state').value, document.getElementById('zip').value].map(s=>s.trim()).filter(Boolean);
+  return parts.join(', ');
+}
+function parseLocation(loc){
+  if(!loc) return {street:'', city:'', state:'', zip:''};
+  const parts = loc.split(',').map(s=>s.trim());
+  return {street:parts[0]||'', city:parts[1]||'', state:parts[2]||'', zip:parts[3]||''};
+}
+
 async function save(){
   const id = document.getElementById('evtId').value;
   const payload = {
     agency_id: parseInt(document.getElementById('agency').value),
     title: document.getElementById('title').value,
     event_type: document.getElementById('eventType').value,
-    location_text: document.getElementById('locationText').value,
+    location_text: buildLocationText(),
     lat: parseFloat(document.getElementById('lat').value) || null,
     lng: parseFloat(document.getElementById('lng').value) || null,
     scheduled_at: document.getElementById('scheduledAt').value ? new Date(document.getElementById('scheduledAt').value).toISOString() : null,
     duration_minutes: parseInt(document.getElementById('duration').value) || 60,
-    unit_id: document.getElementById('unit').value ? parseInt(document.getElementById('unit').value) : null,
     notes: document.getElementById('notes').value,
     status: document.getElementById('status').value
   };
@@ -176,12 +185,15 @@ function editEvent(id){
   document.getElementById('agency').value = e.agency_id;
   document.getElementById('title').value = e.title||'';
   document.getElementById('eventType').value = e.event_type||'other';
-  document.getElementById('locationText').value = e.location_text||'';
+  const loc = parseLocation(e.location_text);
+  document.getElementById('street').value = loc.street;
+  document.getElementById('city').value = loc.city;
+  document.getElementById('state').value = loc.state;
+  document.getElementById('zip').value = loc.zip;
   document.getElementById('lat').value = e.lat||'';
   document.getElementById('lng').value = e.lng||'';
   document.getElementById('scheduledAt').value = e.scheduled_at ? new Date(e.scheduled_at).toISOString().slice(0,16) : '';
   document.getElementById('duration').value = e.duration_minutes||60;
-  document.getElementById('unit').value = e.unit_id||'';
   document.getElementById('notes').value = e.notes||'';
   document.getElementById('status').value = e.status||'scheduled';
 }
@@ -195,12 +207,14 @@ function clearForm(){
   document.getElementById('evtId').value='';
   document.getElementById('title').value='';
   document.getElementById('eventType').value='other';
-  document.getElementById('locationText').value='';
+  document.getElementById('street').value='';
+  document.getElementById('city').value='';
+  document.getElementById('state').value='';
+  document.getElementById('zip').value='';
   document.getElementById('lat').value='';
   document.getElementById('lng').value='';
   document.getElementById('scheduledAt').value='';
   document.getElementById('duration').value='60';
-  document.getElementById('unit').value='';
   document.getElementById('notes').value='';
   document.getElementById('status').value='scheduled';
 }

@@ -4,7 +4,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, or_, UniqueConstraint, inspect, text, event
 from sqlalchemy.orm import declarative_base, relationship, backref, Session, sessionmaker
 from pydantic import BaseModel, computed_field, validator
-from datetime import datetime, date, time, timedelta, timezone
+from datetime import datetime, date, time as dt_time, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import List, Optional, Any, Dict
 import os
@@ -169,6 +169,7 @@ class Personnel(Base):
     provider_level = Column(String(50))
     photo_url = Column(String(255))
     duty_status = Column(String(50), default='off_duty')
+    is_active = Column(Boolean, default=True)
     current_unit_id = Column(Integer, ForeignKey('units.id'), nullable=True)
     created_at = Column(DateTime, default=tz_now)
     agency = relationship('Agency', back_populates='personnel')
@@ -680,7 +681,6 @@ def ensure_db_columns():
             conn.commit()
         except Exception as e:
             print(f'DB backfill warning for last_status_at: {e}')
-        _ensure_default_customer(conn)
 
 def init_sqlite_db():
     Base.metadata.create_all(bind=engine)
@@ -1129,6 +1129,9 @@ class ScheduledEventOut(BaseModel):
     class Config:
         from_attributes = True
 
+class ScheduledEventDispatch(BaseModel):
+    unit_id: int
+
 class PostZoneCreate(BaseModel):
     agency_id: int
     name: str
@@ -1301,13 +1304,11 @@ def seed_default_admin():
     db = SessionLocal()
     try:
         if db.query(User).count() == 0:
-            customer = db.query(Customer).filter(Customer.slug == 'default').first()
-            if not customer:
-                customer = Customer(name='Default Customer', slug='default')
-                db.add(customer); db.flush()
             email = os.getenv('ADMIN_EMAIL', 'dustin@dispatchtodiscipleship.net')
             password = os.getenv('ADMIN_PASSWORD', 'Warrior/202601!')
-            db.add(User(email=email, first_name='Admin', last_name='User', customer_id=customer.id, hashed_password=hash_password(password), role='admin', is_active=True))
+            first_name = os.getenv('ADMIN_FIRST_NAME', 'Dustin')
+            last_name = os.getenv('ADMIN_LAST_NAME', '')
+            db.add(User(email=email, first_name=first_name, last_name=last_name, customer_id=None, agency_id=None, hashed_password=hash_password(password), role='superadmin', is_active=True))
             db.commit()
     finally:
         db.close()
@@ -1656,6 +1657,14 @@ def customer_admin():
 def superadmin():
     return FileResponse('static/superadmin.html')
 
+@app.get('/agency-setup')
+def agency_setup():
+    return FileResponse('static/agency_setup.html')
+
+@app.get('/agency-build')
+def agency_build():
+    return FileResponse('static/agency_build.html')
+
 @app.get('/hud')
 def hud():
     return FileResponse('static/hud.html')
@@ -1881,6 +1890,7 @@ class UnitOut(BaseModel):
     heading: Optional[float] = None
     speed: Optional[float] = None
     last_seen_at: Optional[datetime] = None
+    is_active: Optional[bool] = True
     camera_url: Optional[str] = None
     last_assigned_at: Optional[datetime] = None
     in_service_at: Optional[datetime] = None
@@ -1937,6 +1947,7 @@ class PersonnelCreate(BaseModel):
     photo_url: Optional[str] = None
     current_unit_id: Optional[int] = None
     duty_status: str = 'off_duty'
+    is_active: Optional[bool] = True
 
 class PersonnelOut(PersonnelCreate):
     id: int
@@ -1946,6 +1957,7 @@ class PersonnelOut(PersonnelCreate):
 
 class PersonnelUpdate(BaseModel):
     customer_id: Optional[int] = None
+    agency_id: Optional[int] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     radio_id: Optional[str] = None
@@ -1956,6 +1968,7 @@ class PersonnelUpdate(BaseModel):
     photo_url: Optional[str] = None
     current_unit_id: Optional[int] = None
     duty_status: Optional[str] = None
+    is_active: Optional[bool] = None
 
 class IncidentCreate(BaseModel):
     agency_id: int
@@ -2341,20 +2354,20 @@ def _taip_stale_state(last_seen_at: Optional[datetime]):
     return age > TAIP_STALE_SECONDS, age > TAIP_OFFLINE_SECONDS
 
 # Active unit status codes keep a unit assigned to an incident.
-_CALL_ACTIVE_STATUSES = {'AK','ER','OS','AP','TR','TRP','ED','HEMS','TH','AD','DECEASED','WATER','EXT','OVER','TC','ARR','CT','BK','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'}
+_CALL_ACTIVE_STATUSES = {'AK','ER','OS','AP','TR','TRP','ED','TH','AD','DECEASED','WATER','EXT','OVER','TC','ARR','CT','BK','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'}
 _ASSIGNABLE_STATUSES = {'AQ','AFR','POSTING','STAGED','AT_STATION','AVAILABLE_ON_RADIO','IN_SERVICE','ON_DUTY'}
 _OUT_OF_SERVICE_STATUSES = {'OOS','LUN','MAINT','OFF_DUTY','MEAL','off_duty'}
 
 # Map a unit status code to a high-level assignment phase.
 def map_status(code: str) -> str:
-    on_scene = {'OS','AP','AD','WATER','EXT','OVER','TC','ARR','CT','BK','HEMS','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'}
+    on_scene = {'OS','AP','AD','WATER','EXT','OVER','TC','ARR','CT','BK','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'}
     if code in ('AK','dispatched'):
         return 'assigned'
     if code in ('ER','en_route'):
         return 'en_route'
     if code in on_scene:
         return 'on_scene'
-    if code in ('TR','TRP','HEMS','TH','ED','transport'):
+    if code in ('TR','TRP','TH','ED','transport'):
         return 'transport'
     return 'clear'
 
@@ -2378,7 +2391,7 @@ def refresh_incident_status(db: Session, incident):
 def _incident_milestone_events(db, incident_id):
     rows = db.query(StatusEvent).filter(StatusEvent.incident_id == incident_id).order_by(StatusEvent.created_at).all()
     first = {}
-    on_scene = {'OS','on_scene','AP','WATER','EXT','OVER','HEMS','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'}
+    on_scene = {'OS','on_scene','AP','WATER','EXT','OVER','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'}
     for ev in rows:
         code = ev.status_code
         if code in ('AK','dispatched'):
@@ -2421,7 +2434,19 @@ def _incident_timers(db, incident):
         if status == 'alert':
             alerts.append(f"{label} target missed ({int(elapsed)}s / {target}s)")
         phases.append({'phase':key,'label':label,'target_seconds':target,'actual_seconds':int(elapsed) if elapsed else 0,'actual_at':actual.isoformat() if actual else None,'status':status})
-    return {'start_at':start.isoformat() if start else None,'phases':phases,'alerts':alerts,'has_alert':len(alerts)>0}
+    last_status_event = db.query(StatusEvent).filter(StatusEvent.incident_id == incident.id).order_by(StatusEvent.created_at.desc()).first()
+    last_status = None
+    if last_status_event:
+        last_status = {
+            'status_code': last_status_event.status_code,
+            'status_label': _status_label(last_status_event.status_code),
+            'at': last_status_event.created_at.isoformat() if last_status_event.created_at else None,
+            'elapsed_seconds': int((now - last_status_event.created_at).total_seconds()) if last_status_event.created_at else 0,
+            'reason': last_status_event.reason
+        }
+    else:
+        last_status = {'status_code': None, 'status_label': None, 'at': None, 'elapsed_seconds': 0, 'reason': None}
+    return {'start_at':start.isoformat() if start else None,'phases':phases,'alerts':alerts,'has_alert':len(alerts)>0,'last_status':last_status}
 
 def _active_incident_alerts(db, agency_id=None):
     q = db.query(Incident).filter(Incident.status != 'closed')
@@ -2614,11 +2639,15 @@ def _validate_incident_location(db, incident, force=False):
 def fill_agency_lat_lng(agency):
     if agency.lat is not None and agency.lng is not None:
         return
-    parts = [agency.address, agency.city, agency.state, agency.zip_code, agency.name]
-    query = _build_geo_query(parts)
-    if not query:
-        return
-    lat, lng = geocode_address(query)
+    # Geocode using the address components first; the agency name often confuses Nominatim.
+    query = _build_geo_query([agency.address, agency.city, agency.state, agency.zip_code])
+    lat, lng = (None, None)
+    if query:
+        lat, lng = geocode_address(query)
+    if lat is None and agency.name:
+        query = _build_geo_query([agency.name, agency.city, agency.state])
+        if query:
+            lat, lng = geocode_address(query)
     if lat is not None and lng is not None:
         agency.lat = lat
         agency.lng = lng
@@ -2655,6 +2684,13 @@ def create_customer(body: CustomerCreate, current_user: dict = Depends(require_a
     customer = Customer(**body.model_dump())
     db.add(customer); db.commit(); db.refresh(customer)
     return customer
+
+@app.get('/customers/{customer_id}', response_model=CustomerOut)
+def get_customer(customer_id: int, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    c = db.query(Customer).get(customer_id)
+    if not c:
+        raise HTTPException(status_code=404, detail='Customer not found')
+    return c
 
 @app.put('/customers/{customer_id}', response_model=CustomerOut)
 def update_customer(customer_id: int, body: CustomerUpdate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
@@ -2703,6 +2739,13 @@ def list_agencies(request: Request, skip: int = 0, limit: int = 100, db: Session
     if customer_id:
         q = q.filter(Agency.customer_id == customer_id)
     return q.offset(skip).limit(limit).all()
+
+@app.get('/agencies/{agency_id}', response_model=AgencyOut)
+def get_agency(agency_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    a = db.query(Agency).get(agency_id)
+    if not a:
+        raise HTTPException(status_code=404, detail='Agency not found')
+    return a
 
 @app.put('/agencies/{agency_id}', response_model=AgencyOut)
 def update_agency(agency_id: int, body: AgencyUpdate, current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
@@ -2824,8 +2867,10 @@ def list_events(entity_type: Optional[str] = Query(None), entity_id: Optional[in
     return q.order_by(Event.timestamp.desc()).limit(limit).all()
 
 @app.get('/destinations', response_model=List[DestinationOut])
-def list_destinations(agency_id: Optional[int] = Query(None), category: Optional[str] = Query(None), db: Session = Depends(get_db)):
-    q = db.query(Destination).filter(Destination.is_active == True)
+def list_destinations(agency_id: Optional[int] = Query(None), category: Optional[str] = Query(None), include_inactive: Optional[bool] = Query(False), db: Session = Depends(get_db)):
+    q = db.query(Destination)
+    if not include_inactive:
+        q = q.filter(Destination.is_active == True)
     if agency_id:
         q = q.filter(Destination.agency_id == agency_id)
     if category:
@@ -3016,8 +3061,8 @@ def update_personnel(personnel_id: int, body: PersonnelUpdate, current_user: dic
         raise HTTPException(status_code=403, detail='Not authorized')
     # allow self or admin/dispatch
     u = db.query(User).get(current_user['user_id'])
-    is_admin = u and u.role in ('admin','super_admin')
-    is_self = p.user_id == current_user['user_id']
+    is_admin = u and u.role in ('admin','super_admin','superadmin')
+    is_self = p and p.user_id == current_user['user_id']
     if not is_admin and not is_self:
         raise HTTPException(status_code=403, detail='Not authorized')
     for k, v in body.model_dump(exclude_unset=True).items():
@@ -3036,7 +3081,7 @@ def delete_personnel(personnel_id: int, current_user: dict = Depends(get_current
     if not p:
         raise HTTPException(status_code=404, detail='Personnel not found')
     u = db.query(User).get(current_user['user_id'])
-    if not (u and u.role in ('admin','super_admin')):
+    if not (u and u.role in ('admin','super_admin','superadmin')):
         raise HTTPException(status_code=403, detail='Not authorized')
     db.delete(p); db.commit()
     return {'deleted': personnel_id}
@@ -3068,7 +3113,7 @@ def create_incident(request: Request, body: IncidentCreate, db: Session = Depend
     return incident
 
 @app.get('/incidents', response_model=List[IncidentOut])
-def list_incidents(request: Request, agency_id: Optional[int] = Query(None), status: Optional[str] = Query(None), call_type: Optional[str] = Query(None), search: Optional[str] = Query(None), from_date: Optional[datetime] = Query(None), to_date: Optional[datetime] = Query(None), db: Session = Depends(get_db)):
+def list_incidents(request: Request, agency_id: Optional[int] = Query(None), status: Optional[str] = Query(None), call_type: Optional[str] = Query(None), search: Optional[str] = Query(None), from_date: Optional[datetime] = Query(None), to_date: Optional[datetime] = Query(None), archived: Optional[bool] = Query(None), start_date: Optional[date] = Query(None), end_date: Optional[date] = Query(None), db: Session = Depends(get_db)):
     user = get_current_user(request)
     customer_id = user.get('customer_id')
     q = db.query(Incident)
@@ -3087,6 +3132,15 @@ def list_incidents(request: Request, agency_id: Optional[int] = Query(None), sta
         q = q.filter(Incident.created_at >= from_date)
     if to_date:
         q = q.filter(Incident.created_at <= to_date)
+    if status == 'closed':
+        today = tz_now().date()
+        today_start = datetime.combine(today, dt_time.min)
+        if start_date and end_date:
+            q = q.filter(Incident.closed_at >= datetime.combine(start_date, dt_time.min), Incident.closed_at <= datetime.combine(end_date, dt_time.max))
+        elif archived is True:
+            q = q.filter(Incident.closed_at < today_start)
+        elif archived is False:
+            q = q.filter(Incident.closed_at >= today_start)
     return q.order_by(Incident.created_at.desc()).all()
 
 @app.get('/incidents/{incident_id}', response_model=IncidentOut)
@@ -3248,9 +3302,9 @@ def recommend_units(incident_id: int, limit: int = Query(10), db: Session = Depe
         elif u.current_status not in _ASSIGNABLE_STATUSES:
             eligible = False; reasons.append(f"status {u.current_status}")
         if u.last_seen_at is None:
-            eligible = False; reasons.append('no GPS')
+            reasons.append('no GPS')
         elif (_naive_local(now) - _naive_local(u.last_seen_at)).total_seconds() > TAIP_OFFLINE_SECONDS:
-            eligible = False; reasons.append('GPS offline')
+            s -= 300; reasons.append('GPS offline')
         elif (_naive_local(now) - _naive_local(u.last_seen_at)).total_seconds() > TAIP_STALE_SECONDS:
             age = (_naive_local(now) - _naive_local(u.last_seen_at)).total_seconds()
             s -= age * 0.05; reasons.append('GPS stale')
@@ -3276,8 +3330,8 @@ def recommend_units(incident_id: int, limit: int = Query(10), db: Session = Depe
                 eta_seconds = (dist_miles / speed_mph) * 3600
                 s -= eta_seconds * 0.05
                 reasons.append(f"{dist_miles:.1f} mi · {eta_seconds/60:.0f} min")
-        if dist_miles is None:
-            eligible = False; reasons.append('no GPS')
+        if dist_miles is None and 'no GPS' not in reasons:
+            s -= 500; reasons.append('no GPS')
 
         # Service level / capability
         unit_level = (caps.get('service_level') or 'BLS').upper() if agency_type == 'ems' else (u.unit_type or '')
@@ -3397,7 +3451,7 @@ def fire_report(incident_id: int, db: Session = Depends(get_db)):
             'first_dispatched': first_event(['AK','dispatched']),
             'first_en_route': first_event(['ER','en_route']),
             'first_on_scene': first_event(['OS','on_scene']),
-            'first_transport': first_event(['TR','TH','ED','TRP','HEMS']),
+            'first_transport': first_event(['TR','TH','ED','TRP']),
             'first_cleared': first_event(['CAN','clear']),
         },
         'units': [{
@@ -3434,7 +3488,7 @@ def _unit_status_time(status_events, codes):
 
 def _status_label(code):
     return {
-        'AQ':'Available','AFR':'Available for Response','OS':'On Scene','ER':'En Route','TR':'Transport','TRP':'Transport','ED':'En Route to Destination','TH':'Transport to HEMS','AD':'Arrived at Destination',
+        'AQ':'Available','AFR':'Available for Response','OS':'On Scene','ER':'En Route','TR':'Transport','TRP':'Transport','ED':'En Route to Destination','TH':'Transporting to HEMS','AD':'Arrived at Destination',
         'DEL':'Delivered','NPF':'No Patient Found','NO_TRANSPORT':'No Transport','PATIENT_REFUSAL':'Patient Refusal','CAN':'Cancelled','LUN':'Lunch','MAINT':'Out for Maintenance','OOS':'Out of Service','OFF_DUTY':'Off Duty','off_duty':'Off Duty','IN_SERVICE':'In Service','ON_DUTY':'On Duty',
         'AK':'Dispatched','dispatched':'Dispatched','open':'Open','closed':'Closed','en_route':'En Route','on_scene':'On Scene',
         'TC':'Traffic Control','CT':'Citation','ARR':'Arrest','BK':'Booking','WATER':'Water on Fire','EXT':'Extinguished','OVER':'Overhaul'
@@ -3509,7 +3563,7 @@ def _build_after_call_summary(db, incident):
         dispatched_at = _unit_status_time(unit_status_events, ['AK','dispatched'])
         en_route_at = _unit_status_time(unit_status_events, ['ER','en_route'])
         arrived_at = _unit_status_time(unit_status_events, ['OS','on_scene','AP','WATER','EXT','OVER'])
-        transport_at = _unit_status_time(unit_status_events, ['TR','ED','HEMS','TRP','TH'])
+        transport_at = _unit_status_time(unit_status_events, ['TR','ED','TRP','TH'])
         dest_arrived_at = _unit_status_time(unit_status_events, ['AD','DEL','delivered','at_destination'])
         clear_at = iu.cleared_at.isoformat() if iu.cleared_at else _unit_status_time(unit_status_events, ['AQ','AFR','Available','CAN','NPF','NO_TRANSPORT','PATIENT_REFUSAL','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'])
         miles = db.query(MileageReading).filter_by(incident_id=incident.id, unit_id=unit.id).order_by(MileageReading.recorded_at.asc()).all()
@@ -4143,7 +4197,8 @@ def get_dispatch_packet(incident_id: int, unit_id: int, db: Session = Depends(ge
         'assigned_units': [{'id': u.id, 'call_sign': u.call_sign, 'unit_type': u.unit_type} for _, u in assigned],
         'resource_status': _incident_resource_status(db, incident),
         'acknowledged_at': ack.acknowledged_at.isoformat() if ack else None,
-        'requires_ack': not ack,
+        # Once a unit has moved past the initial dispatched state (e.g., dispatcher set it en_route from console), the MDT should not be forced to acknowledge before status changes.
+        'requires_ack': not ack and unit.current_status in ('AK','AQ','AFR','dispatched','available'),
         'extra': incident.extra
     }
     return packet
@@ -4217,7 +4272,7 @@ def update_unit_status(request: Request, incident_id: int, unit_id: int, body: S
     # Transport leg lifecycle
     if incident:
         open_leg = db.query(TransportLeg).filter_by(incident_id=incident.id, unit_id=unit_id).filter(TransportLeg.status != 'cleared').order_by(TransportLeg.created_at.desc()).first()
-        if body.status_code in ('TR','TRP','HEMS','ED','TH'):
+        if body.status_code in ('TR','TRP','ED','TH'):
             if not open_leg:
                 dest_id = _resolve_destination_id(db, body, incident.agency_id)
                 if not dest_id:
@@ -4744,7 +4799,7 @@ def set_unit_status(request: Request, unit_id: int, body: UnitStatus, db: Sessio
             refresh_incident_status(db, incident)
             # Transport leg lifecycle
             open_leg = db.query(TransportLeg).filter_by(incident_id=incident.id, unit_id=unit_id).filter(TransportLeg.status != 'cleared').order_by(TransportLeg.created_at.desc()).first()
-            if body.status_code in ('TR','ED','TH','TRP','HEMS'):
+            if body.status_code in ('TR','ED','TH','TRP'):
                 if not open_leg:
                     dest_id = _resolve_destination_id(db, body, incident.agency_id)
                     if not dest_id:
@@ -4804,7 +4859,7 @@ def mdt_start(request: Request, body: MDTStart, db: Session = Depends(get_db)):
     if not unit:
         raise HTTPException(status_code=404, detail='Unit not found')
     u = db.query(User).get(user['user_id'])
-    is_admin = u and u.role in ('admin','super_admin')
+    is_admin = u and u.role in ('admin','super_admin','superadmin')
     if not is_admin and unit.agency_id != user.get('agency_id'):
         raise HTTPException(status_code=403, detail='Unit not in your agency')
     # assign selected personnel to unit
@@ -5623,8 +5678,8 @@ def list_scheduled_transports(status: Optional[str] = None, agency_id: Optional[
     if status:
         q = q.filter(ScheduledTransport.status == status)
     if date:
-        start = datetime.combine(date, time.min)
-        end = datetime.combine(date, time.max)
+        start = datetime.combine(date, dt_time.min)
+        end = datetime.combine(date, dt_time.max)
         q = q.filter(ScheduledTransport.scheduled_at >= start, ScheduledTransport.scheduled_at <= end)
     return q.order_by(ScheduledTransport.scheduled_at.asc()).all()
 
@@ -5717,16 +5772,18 @@ def scheduled_events_page():
     return FileResponse('static/scheduled_events.html')
 
 @app.get('/scheduled-events', response_model=List[ScheduledEventOut])
-def list_scheduled_events(status: Optional[str] = None, agency_id: Optional[int] = None, date: Optional[date] = Query(None), current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+def list_scheduled_events(status: Optional[str] = None, agency_id: Optional[int] = None, date: Optional[date] = Query(None), window_minutes: Optional[int] = Query(None), current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     q = db.query(ScheduledEvent)
     if agency_id:
         q = q.filter(ScheduledEvent.agency_id == agency_id)
     if status:
         q = q.filter(ScheduledEvent.status == status)
     if date:
-        start = datetime.combine(date, time.min)
-        end = datetime.combine(date, time.max)
+        start = datetime.combine(date, dt_time.min)
+        end = datetime.combine(date, dt_time.max)
         q = q.filter(ScheduledEvent.scheduled_at >= start, ScheduledEvent.scheduled_at <= end)
+    if window_minutes is not None:
+        q = q.filter(ScheduledEvent.scheduled_at <= tz_now() + timedelta(minutes=window_minutes))
     return q.order_by(ScheduledEvent.scheduled_at.asc()).all()
 
 @app.post('/scheduled-events', response_model=ScheduledEventOut)
@@ -5753,6 +5810,59 @@ def update_scheduled_event(se_id: int, body: ScheduledEventUpdate, current_user:
     db.commit(); db.refresh(se)
     _log_event(db, 'scheduled_event_updated', 'scheduled_event', se.id, user_id=current_user.get('user_id'), data=body.model_dump(exclude_unset=True), agency_id=se.agency_id)
     return se
+
+@app.post('/scheduled-events/{se_id}/dispatch')
+def dispatch_scheduled_event(request: Request, se_id: int, body: ScheduledEventDispatch, db: Session = Depends(get_db)):
+    check_role(request, DISPATCHER_ROLES)
+    se = db.query(ScheduledEvent).get(se_id)
+    if not se:
+        raise HTTPException(status_code=404, detail='Scheduled event not found')
+    unit = db.query(Unit).get(body.unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail='Unit not found')
+    user = get_current_user(request)
+    agency = db.query(Agency).get(se.agency_id)
+    customer_id = agency.customer_id if agency else user.get('customer_id')
+    # create incident from scheduled event
+    count = db.query(Incident).filter(Incident.customer_id == customer_id, Incident.agency_id == se.agency_id).count()
+    incident_number = f"{se.agency_id}-{count + 1:05d}"
+    incident = Incident(
+        customer_id=customer_id,
+        agency_id=se.agency_id,
+        incident_number=incident_number,
+        call_number=incident_number,
+        call_type=se.event_type or 'Scheduled Event',
+        priority=2,
+        status='open',
+        location_text=se.location_text,
+        lat=se.lat,
+        lng=se.lng,
+        narrative=se.notes,
+        extra={'scheduled_event_id': se.id, 'event_type': se.event_type, 'source': 'scheduled_event'},
+        created_by=user.get('user_id')
+    )
+    db.add(incident)
+    db.flush()
+    _validate_incident_location(db, incident)
+    if incident.lat is None or incident.lng is None:
+        if agency and agency.lat is not None and agency.lng is not None:
+            incident.lat = agency.lat
+            incident.lng = agency.lng
+    iu = _dispatch_one_unit(db, incident, unit, user, notes='Dispatched from scheduled event', reassign=True)
+    db.flush()
+    se.status = 'in_progress'
+    se.unit_id = unit.id
+    db.commit()
+    db.refresh(incident)
+    _log_event(db, 'scheduled_event_dispatched', 'scheduled_event', se.id, user_id=user.get('user_id'), data={'incident_id': incident.id, 'unit_id': unit.id}, agency_id=se.agency_id)
+    return {
+        'incident_id': incident.id,
+        'incident_number': incident.incident_number,
+        'call_number': incident.call_number,
+        'unit_id': unit.id,
+        'assigned_at': iu.assigned_at,
+        'assignment_status': iu.assignment_status
+    }
 
 def _generate_standing_order_instances(db, standing_order, start_date, end_date):
     if not standing_order.active or not standing_order.recurrence or not start_date or not end_date:

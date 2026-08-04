@@ -33,6 +33,17 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
   tr.dragging { opacity:0.5; }
   tr.drop-target { outline:2px dashed #22c55e; outline-offset:-2px; background:rgba(34,197,94,0.10); }
   #incidentPanel.drop-target { outline:3px dashed #22c55e; outline-offset:-3px; background:rgba(34,197,94,0.10); }
+  @keyframes slowFlashGreen {
+    0%, 100% { background-color: transparent; }
+    50% { background-color: rgba(34,197,94,0.35); }
+  }
+  .flash-green-slow { animation: slowFlashGreen 2s ease-in-out 4; }
+  @keyframes flashRed {
+    0%, 100% { background-color: transparent; }
+    50% { background-color: rgba(239,68,68,0.35); }
+  }
+  .flash-red { animation: flashRed 1s ease-in-out infinite; }
+  .scheduled-event-row { border-left: 5px solid #22c55e; background: rgba(34,197,94,0.08); }
   .card { background:#132240; border:1px solid #1E4B8C; border-radius:0.5rem; overflow:hidden; display:flex; flex-direction:column; }
   .card-head { background:#0f172a; padding:0.4rem 0.65rem; font-weight:700; border-bottom:1px solid #1E4B8C; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.03em; color:#F1FAF8; display:flex; justify-content:space-between; align-items:center; }
   .card-body { padding:0.5rem; overflow:auto; flex:1; }
@@ -50,13 +61,16 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
   #map { width:100%; height:100%; background:#0f172a; }
   #crewModal { z-index:10000 !important; }
   #crewModal > div { position:relative; z-index:10001; }
+  #unitsModal { z-index:10000 !important; }
+  #unitsModal > div { position:relative; z-index:10001; }
   .legend { background:rgba(15,23,42,0.9); color:#e2e8f0; padding:0.5rem; border-radius:0.375rem; border:1px solid #334155; font-size:0.7rem; }
   .legend .dot { display:inline-block; width:0.6rem; height:0.6rem; border-radius:50%; margin-right:0.3rem; }
   .resizer { width:4px; background:#475569; cursor:col-resize; transition:background 0.1s; }
   .resizer:hover { background:#00B8FF; }
   .resizer-h { height:4px; background:#475569; cursor:row-resize; transition:background 0.1s; }
   .resizer-h:hover { background:#00B8FF; }
-  .locked .resizer, .locked .resizer-h, .locked .undock-btn, .locked .dock-btn { display:none !important; }
+  .locked .resizer, .locked .resizer-h { visibility:hidden !important; }
+  .locked .undock-btn, .locked .dock-btn { display:none !important; }
   .locked .floated-panel { resize:none !important; }
   .undock-btn, .dock-btn { background:#334155; color:#e2e8f0; border:none; border-radius:0.25rem; padding:0.15rem 0.4rem; font-size:0.75rem; cursor:pointer; margin-left:0.5rem; }
   .undock-btn:hover, .dock-btn:hover { background:#475569; }
@@ -105,6 +119,7 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
       <div class='text-slate-400 font-mono' id='clock'>--:--:--</div>
       <button id='consoleLayoutBtn' class='app-btn-outline' onclick='openLayoutEditor()'>Console Layout</button>
       <button id='refreshBtn' class='app-btn-outline'>Refresh</button>
+      <button id='unitsMenuBtn' class='app-btn-outline' onclick='openUnitsModal()'>Units</button>
       <div class='spacer'></div>
       <button id='alertsBtn' class='hidden app-btn-outline text-red-400 border-red-400' onclick='showAlerts()'>Alerts <span id='alertsCount' class='bg-red-500 rounded-full px-1.5'>0</span></button>
       <button class='app-btn-outline' onclick='document.documentElement.classList.toggle("light"); localStorage.setItem("ur_theme", document.documentElement.classList.contains("light")?"light":"dark")'>🌓</button>
@@ -114,7 +129,6 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
       <div class='app-kpi-card'><div class='icon' style='color:#eab308'>🚑</div><div><div class='value' id='kpiEnRoute'>0</div><div class='label'>En Route</div></div></div>
       <div class='app-kpi-card'><div class='icon' style='color:#ef4444'>📍</div><div><div class='value' id='kpiOnScene'>0</div><div class='label'>On Scene</div></div></div>
       <div class='app-kpi-card'><div class='icon' style='color:#22c55e'>✅</div><div><div class='value' id='kpiAvailable'>0</div><div class='label'>Available Units</div></div></div>
-      <div class='app-kpi-card'><div class='icon' style='color:#f97316'>🔔</div><div><div class='value' id='kpiUnacked'>0</div><div class='label'>Unacked Dispatches</div></div></div>
     </div>
     <div class='app-content'>
       <main id='main' class='flex-1 grid p-0 overflow-hidden' style='grid-template-columns:var(--col1,25%) 4px var(--col2,35%) 4px var(--col3,40%);'>
@@ -172,13 +186,16 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
   </div>
 <script>
 const DEFAULT_CENTER = [39.9612,-82.9988];
-let state = { user:null, agencies:[], units:[], incidents:[], messages:[], personnel:[], agencyMap:{}, configs:{}, postZones:[], selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false, mapLayers:[], destinations:{}, lastCallsHtml:null, lastUnitsHtml:null, showClosed:false };
+let state = { user:null, agencies:[], units:[], incidents:[], scheduledEvents:[], seenActiveScheduledIds:new Set(), selectedScheduledEvent:null, messages:[], personnel:[], agencyMap:{}, configs:{}, postZones:[], selectedIncident:null, selectedUnit:null, logs:[], trails:{}, showTrails:true, showCritical:false, mapLayers:[], destinations:{}, lastCallsHtml:null, lastUnitsHtml:null, showClosed:false, closedView:'today', historySearch:{start:'', end:'', search:''} };
 const QUICK_STAMPS = {
   police: ['Shots Fired','Officer Down','Help Needed','K9 Released','Taser Deployed','OC Deployed','In Custody','Vehicle Pursuit','Foot Pursuit','TVI','Crash','Item Thrown','Secure the Chanel','Send Coroner','Send EMS','Send Fire','Send Rescue','Entry Made','Vehicle Search','Building Search'],
   fire: ['Send Law Enforcement','Send EMS','Smoke Showing','Send Power Co','Entry Made','Fire Attack','Fire Out','Search','Recovery','Traffic Assistance','Road Closed','Lane Blocked','Command'],
   ems: ['Send Fire','Send Law Enforcement','Send Help','Send Coroner','Entry Made','Send HEMS','CPR In Progress','Pt Combative','No Pt Found','Pt Deceased','Public Assist Only','Road Blocked','Road Closed','Need an LZ','Need a Supervisor']
 };
 const AVAILABLE_STATUSES = ['AQ','AFR','POSTING','STAGED','AT_STATION','AVAILABLE_ON_RADIO','IN_SERVICE','ON_DUTY','AVAILABLE'];
+const OUT_OF_SERVICE_STATUSES = ['OOS','MAINT','LUN','MEAL','OFF_DUTY','off_duty'];
+const OOS_REASONS = ['Mechanical','Equipment','Staffing','Fuel','Cleaning','Repair','Scheduled Maintenance','Inspection','Other'];
+const UNIT_MANAGE_STATUSES = ['AQ','ON_DUTY','IN_SERVICE','OFF_DUTY','LUN','MEAL','OOS','MAINT'];
 function haversineMiles(lat1, lon1, lat2, lon2){
   const R = 3958.8;
   const dLat = (lat2-lat1)*Math.PI/180;
@@ -250,7 +267,7 @@ function applyLayout(l){
   if(footer){ footer.style.height = l.footer; }
   LAYOUT_PANELS.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display = (l.hidden||[]).includes(id) ? 'none' : ''; });
   const incidentPanel = document.getElementById('incidentPanel'); if(incidentPanel) incidentPanel.style.display = '';
-  applyUndockedPanels(l.undocked||[]);
+  applyUndockedPanels(l.undocked||[], !!l.locked);
   setLayoutLocked(!!l.locked);
   state.layout = l;
 }
@@ -350,7 +367,7 @@ function toggleLayoutAutoRefresh(){
   const l=loadLayout(); l.autoRefresh=document.getElementById('layoutAutoRefresh').checked; saveLayout(l); state.layout=l;
 }
 function toggleLayoutLock(){
-  const l=loadLayout(); l.locked=document.getElementById('layoutLock').checked; saveLayout(l); setLayoutLocked(!!l.locked); state.layout=l;
+  const l=loadLayout(); l.locked=document.getElementById('layoutLock').checked; saveLayout(l); applyLayout(l);
 }
 function resetLayout(){
   if(!confirm('Reset console layout to default?')) return;
@@ -426,13 +443,15 @@ document.addEventListener('click', e=>{
   const btn=e.target.closest('.dock-btn');
   if(btn){ e.stopPropagation(); dockPanel(btn.dataset.dock); }
 });
-function applyUndockedPanels(undocked){
+function applyUndockedPanels(undocked, locked){
   const l=loadLayout();
   const hidden=new Set(l.hidden||[]);
   const current=[...document.querySelectorAll('.floated-panel')].map(w=>w.dataset.panel);
-  const desired=(undocked||[]).map(u=>u.id).filter(id=>!hidden.has(id));
+  const desired = locked ? [] : (undocked||[]).map(u=>u.id).filter(id=>!hidden.has(id));
   current.filter(id=>!desired.includes(id)).forEach(dockPanel);
-  desired.forEach(id=>{ if(!current.includes(id) && !document.body.classList.contains('locked')) undockPanel(id); });
+  if(!locked){
+    desired.forEach(id=>{ if(!current.includes(id)) undockPanel(id); });
+  }
   (undocked||[]).forEach(u=>{
     const wrap=document.getElementById('float-'+u.id); if(!wrap) return;
     ['top','left','width','height'].forEach(k=>{ if(u[k]) wrap.style[k]=u[k]; });
@@ -482,14 +501,14 @@ function toMs(iso){ return iso ? new Date(iso).getTime() : Date.now(); }
 function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
 function elapsed(iso){ return (Date.now()-toMs(iso))/1000; }
 function unitClass(st){
-  const onScene = ['OS','AP','AD','WATER','EXT','OVER','TC','ARR','CT','BK','HEMS','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'];
+  const onScene = ['OS','AP','AD','WATER','EXT','OVER','TC','ARR','CT','BK','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'];
   const enRoute = ['ER','TR','TH','TRP','ED','transport'];
   if(onScene.includes(st)) return 'unit-os';
   if(enRoute.includes(st)) return 'unit-er';
   if(st==='AQ' || st==='AFR') return 'unit-aq';
   return 'unit-oth';
 }
-function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transporting',TH:'Transporting to HEMS',AD:'Arrived at Destination',TRP:'Transporting',ED:'En Route to Destination','CAN':'Cancelled','NPF':'No Patient Found','NO_TRANSPORT':'No Transport','PATIENT_REFUSAL':'Patient Refusal','DEL':'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Out for Maintenance',OFF_DUTY:'Off Duty',IN_SERVICE:'In Service',ON_DUTY:'On Duty',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',intake:'Intake',cleared:'Cleared',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul',AP:'At Patient',HEMS:'Transfer to HEMS',DECEASED:'PT Deceased',INVEST:'Officer Investigating',REPORT:'Taking Report',SEARCH:'Searching for Suspect',WORK_TRAFFIC:'Working Traffic',PA:'Public Assist',CLEARED:'Cleared',REPORT_TAKEN:'Report Taken',FIRE_ATTACK:'Fire Attack',NO_FIRE:'No Fire Found',EXTRICATION:'Extrication',CBY_CALLER:'Cancelled by Caller',CBY_OTHER:'Cancelled by Other Agency',CBY_DISPATCH:'Cancelled by Dispatch'}; return M[code]||code; }
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transporting',TH:'Transporting to HEMS',AD:'Arrived at Destination',TRP:'Transporting',ED:'En Route to Destination','CAN':'Cancelled','NPF':'No Patient Found','NO_TRANSPORT':'No Transport','PATIENT_REFUSAL':'Patient Refusal','DEL':'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Out for Maintenance',OFF_DUTY:'Off Duty',IN_SERVICE:'In Service',ON_DUTY:'On Duty',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',intake:'Intake',cleared:'Cleared',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul',AP:'At Patient',DECEASED:'PT Deceased',INVEST:'Officer Investigating',REPORT:'Taking Report',SEARCH:'Searching for Suspect',WORK_TRAFFIC:'Working Traffic',PA:'Public Assist',CLEARED:'Cleared',REPORT_TAKEN:'Report Taken',FIRE_ATTACK:'Fire Attack',NO_FIRE:'No Fire Found',EXTRICATION:'Extrication',CBY_CALLER:'Cancelled by Caller',CBY_OTHER:'Cancelled by Other Agency',CBY_DISPATCH:'Cancelled by Dispatch'}; return M[code]||code; }
 const AVAILABLE_STATUS_OPTIONS = [
   {code:'IN_SERVICE', label:'In Service'},
   {code:'ON_DUTY', label:'On Duty'},
@@ -513,7 +532,10 @@ const UNIT_STATUS_OPTIONS = {
     {code:'CBY_CALLER', label:'Cancelled by Caller'},
     {code:'CBY_OTHER', label:'Cancelled by Other Agency'},
     {code:'CBY_DISPATCH', label:'Cancelled by Dispatch'},
-    {code:'OOS', label:'Out of Service'}
+    {code:'OOS', label:'Out of Service'},
+    {code:'MAINT', label:'Out for Maintenance'},
+    {code:'OFF_DUTY', label:'Off Duty'},
+    {code:'LUN', label:'Lunch'}
   ],
   fire: [
     {code:'AQ', label:'Available'},
@@ -527,7 +549,10 @@ const UNIT_STATUS_OPTIONS = {
     {code:'CBY_CALLER', label:'Cancelled by Caller'},
     {code:'CBY_OTHER', label:'Cancelled by Other Agency'},
     {code:'CBY_DISPATCH', label:'Cancelled by Dispatch'},
-    {code:'OOS', label:'Out of Service'}
+    {code:'OOS', label:'Out of Service'},
+    {code:'MAINT', label:'Out for Maintenance'},
+    {code:'OFF_DUTY', label:'Off Duty'},
+    {code:'LUN', label:'Lunch'}
   ],
   ems: [
     {code:'AQ', label:'Available'},
@@ -542,7 +567,10 @@ const UNIT_STATUS_OPTIONS = {
     {code:'CBY_DISPATCH', label:'Cancelled by Dispatch'},
     {code:'NO_TRANSPORT', label:'No Transport'},
     {code:'PATIENT_REFUSAL', label:'Patient Refusal'},
-    {code:'OOS', label:'Out of Service'}
+    {code:'OOS', label:'Out of Service'},
+    {code:'MAINT', label:'Out for Maintenance'},
+    {code:'OFF_DUTY', label:'Off Duty'},
+    {code:'LUN', label:'Lunch'}
   ]
 };
 function statusLabelByType(type, code){
@@ -550,7 +578,7 @@ function statusLabelByType(type, code){
   const match = list.find(s=>s.code === code);
   return match ? match.label : statusLabel(code);
 }
-function isTransportStatus(code){ return ['TR','TH','ED','DEL','HEMS','TRP','transport'].includes(code); }
+function isTransportStatus(code){ return ['TR','TH','ED','DEL','TRP','transport'].includes(code); }
 function needsMileage(code){ return ['OS','AD'].includes(code); }
 function serviceAreaColor(type){
   const M = {primary:'#22c55e', secondary:'#3b82f6', mutual:'#eab308', post:'#64748b', zone:'#a855f7', beat:'#f97316', staging:'#ec4899', coverage:'#06b6d4', water:'#0ea5e9', district:'#8b5cf6'};
@@ -620,26 +648,52 @@ function updateTabStyles(){
   }
 }
 
-function renderClosedCalls(){
+async function renderClosedCalls(){
   const am = state.agencyMap;
-  const list = (state.incidents||[]).filter(i=>i.status==='closed' && matchesDiscipline((am[i.agency_id]||{}).agency_type)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
-  document.getElementById('callCount').textContent = list.length;
-  const html = list.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Agency</th><th>Closed</th><th></th></tr></thead><tbody>` + list.map(i=>{
-    const a = am[i.agency_id] || {};
-    return `<tr class='priority-${Math.min(Math.max(i.priority||2,1),4)} hover:bg-slate-800' onclick='window.open("/history?incident_id=${i.id}","_blank")'>
-      <td class='font-bold'>${i.call_number||i.incident_number}</td>
-      <td>${i.call_type}</td>
-      <td class='text-center'>P${i.priority}</td>
-      <td>${a.name||'-'}</td>
-      <td>${fmtTime(i.closed_at)}</td>
-      <td class='space-x-1'>
-        <button class='bg-slate-700 hover:bg-slate-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation(); window.open("/history?incident_id=${i.id}","_blank")'>Review</button>
-        <button class='bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation(); window.open("/static/after_call_summary.html?incident_id=${i.id}","_blank")'>Print</button>
-      </td>
-    </tr>`;
-  }).join('') + '</tbody></table>' : '<div class="p-2 text-slate-500">No closed calls</div>';
-  const el = document.getElementById('callList');
-  if(state.lastCallsHtml !== html){ state.lastCallsHtml = html; el.innerHTML = html; }
+  const isHistory = state.closedView === 'history';
+  const q = new URLSearchParams({status:'closed'});
+  if(isHistory){
+    q.set('archived','true');
+    if(state.historySearch.start) q.set('start_date', state.historySearch.start);
+    if(state.historySearch.end) q.set('end_date', state.historySearch.end);
+    if(state.historySearch.search) q.set('search', state.historySearch.search);
+  } else {
+    q.set('archived','false');
+  }
+  try {
+    const list = await api('/incidents?' + q.toString());
+    document.getElementById('callCount').textContent = list.length;
+    const todayCls = isHistory ? 'bg-slate-700 text-slate-300' : 'bg-blue-600 text-white';
+    const histCls = isHistory ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300';
+    const historyControls = isHistory ? `<input id='hStart' type='date' value='${state.historySearch.start}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><input id='hEnd' type='date' value='${state.historySearch.end}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><input id='hSearch' type='text' value='${escapeHtml(state.historySearch.search)}' placeholder='Search #' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-24'><button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='searchHistory()'>Search</button>` : '';
+    const table = list.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Agency</th><th>Closed</th><th></th></tr></thead><tbody>` + list.map(i=>{
+      const a = am[i.agency_id] || {};
+      return `<tr class='priority-${Math.min(Math.max(i.priority||2,1),4)} hover:bg-slate-800' onclick='window.open("/history?incident_id=${i.id}","_blank")'>
+        <td class='font-bold'>${i.call_number||i.incident_number}</td>
+        <td>${i.call_type}</td>
+        <td class='text-center'>P${i.priority}</td>
+        <td>${a.name||'-'}</td>
+        <td>${fmtTime(i.closed_at)}</td>
+        <td class='space-x-1'>
+          <button class='bg-slate-700 hover:bg-slate-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation(); window.open("/history?incident_id=${i.id}","_blank")'>Review</button>
+          <button class='bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation(); window.open("/static/after_call_summary.html?incident_id=${i.id}","_blank")'>Print</button>
+        </td>
+      </tr>`;
+    }).join('') + '</tbody></table>' : `<div class="p-2 text-slate-500">No ${isHistory ? 'historical' : 'closed'} calls</div>`;
+    const html = `<div class='flex flex-wrap gap-2 p-2 text-xs border-b border-slate-700 mb-1'>
+      <button class='px-2 py-0.5 rounded ${todayCls}' onclick='state.closedView="today"; renderClosedCalls();'>Today</button>
+      <button class='px-2 py-0.5 rounded ${histCls}' onclick='state.closedView="history"; renderClosedCalls();'>History</button>
+      ${historyControls}
+    </div>${table}`;
+    const el = document.getElementById('callList');
+    if(state.lastCallsHtml !== html){ state.lastCallsHtml = html; el.innerHTML = html; }
+  } catch(e){ log('Closed calls load error: '+e.message); }
+}
+function searchHistory(){
+  state.historySearch.start = document.getElementById('hStart')?.value || '';
+  state.historySearch.end = document.getElementById('hEnd')?.value || '';
+  state.historySearch.search = document.getElementById('hSearch')?.value || '';
+  renderClosedCalls();
 }
 
 function renderCalls(){
@@ -649,7 +703,8 @@ function renderCalls(){
   const assigned = document.getElementById('cfAssigned')?.value || 'all';
   const zone = document.getElementById('cfZone')?.value || 'all';
   const search = (document.getElementById('cfSearch')?.value || '').toLowerCase();
-  const active = state.incidents.filter(i=>{
+  const now = Date.now();
+  const activeIncidents = state.incidents.filter(i=>{
     if(i.status==='closed') return false;
     if(!matchesDiscipline((state.agencyMap[i.agency_id]||{}).agency_type)) return false;
     if(priority!=='all' && String(i.priority||2)!==priority) return false;
@@ -661,28 +716,73 @@ function renderCalls(){
       if(!text.includes(search)) return false;
     }
     return true;
-  }).sort((a,b)=> (a.priority||2)-(b.priority||2) || new Date(b.created_at)-new Date(a.created_at));
+  });
+  const activeEvents = (state.scheduledEvents||[]).filter(e=>{
+    if(!matchesDiscipline((state.agencyMap[e.agency_id]||{}).agency_type)) return false;
+    if(priority!=='all') return false;
+    if(assigned==='assigned') return false;
+    if(zone!=='all') return false;
+    if(search){
+      const text = `${e.title||''} ${e.event_type||''} ${e.location_text||''}`.toLowerCase();
+      if(!text.includes(search)) return false;
+    }
+    return true;
+  });
+  const newScheduledIds = new Set();
+  activeEvents.forEach(e=>{ if(!state.seenActiveScheduledIds.has(e.id)){ newScheduledIds.add(e.id); } });
+  if(newScheduledIds.size){ playChime(); }
+  const active = [
+    ...activeEvents.map(e=>({...e, _type:'scheduled'})),
+    ...activeIncidents.map(i=>({...i, _type:'incident'}))
+  ].sort((a,b)=>{
+    if(a._type==='scheduled' && b._type==='incident') return -1;
+    if(a._type==='incident' && b._type==='scheduled') return 1;
+    if(a._type==='scheduled' && b._type==='scheduled') return new Date(a.scheduled_at)-new Date(b.scheduled_at);
+    return (a.priority||2)-(b.priority||2) || new Date(b.created_at)-new Date(a.created_at);
+  });
   document.getElementById('callCount').textContent = active.length;
-  const html = active.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Pickup</th><th>Zone</th><th>Dest</th><th>Units</th><th>Age</th><th>Last Status</th></tr></thead><tbody>` + active.map(i=>{
+  const html = active.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Pickup</th><th>Zone</th><th>Dest</th><th>Units</th><th>Age</th><th>Last Status</th></tr></thead><tbody>` + active.map(item=>{
+    if(item._type==='scheduled'){
+      const e = item;
+      const due = e.scheduled_at ? new Date(e.scheduled_at).getTime() : 0;
+      const untilMin = due ? Math.ceil((due - now)/60000) : 0;
+      const dueText = untilMin > 0 ? `in ${untilMin}m` : 'due now';
+      const cls = state.selectedScheduledEvent===e.id ? 'selected' : '';
+      const flash = newScheduledIds.has(e.id) ? 'flash-green-slow' : '';
+      return `<tr class='scheduled-event-row ${cls} ${flash}' data-type='scheduled' data-id='${e.id}' onclick='selectScheduledEvent(${e.id})' ondragover='callDragOver(event,${e.id})' ondragleave='callDragLeave(event)' ondrop='callDrop(event,${e.id})'>
+        <td class='font-bold' title='Scheduled event #${e.id}'>EVT-${e.id}</td>
+        <td>${e.event_type||'Event'}</td>
+        <td class='text-center'>-</td>
+        <td title='${e.location_text||''}'>${e.location_text||'-'}</td>
+        <td>-</td>
+        <td>-</td>
+        <td class='text-slate-400'>${dueText}</td>
+        <td class='text-slate-400'>-</td>
+        <td class='text-slate-400'>Scheduled</td>
+      </tr>`;
+    }
+    const i = item;
     const a=state.agencyMap[i.agency_id]||{};
     const type = a.agency_type;
-    const assigned=state.units.filter(u=>u.current_incident_id===i.id).map(u=>`${u.call_sign}<span class='text-slate-500 text-[10px]'>(${statusLabelByType(type,u.current_status)})</span>`).join(', ')||'-'; 
+    const assignedUnits=state.units.filter(u=>u.current_incident_id===i.id).map(u=>`${u.call_sign}<span class='text-slate-500 text-[10px]'>(${statusLabelByType(type,u.current_status)})</span>`).join(', ')||'-'; 
+    const dispatchedTooLong = state.units.filter(u=>u.current_incident_id===i.id && ['AK','dispatched'].includes(u.current_status) && u.last_assigned_at && elapsed(u.last_assigned_at) > 120).length > 0;
     const cls = state.selectedIncident===i.id ? 'selected' : '';
     const unv = i.extra?.verification_status==='unverified' ? ` <span class='text-red-400 font-bold' title='UNVERIFIED LOCATION'>!</span>` : '';
     const dest = i.extra?.destination_name || '-';
     const statusIso = i.last_status_at || i.created_at;
-    return `<tr class='priority-${Math.min(Math.max(i.priority||2,1),4)} ${cls}' onclick='selectIncident(${i.id})' ondragover='callDragOver(event,${i.id})' ondragleave='callDragLeave(event)' ondrop='callDrop(event,${i.id})'>
+    return `<tr class='priority-${Math.min(Math.max(i.priority||2,1),4)} ${cls} ${dispatchedTooLong ? 'flash-red' : ''}' data-type='incident' data-id='${i.id}' title='${dispatchedTooLong ? 'Unit dispatched but not en route > 2 min' : ''}' onclick='selectIncident(${i.id})' ondragover='callDragOver(event,${i.id})' ondragleave='callDragLeave(event)' ondrop='callDrop(event,${i.id})'>
       <td class='font-bold' title='${i.incident_number||''}'>${i.call_number||i.incident_number}</td>
       <td>${i.call_type}</td>
       <td class='text-center'>P${i.priority}</td>
       <td title='${i.location_text||''}'>${i.location_text||'-'}${unv}</td>
       <td>${i.extra?.zone_name||'-'}</td>
       <td>${dest}</td>
-      <td>${assigned}</td>
+      <td>${assignedUnits}</td>
       <td class='timer' data-iso='${i.created_at}' data-fallback='-' title='Received ${fmtTime(i.created_at)}'>-</td>
       <td class='timer' data-iso='${statusIso}' data-fallback='-' title='Last status at ${fmtTime(statusIso)}'>-</td>
     </tr>`;
   }).join('') + '</tbody></table>' : `<div class='p-2 text-slate-500'>No active calls (total ${state.incidents.length}, discipline ${DISCIPLINE})<br><span class='text-slate-400 text-[10px]'>Check status/zone filters</span></div>`;
+  newScheduledIds.forEach(id=>state.seenActiveScheduledIds.add(id));
   const el = document.getElementById('callList');
   if(state.lastCallsHtml !== html){ state.lastCallsHtml = html; el.innerHTML = html; updateTimers(); }
   updateTabStyles();
@@ -758,6 +858,7 @@ function renderDisciplineFieldsPanel(incident, discipline){
 async function selectIncident(id){
   const prevSelected = state.selectedIncident;
   state.selectedIncident = id;
+  state.selectedScheduledEvent = null;
   const i = state.incidents.find(x=>x.id===id);
   renderCalls();
   if(!i){ document.getElementById('incidentPanel').innerHTML = '<div class=\'p-2 text-slate-400\'>Incident not found</div>'; return; }
@@ -776,8 +877,8 @@ async function selectIncident(id){
   const start = i.call_entry_started_at || i.created_at;
   const dispatchedAt = findFirstEvent(timeline.events, ['AK','dispatched']);
   const enRouteAt = findFirstEvent(timeline.events, ['ER','en_route']);
-  const onSceneAt = findFirstEvent(timeline.events, ['OS','on_scene','AP','AD','WATER','EXT','OVER','HEMS','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE']);
-  const transportAt = findFirstEvent(timeline.events, ['TR','TH','ED','AD','HEMS','TRP']);
+  const onSceneAt = findFirstEvent(timeline.events, ['OS','on_scene','AP','AD','WATER','EXT','OVER','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE']);
+  const transportAt = findFirstEvent(timeline.events, ['TR','TH','ED','AD','TRP']);
   const assignedSummary = assigned.length ? assigned.map(u=>`<span class='inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs text-slate-200 ${unitClass(u.current_status)}' title='${statusLabelByType(discipline,u.current_status)}'>${u.call_sign}</span>`).join(' ') : '<span class="text-slate-500">none</span>';
   const narrative = (i.narrative||'').replace(/\n/g,'<br>');
   const disciplineFieldsHtml = renderDisciplineFieldsPanel(i, discipline);
@@ -916,12 +1017,13 @@ async function loadRecommendations(id){
   const el = document.getElementById('recs'); if(!el) return;
   try {
     const recs = await api(`/incidents/${id}/recommend`);
-    el.innerHTML = recs.length ? recs.map((r,i)=>{
+    const note = `<div class='text-[10px] text-slate-500 mb-1' title='A unit is ineligible if it is on another call, out of service, has no/stale GPS, is the wrong discipline, or does not match the run-card.'>ineligible = unavailable for this dispatch</div>`;
+    el.innerHTML = recs.length ? note + recs.map((r,i)=>{
       const eta = r.eta_minutes!=null ? `${r.eta_minutes} min` : '-';
       const dist = r.distance_miles!=null ? `${r.distance_miles.toFixed(1)} mi` : '-';
       const cls = r.eligible ? 'text-slate-300' : 'text-slate-500';
-      const btn = r.eligible ? `<button class='bg-blue-700 hover:bg-blue-600 px-1.5 py-0.5 rounded text-[10px] text-white' onclick='dispatchRecommended(${r.unit_id})'>Assign</button>` : `<span class='text-slate-600 text-[10px]'>ineligible</span>`;
-      return `<div class='flex items-center justify-between gap-2 ${cls}' title='${r.reason}'>
+      const btn = r.eligible ? `<button class='bg-blue-700 hover:bg-blue-600 px-1.5 py-0.5 rounded text-[10px] text-white' onclick='dispatchRecommended(${r.unit_id})'>Assign</button>` : `<span class='text-slate-600 text-[10px] cursor-help' title='${escapeHtml(r.reason)}'>ineligible</span>`;
+      return `<div class='flex items-center justify-between gap-2 ${cls}' title='${escapeHtml(r.reason)}'>
         <div class='flex items-center gap-1 min-w-0'>
           <span class='font-mono w-4 opacity-60'>${i+1}</span>
           <span class='font-semibold truncate'>${r.call_sign}</span>
@@ -976,13 +1078,12 @@ async function loadTimers(id){
   const el = document.getElementById('timerPanel'); if(!el) return;
   try {
     const t = await api(`/incidents/${id}/timers`);
-    const rows = t.phases.map(p=>{
-      const cls = p.status==='alert' ? 'text-red-400 font-bold' : p.status==='late' ? 'text-yellow-400' : p.status==='met' ? 'text-green-400' : 'text-slate-400';
-      const at = p.actual_at ? fmtTime(p.actual_at) : 'pending';
-      return `<div class='flex justify-between ${cls}'><span>${p.label}</span><span>${at} · ${fmtDur(p.actual_seconds)} / ${fmtDur(p.target_seconds)}</span></div>`;
-    }).join('');
-    const alert = t.alerts.length ? `<div class='mt-1 text-xs text-red-400 font-bold'>${t.alerts.join('; ')}</div>` : '';
-    el.innerHTML = `<div class='space-y-1'>${rows}</div>${alert}`;
+    const ls = t.last_status || {};
+    if (ls && ls.at) {
+      el.innerHTML = `<div class='flex justify-between text-slate-300'><span>Last unit status: <b>${escapeHtml(ls.status_label || ls.status_code || '-')}</b> @ ${fmtTime(ls.at)}</span><span class='timer' data-iso='${ls.at}' data-fallback='-'>-</span></div>`;
+    } else {
+      el.innerHTML = '<div class=\'text-slate-500\'>No unit status events yet</div>';
+    }
   } catch(e){ el.innerHTML = '<div class=\'text-slate-500\'>Timers unavailable</div>'; }
 }
 
@@ -1355,18 +1456,80 @@ function callDragOver(e, incidentId){
 function callDragLeave(e){
   e.currentTarget.classList.remove('drop-target');
 }
-async function callDrop(e, incidentId){
+async function callDrop(e, id){
   e.preventDefault();
   e.currentTarget.classList.remove('drop-target');
-  if(!isDragging || !dragUnitId || !incidentId) return;
+  if(!isDragging || !dragUnitId || !id) return;
   const unitId = dragUnitId;
-  log(`Call drop: unit ${unitId} on incident ${incidentId}`);
+  const type = e.currentTarget.dataset.type;
+  if(type==='scheduled'){
+    log(`Call drop: unit ${unitId} on scheduled event ${id}`);
+    try {
+      await api(`/scheduled-events/${id}/dispatch`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({unit_id:unitId})});
+      log(`Dispatched unit to scheduled event ${id}`);
+      state.selectedScheduledEvent = null;
+      await load();
+    } catch(err){ log('Drag dispatch error: '+err.message); }
+    return;
+  }
+  log(`Call drop: unit ${unitId} on incident ${id}`);
   try {
-    const res = await api(`/incidents/${incidentId}/dispatch/${unitId}?reassign=1`, {method:'POST'});
-    log(`Dispatched unit to call ${incidentId}`);
-    await selectIncident(incidentId);
+    const res = await api(`/incidents/${id}/dispatch/${unitId}?reassign=1`, {method:'POST'});
+    log(`Dispatched unit to call ${id}`);
+    await selectIncident(id);
     await load();
   } catch(err){ log('Drag dispatch error: '+err.message); }
+}
+
+function playChime(){
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if(!AudioContext) return;
+    const ctx = new AudioContext();
+    const t = ctx.currentTime;
+    const o1 = ctx.createOscillator(); const g1 = ctx.createGain();
+    o1.type = 'sine'; o1.frequency.value = 880; o1.connect(g1); g1.connect(ctx.destination);
+    g1.gain.setValueAtTime(0.08, t); g1.gain.exponentialRampToValueAtTime(0.001, t+0.3);
+    o1.start(t); o1.stop(t+0.3);
+    const o2 = ctx.createOscillator(); const g2 = ctx.createGain();
+    o2.type = 'sine'; o2.frequency.value = 1109; o2.connect(g2); g2.connect(ctx.destination);
+    g2.gain.setValueAtTime(0, t+0.25); g2.gain.linearRampToValueAtTime(0.08, t+0.3); g2.gain.exponentialRampToValueAtTime(0.001, t+0.7);
+    o2.start(t+0.3); o2.stop(t+0.7);
+  } catch(e){}
+}
+
+function selectScheduledEvent(seId){
+  state.selectedScheduledEvent = seId;
+  state.selectedIncident = null;
+  const e = state.scheduledEvents.find(x=>x.id===seId);
+  if(!e){ document.getElementById('incidentPanel').innerHTML = '<div class=\'p-2 text-slate-400\'>Scheduled event not found</div>'; return; }
+  const agency = state.agencyMap[e.agency_id]||{};
+  const due = e.scheduled_at ? new Date(e.scheduled_at).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '-';
+  const avail = state.units.filter(u=>['AQ','AFR'].includes(u.current_status)).map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
+  document.getElementById('incidentPanel').innerHTML = `
+    <div class='card-head'>SCHEDULED EVENT <span class='text-slate-400'>${escapeHtml(e.title)}</span></div>
+    <div class='p-2 space-y-2'>
+      <div class='text-xs text-slate-300 flex flex-wrap gap-2 items-center'><span class='text-slate-500'>Type:</span> ${e.event_type||'-'}</div>
+      <div class='text-xs text-slate-400'>Agency: <b class='text-white'>${agency.name||'-'}</b></div>
+      <div class='text-xs text-slate-400'>Scheduled: <b class='text-white'>${due}</b></div>
+      <div class='text-xs text-slate-400'>Location: <b class='text-white'>${e.location_text||'-'}</b></div>
+      <div class='text-xs bg-slate-900 p-1 rounded max-h-24 overflow-auto'>${escapeHtml(e.notes || 'No notes')}</div>
+      <div class='flex gap-2 flex-wrap'>
+        <select id='seDispUnit' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value=''>Unit</option>${avail}</select>
+        <button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='dispatchSelectedScheduled(${seId})'>Dispatch</button>
+      </div>
+    </div>`;
+  renderCalls();
+}
+
+async function dispatchSelectedScheduled(seId){
+  const uid = document.getElementById('seDispUnit')?.value;
+  if(!uid){ alert('Select a unit'); return; }
+  try {
+    await api(`/scheduled-events/${seId}/dispatch`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({unit_id:parseInt(uid)})});
+    state.selectedScheduledEvent = null;
+    await load();
+  } catch(e){ log('Scheduled dispatch error: '+e.message); }
 }
 
 async function closeSelected(){
@@ -1384,12 +1547,12 @@ function offerPrintReport(incidentId){
 
 function renderUnits(){
   if(isDragging) return;
-  const filtered = state.units.filter(u=>matchesDiscipline((state.agencyMap[u.agency_id]||{}).agency_type));
+  const filtered = state.units.filter(u=>matchesDiscipline((state.agencyMap[u.agency_id]||{}).agency_type) && !OUT_OF_SERVICE_STATUSES.includes(u.current_status));
   document.getElementById('unitCount').textContent = filtered.length;
   const rows = filtered.map(u=>{
     const a=state.agencyMap[u.agency_id]||{};
     const inc = u.current_incident_id ? (state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id) : '-';
-    const onCall = ['OS','ER','TR','TH','AD','AK','dispatched','LUN','OOS','MAINT','DEL','NPF','HEMS'].includes(u.current_status);
+    const onCall = ['OS','ER','TR','TH','AD','AK','dispatched','LUN','OOS','MAINT','DEL','NPF'].includes(u.current_status);
     const availIso = u.current_status==='AQ' ? (u.last_assigned_at || u.in_service_at) : '';
     const sceneIso = u.current_status==='OS' ? u.last_assigned_at : '';
     const callAcc = u.accumulated_call_seconds || 0;
@@ -1410,7 +1573,7 @@ function renderUnits(){
       <td class='timer' data-fallback='-' data-iso='${sceneIso||''}'>-</td>
       <td class='timer' data-fallback='-' data-acc='${callAcc}' data-iso='${callIso||''}'>-</td>
       <td class='timer' data-fallback='-' data-iso='${shiftIso||''}'>-</td>
-      <td onclick='event.stopPropagation()'><select id='uStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitStatusChanged(${u.id})'>${unitStatusOptions(a.agency_type, a.id, u.current_status)}</select><select id='uDest_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 hidden' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitStatusChanged(${u.id})'>${getTransportDestinationOptions(a.id, a.agency_type)}</select><input id='uDestOther_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-24 hidden' placeholder='Destination' onclick='event.stopPropagation()'><input id='uMile_${u.id}' type='number' step='0.1' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-16 hidden' placeholder='Miles' onclick='event.stopPropagation()'><input id='uTime_${u.id}' type='datetime-local' step='1' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-36' placeholder='Time' onclick='event.stopPropagation()'><button class='ml-1 bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();setUnitStatus(${u.id})'>Set</button><button class='ml-1 bg-indigo-700 hover:bg-indigo-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();openCrewModal(${u.id})'>Crew</button></td>
+      <td onclick='event.stopPropagation()'><select id='uStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitStatusChanged(${u.id})'>${unitStatusOptions(a.agency_type, a.id, u.current_status)}</select><select id='uDest_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 hidden' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitStatusChanged(${u.id})'>${getTransportDestinationOptions(a.id, a.agency_type)}</select><input id='uDestOther_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-24 hidden' placeholder='Destination' onclick='event.stopPropagation()'><input id='uMile_${u.id}' type='number' step='0.1' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-16 hidden' placeholder='Miles' onclick='event.stopPropagation()'><select id='uReason_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 hidden' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitReasonChanged(${u.id})'><option value=''>Reason</option>${OOS_REASONS.map(r=>`<option value='${r}'>${r}</option>`).join('')}</select><input id='uReasonOther_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-24 hidden' placeholder='Other reason' onclick='event.stopPropagation()'><input id='uTime_${u.id}' type='datetime-local' step='1' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-36' placeholder='Time' onclick='event.stopPropagation()'><button class='ml-1 bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();setUnitStatus(${u.id})'>Set</button><button class='ml-1 bg-indigo-700 hover:bg-indigo-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();openCrewModal(${u.id})'>Crew</button></td>
     </tr>`;
   }).join('');
   const html = rows ? `<table class='tbl'><thead><tr><th>Unit</th><th>Type</th><th>Status</th><th>Crew</th><th>Call</th><th>Avail</th><th>Scene</th><th>Call T</th><th>Shift</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class=\'p-2 text-slate-500\'>No units</div>';
@@ -1457,15 +1620,16 @@ window.saveCrew = async function(){
 };
 
 function updateTimers(){
-  // Generic duration cells (unit board)
-  document.querySelectorAll('td[data-iso]').forEach(el=>{
+  // Generic duration cells (unit board, incident panel, etc.)
+  document.querySelectorAll('[data-iso]').forEach(el=>{
     if(el.dataset.timer === 'sla') return;
     const iso = el.dataset.iso;
     const acc = el.dataset.acc;
+    if(!iso) return;
     let sec = null;
     if(acc !== undefined){
-      sec = parseFloat(acc||0) + (iso ? elapsed(iso) : 0);
-    } else if(iso){
+      sec = parseFloat(acc||0) + elapsed(iso);
+    } else {
       sec = elapsed(iso);
     }
     el.textContent = sec !== null ? fmtDur(sec) : (el.dataset.fallback || '-');
@@ -1498,12 +1662,22 @@ function unitStatusChanged(unitId){
   const a = state.agencyMap[u?.agency_id]||{};
   const needsDest = isTransportStatus(s);
   const needsMile = needsMileage(s) && a.agency_type === 'ems';
+  const needsReason = ['OOS','MAINT','LUN','MEAL','OFF_DUTY','off_duty'].includes(s);
   const dest = document.getElementById('uDest_'+unitId);
   const other = document.getElementById('uDestOther_'+unitId);
   const mile = document.getElementById('uMile_'+unitId);
+  const reason = document.getElementById('uReason_'+unitId);
+  const reasonOther = document.getElementById('uReasonOther_'+unitId);
   if(dest) dest.classList.toggle('hidden', !needsDest);
   if(other) other.classList.toggle('hidden', !(needsDest && dest && dest.value==='other'));
   if(mile) mile.classList.toggle('hidden', !needsMile);
+  if(reason){ reason.classList.toggle('hidden', !needsReason); if(!needsReason) reason.value=''; }
+  if(reasonOther){ reasonOther.classList.toggle('hidden', !(needsReason && reason && reason.value==='Other')); if(!needsReason) reasonOther.value=''; }
+}
+function unitReasonChanged(unitId){
+  const reason = document.getElementById('uReason_'+unitId);
+  const other = document.getElementById('uReasonOther_'+unitId);
+  if(other && reason) other.classList.toggle('hidden', reason.value !== 'Other');
 }
 window.setUnitStatus = async function(unitId){
   const s = document.getElementById('uStat_'+unitId).value; if(!s) return;
@@ -1514,6 +1688,10 @@ window.setUnitStatus = async function(unitId){
   const needsDest = isTransportStatus(s);
   const needsMile = needsMileage(s) && a.agency_type === 'ems';
   const body = {status_code: s};
+  const reasonEl = document.getElementById('uReason_'+unitId);
+  if(reasonEl && !reasonEl.classList.contains('hidden') && reasonEl.value){
+    body.reason = reasonEl.value === 'Other' ? (document.getElementById('uReasonOther_'+unitId)?.value || 'Other') : reasonEl.value;
+  }
   const at = manualStatusTime('uTime_'+unitId);
   if(at) body.at = at;
   if(needsDest){
@@ -1548,6 +1726,66 @@ window.setUnitStatus = async function(unitId){
       offerPrintReport(inc.id);
     }
   } catch(e){ log('Status error: '+e.message); }
+};
+
+function manageUnitStatusChanged(unitId){
+  const s = document.getElementById('umStat_'+unitId).value;
+  const needsReason = ['OOS','MAINT','LUN','MEAL','OFF_DUTY','off_duty'].includes(s);
+  const reason = document.getElementById('umReason_'+unitId);
+  const other = document.getElementById('umReasonOther_'+unitId);
+  if(reason){ reason.classList.toggle('hidden', !needsReason); if(!needsReason) reason.value=''; }
+  if(other){ other.classList.toggle('hidden', !(needsReason && reason && reason.value==='Other')); if(!needsReason) other.value=''; }
+}
+function manageUnitReasonChanged(unitId){
+  const reason = document.getElementById('umReason_'+unitId);
+  const other = document.getElementById('umReasonOther_'+unitId);
+  if(other && reason) other.classList.toggle('hidden', reason.value !== 'Other');
+}
+window.openUnitsModal = function(){
+  document.getElementById('unitsModal').classList.remove('hidden');
+  document.getElementById('unitsModal').classList.add('flex');
+  renderUnitsModal();
+};
+window.closeUnitsModal = function(){
+  document.getElementById('unitsModal').classList.add('hidden');
+  document.getElementById('unitsModal').classList.remove('flex');
+};
+function renderUnitsModal(){
+  const filtered = state.units.filter(u=>matchesDiscipline((state.agencyMap[u.agency_id]||{}).agency_type)).sort((a,b)=>(a.call_sign||'').localeCompare(b.call_sign||''));
+  const html = filtered.length ? `<table class='tbl' style='font-size:0.75rem'><thead><tr><th>Unit</th><th>Agency</th><th>Current Status</th><th>Crew</th><th>Set Status</th><th>Reason</th><th>Actions</th></tr></thead><tbody>` + filtered.map(u=>{
+    const agency = state.agencyMap[u.agency_id]||{};
+    const crew = (state.personnel||[]).filter(p=>p.current_unit_id===u.id).map(p=>`${p.first_name||''} ${p.last_name||''}`).join(', ') || '-';
+    const statusOpts = `<option value=''>Set status...</option>` + UNIT_MANAGE_STATUSES.map(s=>`<option value='${s}'>${statusLabel(s)}</option>`).join('');
+    const reasonOpts = `<option value=''>Reason</option>` + OOS_REASONS.map(r=>`<option value='${r}'>${r}</option>`).join('');
+    return `<tr>
+      <td class='font-bold'>${u.call_sign}</td>
+      <td>${agency.name||'-'}</td>
+      <td>${statusLabelByType(agency.agency_type, u.current_status)}</td>
+      <td>${crew}</td>
+      <td><select id='umStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onchange='manageUnitStatusChanged(${u.id})'>${statusOpts}</select></td>
+      <td><select id='umReason_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden' onchange='manageUnitReasonChanged(${u.id})'>${reasonOpts}</select><input id='umReasonOther_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-28 mt-1 hidden' placeholder='Other reason'></td>
+      <td class='space-x-1'><button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='manageSetUnitStatus(${u.id})'>Set</button><button class='bg-indigo-700 hover:bg-indigo-600 px-2 py-0.5 rounded text-xs' onclick='openCrewModal(${u.id}); closeUnitsModal();'>Crew</button></td>
+    </tr>`;
+  }).join('') + '</tbody></table>' : '<div class=\'p-2 text-slate-500\'>No units</div>';
+  document.getElementById('unitsListContainer').innerHTML = html;
+}
+window.manageSetUnitStatus = async function(unitId){
+  const s = document.getElementById('umStat_'+unitId).value;
+  if(!s){ alert('Select a status'); return; }
+  const u = state.units.find(x=>x.id===unitId);
+  const reasonSel = document.getElementById('umReason_'+unitId);
+  let reason = '';
+  if(reasonSel && !reasonSel.classList.contains('hidden') && reasonSel.value){
+    reason = reasonSel.value === 'Other' ? (document.getElementById('umReasonOther_'+unitId)?.value || 'Other') : reasonSel.value;
+  }
+  const body = {status_code: s};
+  if(reason) body.reason = reason;
+  try {
+    await api(`/units/${unitId}/status`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    log(`Unit ${u?.call_sign||unitId} set to ${statusLabel(s)}${reason ? ' - ' + reason : ''}`);
+    await load();
+    renderUnitsModal();
+  } catch(e){ log('Unit status error: '+e.message); alert(e.message); }
 };
 
 async function selectUnit(id){ state.selectedUnit=id; await loadTrails(id); renderUnits(); renderMap(); }
@@ -1728,8 +1966,8 @@ async function loadConfigs(){
 
 async function load(){
   try {
-    const [agencies, units, incidents, messages, configs, postZones, personnel, _dests] = await Promise.all([api('/agencies'), api('/units'), api('/incidents'), api('/messages'), loadConfigs(), api('/post-zones'), api('/personnel'), loadAllDestinations()]);
-    state.agencies = agencies; state.units = units; state.incidents = incidents; state.messages = messages; state.configs = configs; state.postZones = postZones; state.personnel = personnel;
+    const [agencies, units, incidents, scheduledEvents, messages, configs, postZones, personnel, _dests] = await Promise.all([api('/agencies'), api('/units'), api('/incidents'), api('/scheduled-events?status=scheduled&window_minutes=60'), api('/messages'), loadConfigs(), api('/post-zones'), api('/personnel'), loadAllDestinations()]);
+    state.agencies = agencies; state.units = units; state.incidents = incidents; state.scheduledEvents = scheduledEvents || []; state.messages = messages; state.configs = configs; state.postZones = postZones; state.personnel = personnel;
     state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
     const mapConfig = await api('/config?category=map_layers');
     const ml = mapConfig.find(c=>c.category==='map_layers' && c.key==='all')?.value || [];
@@ -1759,15 +1997,14 @@ async function load(){
 
 function renderKPI(){
   const active = state.incidents.filter(i=>i.status!=='closed');
+  const activeScheduled = state.scheduledEvents || [];
   const enRoute = state.units.filter(u=>['ER','en_route'].includes(u.current_status)).length;
   const onScene = state.units.filter(u=>['OS','on_scene'].includes(u.current_status)).length;
   const available = state.units.filter(u=>['AQ','AFR','POSTING','STAGED','AT_STATION','AVAILABLE_ON_RADIO','IN_SERVICE','ON_DUTY','AVAILABLE'].includes(u.current_status)).length;
-  const unacked = state.incidents.filter(i=>i.requires_ack && !i.acknowledged_at).length;
-  const elActive=document.getElementById('kpiActive'); if(elActive) elActive.textContent=active.length;
+  const elActive=document.getElementById('kpiActive'); if(elActive) elActive.textContent=active.length + activeScheduled.length;
   const elEn=document.getElementById('kpiEnRoute'); if(elEn) elEn.textContent=enRoute;
   const elOn=document.getElementById('kpiOnScene'); if(elOn) elOn.textContent=onScene;
   const elAv=document.getElementById('kpiAvailable'); if(elAv) elAv.textContent=available;
-  const elUn=document.getElementById('kpiUnacked'); if(elUn) elUn.textContent=unacked;
 }
 function updateClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 
@@ -1899,6 +2136,22 @@ function attachIncidentPanelDrops(){
     <div class='mt-3 flex justify-end gap-2'>
       <button class='bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-sm' onclick='closeCrewModal()'>Cancel</button>
       <button class='bg-blue-700 hover:bg-blue-600 px-3 py-1 rounded text-sm' onclick='saveCrew()'>Save</button>
+    </div>
+  </div>
+</div>
+
+<div id='unitsModal' class='fixed inset-0 bg-slate-950/80 hidden items-center justify-center z-50' onclick='if(event.target===this) closeUnitsModal()'>
+  <div class='bg-slate-800 border border-slate-600 rounded-lg p-4 w-full max-w-4xl max-h-[85vh] flex flex-col'>
+    <div class='flex justify-between items-center mb-2'>
+      <h3 class='font-bold'>Unit Management</h3>
+      <button class='text-slate-400 hover:text-white' onclick='closeUnitsModal()'>&times;</button>
+    </div>
+    <div class='text-xs text-slate-400 mb-2'>Manage out of service units, set status with reason, and assign or remove crew. Active units are also shown for convenience.</div>
+    <div class='overflow-y-auto flex-1'>
+      <div id='unitsListContainer' class='text-sm'></div>
+    </div>
+    <div class='mt-3 flex justify-end gap-2'>
+      <button class='bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-sm' onclick='closeUnitsModal()'>Close</button>
     </div>
   </div>
 </div>

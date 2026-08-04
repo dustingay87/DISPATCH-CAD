@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>Unified Response - Agency Setup</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .card { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1.25rem; }
+  .btn { padding:0.5rem 1rem; border-radius:0.375rem; font-size:0.875rem; cursor:pointer; border:none; }
+  .btn-primary { background:#2563eb; color:#fff; }
+  .btn-primary:hover { background:#1d4ed8; }
+  .btn-slate { background:#475569; color:#fff; }
+  .btn-slate:hover { background:#334155; }
+  input, select, textarea { background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:0.5rem; border-radius:0.25rem; font-size:0.875rem; width:100%; }
+  label { display:block; font-size:0.8rem; color:#94a3b8; margin:0.5rem 0 0.2rem; }
+  .hidden { display:none; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+  @media (max-width:640px){ .grid-2 { grid-template-columns:1fr; } }
+</style>
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
+</head>
+<body class='p-6'>
+  <div class='max-w-3xl mx-auto'>
+    <div class='flex justify-between items-center mb-4'>
+      <h1 id='title' class='text-2xl font-bold'>New Customer Agency</h1>
+      <a href='/superadmin' class='btn btn-slate'>Back</a>
+    </div>
+    <div id='msg' class='hidden mb-4 px-4 py-2 rounded text-sm'></div>
+
+    <div id='createView' class='card'>
+      <p class='text-sm text-slate-400 mb-4'>Enter the agency / customer demographics. A customer tenant will be created automatically.</p>
+      <form id='agencyForm' class='space-y-3'>
+        <label>Agency Name</label>
+        <input id='name' placeholder='e.g. Metro Fire Department' required>
+
+        <label>Agency Type</label>
+        <select id='agency_type'>
+          <option value='police'>Police</option>
+          <option value='fire'>Fire</option>
+          <option value='ems'>EMS</option>
+        </select>
+
+        <label>Street Address</label>
+        <input id='address' placeholder='123 Main St'>
+
+        <div class='grid-2'>
+          <div>
+            <label>City</label>
+            <input id='city' placeholder='City'>
+          </div>
+          <div>
+            <label>State</label>
+            <input id='state' placeholder='OH' maxlength='2'>
+          </div>
+        </div>
+
+        <div class='grid-2'>
+          <div>
+            <label>ZIP</label>
+            <input id='zip_code' placeholder='43210'>
+          </div>
+          <div>
+            <label>Domain / Slug</label>
+            <input id='domain' placeholder='metrofire.example.com'>
+          </div>
+        </div>
+
+        <div class='grid-2'>
+          <div>
+            <label>Latitude</label>
+            <input id='lat' type='number' step='any' placeholder='auto if blank'>
+          </div>
+          <div>
+            <label>Longitude</label>
+            <input id='lng' type='number' step='any' placeholder='auto if blank'>
+          </div>
+        </div>
+
+        <div class='flex gap-2 mt-4'>
+          <button type='submit' class='btn btn-primary'>Create Agency & Customer</button>
+          <button type='button' class='btn btn-slate' onclick='geocode()'>Verify Location</button>
+        </div>
+      </form>
+    </div>
+
+    <div id='createdView' class='hidden card text-center'>
+      <h2 class='text-xl font-semibold mb-2'>Agency created</h2>
+      <p id='createdText' class='text-slate-400 mb-4'></p>
+      <a id='buildLink' href='#' class='btn btn-primary'>Build Agency</a>
+    </div>
+
+    <div id='existingView' class='hidden card'>
+      <h2 class='text-xl font-semibold mb-2' id='existingName'></h2>
+      <p id='existingDetails' class='text-sm text-slate-400 mb-4'></p>
+      <a id='existingBuildLink' href='#' class='btn btn-primary'>Build / Manage Agency</a>
+    </div>
+  </div>
+
+<script>
+const msg = document.getElementById('msg');
+function showMsg(text, ok=true){
+  msg.textContent = text;
+  msg.className = 'mb-4 px-4 py-2 rounded text-sm ' + (ok ? 'bg-green-900 text-green-200' : 'bg-red-900 text-red-200');
+  msg.classList.remove('hidden');
+}
+
+async function api(path, opts={}){
+  opts.credentials = 'include';
+  opts.headers = opts.headers || {};
+  if(opts.body && typeof opts.body === 'string' && !opts.headers['Content-Type']){
+    opts.headers['Content-Type'] = 'application/json';
+  }
+  const res = await fetch(path, opts);
+  if(!res.ok){
+    const txt = await res.text();
+    throw new Error(txt || 'Request failed');
+  }
+  return res.json().catch(()=>{});
+}
+
+const params = new URLSearchParams(window.location.search);
+const agencyId = params.get('agency_id');
+
+(async function init(){
+  try {
+    const me = await api('/me');
+    if(me.role !== 'superadmin' && me.role !== 'admin'){
+      window.location.href = '/';
+      return;
+    }
+    if(agencyId){
+      const a = await api('/agencies/' + agencyId);
+      document.getElementById('title').textContent = a.name;
+      document.getElementById('createView').classList.add('hidden');
+      document.getElementById('existingView').classList.remove('hidden');
+      document.getElementById('existingName').textContent = a.name;
+      document.getElementById('existingDetails').textContent = [a.address, a.city, a.state, a.zip_code].filter(Boolean).join(', ') || 'No address';
+      document.getElementById('existingBuildLink').href = '/agency-build?agency_id=' + a.id;
+    }
+  } catch(e){
+    window.location.href = '/login';
+  }
+})();
+
+async function geocode(){
+  const city = document.getElementById('city').value;
+  const state = document.getElementById('state').value;
+  const addr = document.getElementById('address').value;
+  const q = [addr, city, state].filter(Boolean).join(', ');
+  if(!q){ showMsg('Enter address/city/state', false); return; }
+  try {
+    const res = await fetch('https://nominatim.openstreetmap.org/search?' + new URLSearchParams({q, format:'json', limit:1}), {headers:{'Accept':'application/json'}});
+    const data = await res.json();
+    if(data && data.length){
+      document.getElementById('lat').value = parseFloat(data[0].lat).toFixed(6);
+      document.getElementById('lng').value = parseFloat(data[0].lon).toFixed(6);
+      showMsg('Location verified: ' + data[0].display_name, true);
+    } else {
+      showMsg('Address not found', false);
+    }
+  } catch(e){
+    showMsg('Geocoding failed', false);
+  }
+}
+
+document.getElementById('agencyForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const body = {
+    name: document.getElementById('name').value,
+    agency_type: document.getElementById('agency_type').value,
+    address: document.getElementById('address').value,
+    city: document.getElementById('city').value,
+    state: document.getElementById('state').value,
+    zip_code: document.getElementById('zip_code').value,
+    domain: document.getElementById('domain').value,
+    lat: document.getElementById('lat').value ? parseFloat(document.getElementById('lat').value) : null,
+    lng: document.getElementById('lng').value ? parseFloat(document.getElementById('lng').value) : null
+  };
+  try {
+    const a = await api('/agencies', {method:'POST', body:JSON.stringify(body)});
+    document.getElementById('createView').classList.add('hidden');
+    document.getElementById('createdView').classList.remove('hidden');
+    document.getElementById('createdText').textContent = `${a.name} (${a.agency_type}) was created. Customer slug: ${a.customer_id}`;
+    document.getElementById('buildLink').href = '/agency-build?agency_id=' + a.id;
+    showMsg('Agency and customer created', true);
+  } catch(err){
+    showMsg(err.message, false);
+  }
+});
+</script>
+<script src="/static/theme.js"></script>
+</body>
+</html>

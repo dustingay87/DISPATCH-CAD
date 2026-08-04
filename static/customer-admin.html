@@ -68,6 +68,9 @@ th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
           <input id='ctLabel' placeholder='Label' required>
           <input id='ctPriority' placeholder='Priority' type='number' value='2' required>
           <input id='ctFields' placeholder='Fields (comma sep)'>
+          <div class='flex items-center gap-2'>
+            <label class='flex items-center gap-1 text-sm text-slate-300'><input type='checkbox' id='ctActive' checked> Active</label>
+          </div>
           <div class='flex gap-2'>
             <button id='ctSubmit' class='btn btn-primary text-white flex-1'>Add Call Type</button>
             <button type='button' id='ctCancel' class='btn bg-slate-700 hover:bg-slate-600 text-white hidden' onclick='resetCallTypeForm()'>Cancel</button>
@@ -112,6 +115,9 @@ th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
         <form id='unitTypeForm' class='flex gap-2'>
           <input type='hidden' id='utEditIndex'>
           <input id='utName' placeholder='Unit Type' class='flex-1' required>
+          <div class='flex items-center gap-2'>
+            <label class='flex items-center gap-1 text-sm text-slate-300'><input type='checkbox' id='utActive' checked> Active</label>
+          </div>
           <div class='flex gap-2'>
             <button id='utSubmit' class='btn btn-primary text-white'>Add Unit Type</button>
             <button type='button' id='utCancel' class='btn bg-slate-700 hover:bg-slate-600 text-white hidden' onclick='resetUnitTypeForm()'>Cancel</button>
@@ -125,7 +131,12 @@ th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
         <form id='destForm' class='grid grid-cols-1 sm:grid-cols-6 gap-2'>
           <input type='hidden' id='dId'>
           <input id='dName' placeholder='Name' required>
-          <input id='dAddress' placeholder='Address'>
+          <input id='dStreet' placeholder='Street Address' class='sm:col-span-6'>
+          <div class='grid grid-cols-3 gap-2 sm:col-span-6'>
+            <input id='dCity' placeholder='City'>
+            <input id='dState' placeholder='ST' maxlength='2'>
+            <input id='dZip' placeholder='Zip'>
+          </div>
           <input id='dLat' placeholder='Lat' type='number' step='any'>
           <input id='dLng' placeholder='Lng' type='number' step='any'>
           <input id='dCategory' placeholder='Category'>
@@ -229,6 +240,14 @@ async function uploadPhoto(path, file, previewEl){
 
 let state = {agencies:[], agency_id:null, call_types:[], unit_types:[], units:[], personnel:[], features:{}, response_profiles:{}};
 
+function normalizeActive(v){ return v === false || v === 'false' || v === 0 ? false : true; }
+
+function normalizeUnitType(t){
+  if(typeof t === 'string') return {name: t, active: true};
+  if(!t) return {name: '', active: true};
+  return {name: t.name || '', active: normalizeActive(t.active)};
+}
+
 async function loadAgencies(){
   state.agencies = await api('/agencies');
   document.getElementById('agencySelect').innerHTML = '<option value="">Select agency</option>' + state.agencies.map(a=>`<option value='${a.id}'>${a.name} (${a.agency_type})</option>`).join('');
@@ -269,9 +288,9 @@ document.getElementById('saveModules').addEventListener('click', async ()=>{
 });
 
 async function loadCallTypes(){
-  state.call_types = await getConfigValue('call_types') || [];
+  state.call_types = (await getConfigValue('call_types') || []).map(c=>{ return {...c, active: normalizeActive(c.active)}; });
   const el = document.getElementById('callTypeList');
-  el.innerHTML = state.call_types.length ? `<table><thead><tr><th>Label</th><th>Priority</th><th>Fields</th><th></th></tr></thead><tbody>${state.call_types.map((c,i)=>`<tr><td>${c.label}</td><td>${c.priority}</td><td>${(c.fields||[]).join(', ')}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editCallType(${i})'>Edit</button><button class='btn btn-danger' onclick='deleteCallType(${i})'>Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No call types.</div>';
+  el.innerHTML = state.call_types.length ? `<table><thead><tr><th>Label</th><th>Priority</th><th>Fields</th><th>Active</th><th></th></tr></thead><tbody>${state.call_types.map((c,i)=>`<tr class='${c.active?'':'text-slate-500 line-through'}'><td>${c.label}</td><td>${c.priority}</td><td>${(c.fields||[]).join(', ')}</td><td>${c.active?'Yes':'No'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editCallType(${i})'>Edit</button><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='toggleCallTypeActive(${i})'>${c.active?'Make Inactive':'Make Active'}</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No call types.</div>';
 }
 
 function resetCallTypeForm(){
@@ -286,13 +305,13 @@ function editCallType(i){
   document.getElementById('ctLabel').value=c.label;
   document.getElementById('ctPriority').value=c.priority;
   document.getElementById('ctFields').value=(c.fields||[]).join(', ');
+  document.getElementById('ctActive').checked = c.active !== false;
   document.getElementById('ctSubmit').textContent='Update Call Type';
   document.getElementById('ctCancel').classList.remove('hidden');
 }
 
-async function deleteCallType(i){
-  if(!confirm('Delete this call type?')) return;
-  state.call_types.splice(i,1);
+async function toggleCallTypeActive(i){
+  state.call_types[i].active = !normalizeActive(state.call_types[i].active);
   await setConfigValue('call_types', state.call_types);
   resetCallTypeForm(); await loadCallTypes();
 }
@@ -300,7 +319,7 @@ async function deleteCallType(i){
 document.getElementById('callTypeForm').addEventListener('submit', async e=>{
   e.preventDefault();
   const fields = document.getElementById('ctFields').value.split(',').map(s=>s.trim()).filter(Boolean);
-  const item = {label: document.getElementById('ctLabel').value, priority: parseInt(document.getElementById('ctPriority').value), fields};
+  const item = {label: document.getElementById('ctLabel').value, priority: parseInt(document.getElementById('ctPriority').value), fields, active: document.getElementById('ctActive').checked};
   const idx = document.getElementById('ctEditIndex').value;
   if(idx!=='') state.call_types[parseInt(idx)] = item; else state.call_types.push(item);
   await setConfigValue('call_types', state.call_types);
@@ -309,9 +328,9 @@ document.getElementById('callTypeForm').addEventListener('submit', async e=>{
 });
 
 async function loadUnitTypes(){
-  state.unit_types = await getConfigValue('unit_types') || [];
-  document.getElementById('unitTypeList').innerHTML = state.unit_types.map((u,i)=>`<span class='tag flex items-center gap-1'>${u}<button class='ml-1 text-slate-400 hover:text-white' onclick='editUnitType(${i})'>&#9998;</button><button class='ml-1 text-red-400 hover:text-red-200' onclick='deleteUnitType(${i})'>&times;</button></span>`).join('');
-  const opts = state.unit_types.map(u=>`<option value='${u}'>${u}</option>`).join('');
+  state.unit_types = (await getConfigValue('unit_types') || []).map(normalizeUnitType);
+  document.getElementById('unitTypeList').innerHTML = state.unit_types.map((u,i)=>`<span class='tag flex items-center gap-1 ${u.active?'':'line-through'}'>${u.name}<button class='ml-1 text-slate-400 hover:text-white' onclick='editUnitType(${i})'>&#9998;</button><button class='ml-1 text-slate-400 hover:text-white' onclick='toggleUnitTypeActive(${i})' title='${u.active?'Make inactive':'Make active'}'>${u.active?'Off':'On'}</button></span>`).join('');
+  const opts = state.unit_types.filter(u=>u.active).map(u=>`<option value='${u.name}'>${u.name}</option>`).join('');
   document.getElementById('uUnitType').innerHTML = '<option value="">Select unit type</option>' + opts;
 }
 
@@ -322,34 +341,47 @@ function resetUnitTypeForm(){
 }
 
 function editUnitType(i){
+  const u = state.unit_types[i];
   document.getElementById('utEditIndex').value=i;
-  document.getElementById('utName').value=state.unit_types[i];
+  document.getElementById('utName').value=u.name;
+  document.getElementById('utActive').checked = u.active !== false;
   document.getElementById('utSubmit').textContent='Update Unit Type';
   document.getElementById('utCancel').classList.remove('hidden');
 }
 
-async function deleteUnitType(i){
-  if(!confirm('Delete this unit type?')) return;
-  state.unit_types.splice(i,1);
+async function toggleUnitTypeActive(i){
+  state.unit_types[i].active = !normalizeActive(state.unit_types[i].active);
   await setConfigValue('unit_types', state.unit_types);
   resetUnitTypeForm(); await loadUnitTypes();
 }
 
 document.getElementById('unitTypeForm').addEventListener('submit', async e=>{
   e.preventDefault();
-  const name = document.getElementById('utName').value;
+  const name = document.getElementById('utName').value.trim();
+  const active = document.getElementById('utActive').checked;
   const idx = document.getElementById('utEditIndex').value;
-  if(idx!=='') state.unit_types[parseInt(idx)] = name; else state.unit_types.push(name);
+  const existing = state.unit_types.findIndex((u,i)=>(typeof u==='string'?u:u.name)===name && i!=(idx||-1));
+  if(existing>=0){ alert('Unit type already exists'); return; }
+  if(idx!=='') state.unit_types[parseInt(idx)] = {name, active}; else state.unit_types.push({name, active});
   await setConfigValue('unit_types', state.unit_types);
   resetUnitTypeForm();
   await loadUnitTypes();
 });
 
 async function loadDestinations(){
-  const list = await api(`/destinations?agency_id=${state.agency_id}`);
-  document.getElementById('destList').innerHTML = list.length ? `<table><thead><tr><th>Name</th><th>Address</th><th>Category</th><th>Phone</th><th>Door</th><th>Notes</th><th></th></tr></thead><tbody>${list.map(d=>{ const det=d.details||{}; return `<tr><td>${d.name}</td><td>${d.address||'-'}</td><td>${d.category||'-'}</td><td>${det.phone||'-'}</td><td>${det.door_code||'-'}</td><td>${det.notes||'-'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editDestination(${JSON.stringify(d).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deleteDestination(${d.id})'>Delete</button></td></tr>`}).join('')}</tbody></table>` : '<div class="text-slate-500">No saved locations.</div>';
+  const list = await api(`/destinations?agency_id=${state.agency_id}&include_inactive=1`);
+  document.getElementById('destList').innerHTML = list.length ? `<table><thead><tr><th>Name</th><th>Address</th><th>Category</th><th>Phone</th><th>Door</th><th>Notes</th><th>Active</th><th></th></tr></thead><tbody>${list.map(d=>{ const det=d.details||{}; const active = normalizeActive(d.is_active); return `<tr class='${active?'':'text-slate-500 line-through'}'><td>${d.name}</td><td>${d.address||'-'}</td><td>${d.category||'-'}</td><td>${det.phone||'-'}</td><td>${det.door_code||'-'}</td><td>${det.notes||'-'}</td><td>${active?'Yes':'No'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editDestination(${JSON.stringify(d).replace(/'/g,"&#39;")})'>Edit</button><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='toggleDestinationActive(${d.id}, ${active})'>${active?'Make Inactive':'Make Active'}</button></td></tr>`}).join('')}</tbody></table>` : '<div class="text-slate-500">No saved locations.</div>';
 }
 
+function buildAddress(prefix){
+  const parts = [document.getElementById(prefix+'Street').value, document.getElementById(prefix+'City').value, document.getElementById(prefix+'State').value, document.getElementById(prefix+'Zip').value].map(s=>s.trim()).filter(Boolean);
+  return parts.join(', ');
+}
+function parseAddress(addr){
+  if(!addr) return {street:'', city:'', state:'', zip:''};
+  const parts = addr.split(',').map(s=>s.trim());
+  return {street:parts[0]||'', city:parts[1]||'', state:parts[2]||'', zip:parts[3]||''};
+}
 function resetDestForm(){
   document.getElementById('destForm').reset(); document.getElementById('dId').value='';
   document.getElementById('destFormTitle').textContent='Saved Locations';
@@ -361,7 +393,11 @@ function editDestination(d){
   const details = d.details || {};
   document.getElementById('dId').value=d.id;
   document.getElementById('dName').value=d.name;
-  document.getElementById('dAddress').value=d.address||'';
+  const loc = parseAddress(d.address);
+  document.getElementById('dStreet').value=loc.street;
+  document.getElementById('dCity').value=loc.city;
+  document.getElementById('dState').value=loc.state;
+  document.getElementById('dZip').value=loc.zip;
   document.getElementById('dLat').value=d.lat||'';
   document.getElementById('dLng').value=d.lng||'';
   document.getElementById('dCategory').value=d.category||'';
@@ -373,9 +409,8 @@ function editDestination(d){
   document.getElementById('dCancel').classList.remove('hidden');
 }
 
-async function deleteDestination(id){
-  if(!confirm('Delete this saved location?')) return;
-  try { await api(`/destinations/${id}`,{method:'DELETE'}); resetDestForm(); await loadDestinations(); } catch(err){ alert(err.message); }
+async function toggleDestinationActive(id, active){
+  try { await api(`/destinations/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({is_active:!active})}); resetDestForm(); await loadDestinations(); } catch(err){ alert(err.message); }
 }
 
 document.getElementById('destForm').addEventListener('submit', async e=>{
@@ -383,7 +418,7 @@ document.getElementById('destForm').addEventListener('submit', async e=>{
   const body = {
     agency_id: state.agency_id,
     name: document.getElementById('dName').value,
-    address: document.getElementById('dAddress').value,
+    address: buildAddress('d'),
     lat: parseFloat(document.getElementById('dLat').value) || null,
     lng: parseFloat(document.getElementById('dLng').value) || null,
     category: document.getElementById('dCategory').value,
@@ -403,7 +438,7 @@ document.getElementById('destForm').addEventListener('submit', async e=>{
 
 async function loadUnits(){
   state.units = await api(`/units?agency_id=${state.agency_id}`);
-  document.getElementById('unitList').innerHTML = state.units.length ? `<table><thead><tr><th>Photo</th><th>Call Sign</th><th>Name</th><th>Type</th><th>Status</th><th></th></tr></thead><tbody>${state.units.map(u=>`<tr><td>${u.photo_url?`<img src='${u.photo_url}' class='h-8 w-8 rounded-full object-cover border border-slate-600'>`:'-'}</td><td>${u.call_sign}</td><td>${u.name}</td><td>${u.unit_type}</td><td>${u.current_status}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editUnit(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deleteUnit(${u.id})'>Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No units.</div>';
+  document.getElementById('unitList').innerHTML = state.units.length ? `<table><thead><tr><th>Photo</th><th>Call Sign</th><th>Name</th><th>Type</th><th>Status</th><th>Active</th><th></th></tr></thead><tbody>${state.units.map(u=>{ const active = normalizeActive(u.is_active); return `<tr class='${active?'':'text-slate-500 line-through'}'><td>${u.photo_url?`<img src='${u.photo_url}' class='h-8 w-8 rounded-full object-cover border border-slate-600'>`:'-'}</td><td>${u.call_sign}</td><td>${u.name}</td><td>${u.unit_type}</td><td>${u.current_status}</td><td>${active?'Yes':'No'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editUnit(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Edit</button><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='toggleUnitActive(${u.id}, ${active})'>${active?'Make Inactive':'Make Active'}</button></td></tr>`}).join('')}</tbody></table>` : '<div class="text-slate-500">No units.</div>';
   const opts = state.units.map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
   document.getElementById('pUnit').innerHTML = '<option value="">No unit</option>' + opts;
 }
@@ -448,9 +483,8 @@ async function uploadUnitPhoto(){
   } catch(err){ alert(err.message); }
 }
 
-async function deleteUnit(id){
-  if(!confirm('Delete this unit?')) return;
-  try { await api(`/units/${id}`,{method:'DELETE'}); resetUnitForm(); await loadUnits(); } catch(err){ alert(err.message); }
+async function toggleUnitActive(id, active){
+  try { await api(`/units/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({is_active:!active})}); resetUnitForm(); await loadUnits(); } catch(err){ alert(err.message); }
 }
 
 document.getElementById('unitForm').addEventListener('submit', async e=>{
@@ -477,7 +511,7 @@ document.getElementById('unitForm').addEventListener('submit', async e=>{
 
 async function loadPersonnel(){
   state.personnel = await api(`/personnel?agency_id=${state.agency_id}`);
-  document.getElementById('personnelList').innerHTML = state.personnel.length ? `<table><thead><tr><th>Photo</th><th>Name</th><th>Radio</th><th>Phone</th><th>Duty</th><th>Unit</th><th></th></tr></thead><tbody>${state.personnel.map(p=>`<tr><td>${p.photo_url?`<img src='${p.photo_url}' class='h-8 w-8 rounded-full object-cover border border-slate-600'>`:'-'}</td><td>${p.first_name} ${p.last_name}</td><td>${p.radio_id||'-'}</td><td>${p.phone||'-'}</td><td>${p.duty_status}</td><td>${(state.units.find(u=>u.id==p.current_unit_id)||{}).call_sign||'-'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editPersonnel(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-danger' onclick='deletePersonnel(${p.id})'>Delete</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No crew members.</div>';
+  document.getElementById('personnelList').innerHTML = state.personnel.length ? `<table><thead><tr><th>Photo</th><th>Name</th><th>Radio</th><th>Phone</th><th>Duty</th><th>Unit</th><th>Active</th><th></th></tr></thead><tbody>${state.personnel.map(p=>{ const active = normalizeActive(p.is_active); return `<tr class='${active?'':'text-slate-500 line-through'}'><td>${p.photo_url?`<img src='${p.photo_url}' class='h-8 w-8 rounded-full object-cover border border-slate-600'>`:'-'}</td><td>${p.first_name} ${p.last_name}</td><td>${p.radio_id||'-'}</td><td>${p.phone||'-'}</td><td>${p.duty_status}</td><td>${(state.units.find(u=>u.id==p.current_unit_id)||{}).call_sign||'-'}</td><td>${active?'Yes':'No'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editPersonnel(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Edit</button><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='togglePersonnelActive(${p.id}, ${active})'>${active?'Make Inactive':'Make Active'}</button></td></tr>`}).join('')}</tbody></table>` : '<div class="text-slate-500">No crew members.</div>';
 }
 
 function resetPersonnelForm(){
@@ -518,9 +552,8 @@ async function uploadPersonnelPhoto(){
   } catch(err){ alert(err.message); }
 }
 
-async function deletePersonnel(id){
-  if(!confirm('Delete this crew member?')) return;
-  try { await api(`/personnel/${id}`,{method:'DELETE'}); resetPersonnelForm(); await loadPersonnel(); } catch(err){ alert(err.message); }
+async function togglePersonnelActive(id, active){
+  try { await api(`/personnel/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({is_active:!active})}); resetPersonnelForm(); await loadPersonnel(); } catch(err){ alert(err.message); }
 }
 
 document.getElementById('personnelForm').addEventListener('submit', async e=>{
@@ -612,7 +645,7 @@ function editResponseProfile(idx){
 
 function renderRpSlotOptions(){
   const sel = document.getElementById('rpSlotUnit');
-  const opts = state.unit_types.map(u=>`<option value='${u}'>${u}</option>`).join('');
+  const opts = state.unit_types.map(u=>`<option value='${u.name || u}'>${u.name || u}</option>`).join('');
   sel.innerHTML = '<option value="">Unit type</option>' + opts;
 }
 

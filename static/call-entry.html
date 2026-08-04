@@ -546,8 +546,19 @@ async function init(){
     state.agencies = await api('/agencies');
     state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
     const userAgency = user?.agency_id ? state.agencyMap[user.agency_id] : null;
-    const allowedDisciplines = ['admin','super_admin','superadmin'].includes(user?.role) ? ['police','fire','ems'] : (userAgency ? [userAgency.agency_type] : (d ? [d] : ['fire']));
-    const defaultDiscipline = allowedDisciplines[0] || 'fire';
+    let allowedDisciplines = [];
+    if(user?.modules && user.modules.length && !user.modules.includes('all')){
+      allowedDisciplines = user.modules.map(moduleToDiscipline).filter(x=>['police','fire','ems'].includes(x));
+    } else if(['admin','super_admin','superadmin'].includes(user?.role)){
+      allowedDisciplines = ['police','fire','ems'];
+    } else if(userAgency){
+      allowedDisciplines = [userAgency.agency_type].filter(x=>['police','fire','ems'].includes(x));
+    } else if(d){
+      allowedDisciplines = [d].filter(x=>['police','fire','ems'].includes(x));
+    } else {
+      allowedDisciplines = ['fire'];
+    }
+    const defaultDiscipline = d && allowedDisciplines.includes(d) ? d : (allowedDisciplines[0] || 'fire');
     document.querySelectorAll('#disciplineTabs .tab').forEach(t=>t.classList.toggle('hidden', !allowedDisciplines.includes(t.dataset.d)));
     if(allowedDisciplines.length <= 1){
       document.getElementById('disciplineTabs').classList.add('hidden');

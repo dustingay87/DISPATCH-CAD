@@ -99,7 +99,7 @@ body { -webkit-tap-highlight-color:transparent; overscroll-behavior:none; }
 
   <div id='map' class='tab-content'>
     <div id='routePanel' class='card hidden'>
-      <div class='text-xs font-semibold text-slate-400 uppercase mb-1'>Navigation</div>
+      <div class='text-xs font-semibold text-slate-400 uppercase mb-1'>Turn-by-Turn Navigation</div>
       <div id='routeSummary' class='text-sm text-slate-200'></div>
       <div id='routeSteps' class='text-sm space-y-1 mt-2 max-h-40 overflow-auto'></div>
     </div>
@@ -180,7 +180,7 @@ async function logout(){ try { await api('/logout', {method:'POST'}); } catch(e)
 function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
 function elapsed(iso){ return iso ? (Date.now()-new Date(iso).getTime())/1000 : 0; }
 function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
-function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transporting',TH:'Transporting to HEMS',AD:'Arrived at Destination',CBY_CALLER:'Cancelled by Caller',CBY_OTHER:'Cancelled by Other Agency',CBY_DISPATCH:'Cancelled by Dispatch',CAN:'Cancelled',NPF:'No Patient Found',NO_TRANSPORT:'No Transport',PATIENT_REFUSAL:'Patient Refusal',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul',AP:'At Patient',HEMS:'Transfer to HEMS',DECEASED:'PT Deceased'}; return M[code]||code; }
+function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transporting',TH:'Transporting to HEMS',AD:'Arrived at Destination',CBY_CALLER:'Cancelled by Caller',CBY_OTHER:'Cancelled by Other Agency',CBY_DISPATCH:'Cancelled by Dispatch',CAN:'Cancelled',NPF:'No Patient Found',NO_TRANSPORT:'No Transport',PATIENT_REFUSAL:'Patient Refusal',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene',TC:'Traffic Control',CT:'Citation',ARR:'Arrest',BK:'Booking',WATER:'Water on Fire',EXT:'Extinguished',OVER:'Overhaul',AP:'At Patient',DECEASED:'PT Deceased'}; return M[code]||code; }
 
 function roleFromAgencyType(t){
   if(t==='police') return 'law';
@@ -317,10 +317,10 @@ function render(){
   const rb = document.getElementById('roleBadge');
   rb.textContent = badge.label; rb.className = `text-xs font-bold px-2 py-0.5 rounded ${badge.color}`;
 
-  // EMS actions only
-  document.getElementById('emsActions').classList.toggle('hidden', role!=='ems');
-  if(role==='ems'){ renderCallPanel(); renderStatusButtons(); }
-  else { renderCallPanel(); }
+  // Status actions are available for all disciplines (law, fire, ems)
+  document.getElementById('emsActions').classList.remove('hidden');
+  renderCallPanel();
+  renderStatusButtons();
   renderActiveCalls(); renderHistory(); renderUnitsTab(); renderNotes(); renderMap();
   const callTab = document.querySelector('#tabNav [data-tab="call"]');
   const shouldFlash = state.packet && state.packet.requires_ack;
@@ -337,6 +337,8 @@ function renderCallPanel(){
   const dest = p.destination ? `<div class='text-xs text-slate-300 mt-1'>Dest: <span class='font-semibold'>${p.destination.name}</span> ${p.destination.address||''}</div>` : '';
   const assigned = p.assigned_units.map(u=>u.call_sign).join(', ') || '-';
   const loc = [p.standardized_address||p.location_text, p.cross_streets, p.zone_name].filter(Boolean).join(' • ') || '-';
+  const hasLoc = (p.lat!=null && p.lng!=null) || (p.destination && p.destination.lat!=null && p.destination.lng!=null);
+  const nav = hasLoc ? `<button class='mt-2 w-full touch-btn bg-emerald-700 hover:bg-emerald-600 rounded font-semibold text-sm' onclick='openNavigation()'>Turn-by-Turn Navigation</button>` : '';
   const ack = p.requires_ack ? `<button class='mt-2 w-full touch-btn bg-green-700 hover:bg-green-600 rounded font-semibold text-sm' onclick='ackPacket()'>Acknowledge Dispatch</button>` : `<div class='mt-2 text-xs text-green-400 font-semibold'>Acknowledged</div>`;
   const resource = p.resource_status && p.resource_status.profiled ? `<div class='text-xs text-slate-400 mt-1'>Resources: ${p.resource_status.filled}/${p.resource_status.total_required} filled</div>` : '';
   const dfHtml = renderDisciplineFieldsMDT(p.extra, (p.agency||{}).agency_type);
@@ -352,9 +354,15 @@ function renderCallPanel(){
     ${resource}
     ${dest}
     <div class='text-xs text-slate-400 mt-1'>Elapsed: ${elapsedCall}</div>
+    ${nav}
     ${ack}
     </div>
   `;
+}
+
+window.openNavigation = function(){
+  showTab('map');
+  if(state.map){ setTimeout(()=>{ state.map.invalidateSize(); updateRoute(true); }, 100); }
 }
 
 async function ackPacket(){
@@ -369,7 +377,7 @@ async function ackPacket(){
 }
 
 function statusButtonClass(code){
-  const C = {AQ:'bg-green-700 hover:bg-green-600',AK:'bg-blue-800 hover:bg-blue-700',ER:'bg-blue-700 hover:bg-blue-600',OS:'bg-red-700 hover:bg-red-600',AP:'bg-orange-700 hover:bg-orange-600',TR:'bg-purple-700 hover:bg-purple-600',TH:'bg-purple-800 hover:bg-purple-700',HEMS:'bg-indigo-700 hover:bg-indigo-600',AD:'bg-emerald-700 hover:bg-emerald-600',CBY_CALLER:'bg-red-800 hover:bg-red-700',CBY_OTHER:'bg-red-800 hover:bg-red-700',CBY_DISPATCH:'bg-red-800 hover:bg-red-700',NPF:'bg-slate-700 hover:bg-slate-600',NO_TRANSPORT:'bg-slate-700 hover:bg-slate-600',PATIENT_REFUSAL:'bg-slate-700 hover:bg-slate-600',CAN:'bg-slate-700 hover:bg-slate-600',DECEASED:'bg-black hover:bg-slate-900',LUN:'bg-slate-700 hover:bg-slate-600',OOS:'bg-slate-700 hover:bg-slate-600',MAINT:'bg-slate-700 hover:bg-slate-600'};
+  const C = {AQ:'bg-green-700 hover:bg-green-600',AK:'bg-blue-800 hover:bg-blue-700',ER:'bg-blue-700 hover:bg-blue-600',OS:'bg-red-700 hover:bg-red-600',AP:'bg-orange-700 hover:bg-orange-600',TR:'bg-purple-700 hover:bg-purple-600',TH:'bg-purple-800 hover:bg-purple-700',AD:'bg-emerald-700 hover:bg-emerald-600',CBY_CALLER:'bg-red-800 hover:bg-red-700',CBY_OTHER:'bg-red-800 hover:bg-red-700',CBY_DISPATCH:'bg-red-800 hover:bg-red-700',NPF:'bg-slate-700 hover:bg-slate-600',NO_TRANSPORT:'bg-slate-700 hover:bg-slate-600',PATIENT_REFUSAL:'bg-slate-700 hover:bg-slate-600',CAN:'bg-slate-700 hover:bg-slate-600',DECEASED:'bg-black hover:bg-slate-900',LUN:'bg-slate-700 hover:bg-slate-600',OOS:'bg-slate-700 hover:bg-slate-600',MAINT:'bg-slate-700 hover:bg-slate-600'};
   return C[code] || 'bg-slate-700 hover:bg-slate-600';
 }
 function nextStatusCodes(u){
@@ -380,10 +388,9 @@ function nextStatusCodes(u){
     const flow = {
       AK: ['ER','OS','CAN','NO_TRANSPORT','PATIENT_REFUSAL','NPF','CBY_CALLER','CBY_OTHER','CBY_DISPATCH','OOS'],
       ER: ['OS','CAN','NO_TRANSPORT','PATIENT_REFUSAL','NPF','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'],
-      OS: ['TR','TH','HEMS','NO_TRANSPORT','PATIENT_REFUSAL','NPF','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'],
+      OS: ['TR','TH','NO_TRANSPORT','PATIENT_REFUSAL','NPF','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'],
       TR: ['AD','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'],
       TH: ['AD','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'],
-      HEMS:['AD','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'],
       AD: ['AQ','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH']
     }[code];
     if(flow) return flow;
@@ -397,11 +404,16 @@ function renderStatusButtons(){
   const u = state.unit;
   if(!u){ el.innerHTML=''; return; }
   const codes = nextStatusCodes(u);
-  if(!codes.length){ el.innerHTML=''; return; }
-  el.innerHTML = codes.map(code=>{
+  const hasAq = codes.includes('AQ') || u.current_status==='AQ';
+  let extra = '';
+  if(!hasAq){
+    extra = `<button class='touch-btn bg-green-700 hover:bg-green-600 rounded font-semibold text-sm' onclick='setStatus("AQ")'>Available</button>`;
+  }
+  const html = (codes.length ? codes.map(code=>{
     const label = statusLabel(code);
     return `<button class='touch-btn ${statusButtonClass(code)} rounded font-semibold text-sm' onclick='setStatus("${code}")'>${label}</button>`;
-  }).join('');
+  }).join('') : '');
+  el.innerHTML = extra + html;
 }
 
 function renderActiveCalls(){
@@ -649,7 +661,7 @@ function openStatusModal(code){
   const sel = document.getElementById('statusDisposition');
   sel.innerHTML = '<option value="">Select...</option>' + (state.config.dispositions||[]).map(d=>`<option value='${d}'>${d}</option>`).join('');
   if(['OS','AD'].includes(code)) document.getElementById('statusMileageWrap').classList.remove('hidden');
-  if(['TR','TH','HEMS'].includes(code)){
+  if(['TR','TH'].includes(code)){
     document.getElementById('statusDestWrap').classList.remove('hidden');
     document.getElementById('statusPatCountWrap').classList.remove('hidden');
   }
@@ -693,7 +705,7 @@ async function confirmStatus(){
   const body = {status_code: code, lat: u.lat, lng: u.lng};
   const mileage = document.getElementById('statusMileage').value;
   if(['OS','AD'].includes(code) && mileage) body.mileage = parseFloat(mileage);
-  if(['TR','TH','HEMS'].includes(code)){
+  if(['TR','TH'].includes(code)){
     const destId = document.getElementById('destId').value;
     const destName = document.getElementById('destName').value.trim();
     if(!destId && !destName){ alert('Select or enter a destination'); return; }

@@ -60,7 +60,13 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
     });
     if (!res.ok) { throw new Error('Invalid credentials'); }
     const data = await res.json();
-    window.location.href = (data.role === 'mdt') ? '/mdt' : '/';
+    if (data.role === 'superadmin') {
+      window.location.href = '/superadmin';
+    } else if (data.role === 'mdt') {
+      window.location.href = '/mdt';
+    } else {
+      window.location.href = '/';
+    }
   } catch (err) { window.turnstile?.reset(); document.getElementById('error').textContent = err.message; document.getElementById('error').classList.remove('hidden'); }
 });
 </script>

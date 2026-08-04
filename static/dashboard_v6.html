@@ -394,19 +394,22 @@ function renderVehicleInfo(){
   const sorted=state.units.slice().sort((a,b)=>(a.call_sign||'').localeCompare(b.call_sign||''));
   document.getElementById('unitCount').textContent=sorted.length;
   const html=sorted.length?`<table class='tbl'><thead><tr><th>Unit</th><th>Type</th><th>Svc</th><th>Status</th><th>Call</th><th>Post</th><th>Loc</th></tr></thead><tbody>`+sorted.map(u=>{
-    const inc=u.current_incident_id?(state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id):'-';
+    const inc=u.current_incident_id?(state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id):'-'
     const svc=u.capabilities && u.capabilities.service_level ? u.capabilities.service_level : '-';
     const post = state.postingMap[u.id] ? state.postingMap[u.id].name : '-';
     const staleClass = u.offline ? 'text-slate-500' : u.stale ? 'text-orange-400' : '';
     const stateLabel = u.offline ? 'Offline' : u.stale ? 'Stale' : statusLabel(u.current_status);
+    const lastSeen = u.last_seen_at ? new Date(u.last_seen_at).toLocaleTimeString() : 'unknown';
+    const statusTitle = u.offline ? `No GPS update in 5+ minutes (last seen ${lastSeen})` : u.stale ? `No GPS update in 60+ seconds (last seen ${lastSeen})` : `Unit status: ${stateLabel}`;
+    const locTitle = u.lat!=null&&u.lng!=null ? `GPS available (last seen ${lastSeen})` : 'No GPS position stored';
     return `<tr class='${state.selectedVehicle===u.id?'selected':''}' onclick='selectVehicle(${u.id})'>
       <td class='font-bold'>${u.call_sign}</td>
       <td>${u.unit_type||'-'}</td>
       <td>${svc}</td>
-      <td class='${statClass(u.current_status)} ${staleClass} cursor-context-menu' oncontextmenu='showUnitStatusMenu(event, ${u.id}); return false;'>${stateLabel}</td>
+      <td class='${statClass(u.current_status)} ${staleClass} cursor-context-menu' oncontextmenu='showUnitStatusMenu(event, ${u.id}); return false;' title='${statusTitle}'>${stateLabel}</td>
       <td>${inc}</td>
       <td>${post}</td>
-      <td>${u.lat!=null&&u.lng!=null?'GPS':'-'}</td>
+      <td title='${locTitle}'>${u.lat!=null&&u.lng!=null?'GPS':'-'}</td>
     </tr>`;
   }).join('')+'</tbody></table>':'<div class="p-2 text-slate-500">No units</div>';
   document.getElementById('vehicleInfo').innerHTML=html;
@@ -459,13 +462,26 @@ function renderTripSummary(){
     loadRecommendations(i.id); loadMileageSummary(i.id); loadDestinationStatusSummary(i.id);
   }else if(state.selectedVehicle){
     const u=state.units.find(x=>x.id===state.selectedVehicle);if(!u)return;
-    const inc=u.current_incident_id?(state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id):'-';
+    const inc=u.current_incident_id?(state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id):'-'
     const crew=state.personnel.filter(p=>p.current_unit_id===u.id);
     const crewList=crew.map(p=>`<span class='inline-flex items-center gap-1 bg-slate-700 rounded px-1 py-0.5'>${p.first_name} ${p.last_name} <button class='text-red-400 hover:text-red-300' onclick='removeCrew(${p.id})'>&times;</button></span>`).join(' ')||'<span class="text-slate-500">-</span>';
-    const maxCrew=3;
+    const maxCrew=4;
     const canAdd=crew.length<maxCrew;
-    const available=state.personnel.filter(p=>!p.current_unit_id && (p.duty_status==='off_duty'||p.duty_status==='on_duty')).map(p=>`<option value='${p.id}'>${p.first_name} ${p.last_name}</option>`).join('');
-    const addCrew=canAdd&&available?`<div class='flex gap-1 mt-1'><select id='addCrew' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value=''>Add crew</option>${available}</select><button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='addCrewToUnit(${u.id})'>Add</button></div>`:`<div class='text-xs text-slate-500 mt-1'>Crew full or none available (max ${maxCrew})</div>`;
+    const available=state.personnel.filter(p=>p.agency_id===u.agency_id && !p.current_unit_id && (p.duty_status==='off_duty'||p.duty_status==='on_duty')).map(p=>`<option value='${p.id}'>${p.first_name} ${p.last_name}</option>`).join('');
+    let addCrew='';
+    if(canAdd && available){
+      const emptySlots=maxCrew-crew.length;
+      let selects='';
+      for(let i=1;i<=emptySlots;i++){
+        selects += `<select id='addCrew${i}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-full ${i===1?'':'hidden'}' onchange='revealCrewSlot(${u.id},${i})'><option value=''>Select crew ${i}</option>${available}</select>`;
+      }
+      addCrew = `<div class='space-y-1 mt-1'>${selects}<button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='saveCrewToUnit(${u.id})'>Add Crew</button></div>`;
+    } else if(crew.length>=maxCrew){
+      addCrew = `<div class='text-xs text-slate-500 mt-1'>Crew full (max ${maxCrew})</div>`;
+    } else {
+      addCrew = `<div class='text-xs text-slate-500 mt-1'>No available personnel</div>`;
+    }
+    const dutyStatus = `<div class='flex gap-1 mt-2 pt-2 border-t border-slate-700'><select id='dutyStatus' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><option value='ON_DUTY' ${u.current_status==='ON_DUTY'?'selected':''}>On Duty</option><option value='OFF_DUTY' ${u.current_status==='OFF_DUTY'?'selected':''}>Off Duty</option></select><button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='setUnitDutyStatus(${u.id})'>Set Duty</button></div>`;
     el.innerHTML=`<div class='space-y-1'>
       <div class='font-bold text-white'>${u.call_sign}</div>
       <div><span class='text-slate-400'>Status:</span> ${statusLabel(u.current_status)}</div>
@@ -474,6 +490,7 @@ function renderTripSummary(){
       <div><span class='text-slate-400'>Current Call:</span> ${inc}</div>
       <div><span class='text-slate-400'>Crew:</span> ${crewList}</div>
       ${addCrew}
+      ${dutyStatus}
     </div>`;
   }else{el.innerHTML='<div class="text-slate-500">Select a trip or vehicle.</div>';}
 }
@@ -481,7 +498,45 @@ function renderTripSummary(){
 window.selectTrip=function(id){state.selectedTrip=id;state.selectedVehicle=null;renderOpenWork();renderVehicleInfo();renderTripSummary();}
 window.selectVehicle=function(id){state.selectedVehicle=id;state.selectedTrip=null;renderOpenWork();renderVehicleInfo();renderTripSummary();}
 window.addUnitToTrip=async function(incidentId){const uid=document.getElementById('addUnit').value;if(!uid)return;try{await api(`/incidents/${incidentId}/dispatch/${uid}`,{method:'POST'});await load();}catch(e){alert(e.message);}}
-window.addCrewToUnit=async function(unitId){const pid=parseInt(document.getElementById('addCrew').value);if(!pid)return;try{await api(`/personnel/${pid}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_unit_id:unitId,duty_status:'on_duty'})});await load();}catch(e){alert(e.message);}}
+function updateCrewOptions(unitId, slot){
+  const unit=state.units.find(u=>u.id===unitId); if(!unit) return;
+  const selected=new Set();
+  const emptySlots=4 - state.personnel.filter(p=>p.current_unit_id===unitId).length;
+  for(let i=1;i<slot;i++){
+    const v=document.getElementById('addCrew'+i)?.value;
+    if(v) selected.add(parseInt(v));
+  }
+  const opts=state.personnel.filter(p=>p.agency_id===unit.agency_id && !p.current_unit_id && !selected.has(p.id) && (p.duty_status==='off_duty'||p.duty_status==='on_duty')).map(p=>`<option value='${p.id}'>${p.first_name} ${p.last_name}</option>`).join('');
+  const sel=document.getElementById('addCrew'+slot);
+  if(sel) sel.innerHTML = `<option value=''>Select crew ${slot}</option>` + opts;
+}
+window.revealCrewSlot=function(unitId, slot){
+  const next=document.getElementById('addCrew'+(slot+1));
+  if(!next) return;
+  updateCrewOptions(unitId, slot+1);
+  next.classList.remove('hidden');
+}
+window.saveCrewToUnit=async function(unitId){
+  const ids=[];
+  const emptySlots=4 - state.personnel.filter(p=>p.current_unit_id===unitId).length;
+  for(let i=1;i<=emptySlots;i++){
+    const v=document.getElementById('addCrew'+i)?.value;
+    if(v) ids.push(parseInt(v));
+  }
+  if(!ids.length) return;
+  try{
+    await api(`/units/${unitId}/staff`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({personnel_ids:ids, duty_status:'on_duty'})});
+    await load();
+  }catch(e){alert(e.message);}
+}
+window.setUnitDutyStatus=async function(unitId){
+  const code=document.getElementById('dutyStatus')?.value;
+  if(!code) return;
+  try{
+    await api(`/units/${unitId}/status`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status_code:code})});
+    await load();
+  }catch(e){alert(e.message);}
+}
 
 let statusMenuUnit=null;
 async function showUnitStatusMenu(event,unitId){

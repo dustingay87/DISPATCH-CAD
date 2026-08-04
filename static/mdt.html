@@ -230,13 +230,13 @@ function render(){
   document.getElementById('unitAgency').textContent = a.name || a.agency_type || '';
   document.getElementById('unitStatus').textContent = statusLabel(u.current_status);
   document.getElementById('shiftTimer').textContent = u.in_service_at ? fmtDur(elapsed(u.in_service_at)) : '--';
-  const onCall = ['OS','ER','TR','TH','AD','HEMS','AK','dispatched'].includes(u.current_status) && u.last_assigned_at;
+  const onCall = ['OS','ER','TR','TH','AD','AK','dispatched'].includes(u.current_status) && u.last_assigned_at;
   document.getElementById('callTimer').textContent = onCall ? fmtDur(elapsed(u.last_assigned_at)) : '--';
 
   document.getElementById('statusButtons').innerHTML = state.config.statuses.map(s=>{
     let color='bg-slate-700 hover:bg-slate-600';
     if(s.code==='OS'||s.code==='AD'||s.code==='AP') color='bg-red-700 hover:bg-red-600';
-    else if(s.code==='ER'||s.code==='TR'||s.code==='DEL'||s.code==='TH'||s.code==='HEMS') color='bg-yellow-700 hover:bg-yellow-600';
+    else if(s.code==='ER'||s.code==='TR'||s.code==='DEL'||s.code==='TH') color='bg-yellow-700 hover:bg-yellow-600';
     else if(s.code==='AQ') color='bg-green-700 hover:bg-green-600';
     else if(s.code==='CAN'||s.code==='NPF'||s.code==='NO_TRANSPORT'||s.code==='PATIENT_REFUSAL'||s.code==='OOS'||s.code==='MAINT'||s.code==='LUN'||s.code==='AFR') color='bg-slate-600 hover:bg-slate-500';
     return `<button class='mdt-btn ${color} text-white' onclick='setStatus("${s.code}")'>${statusLabel(s.code)}</button>`;
@@ -332,7 +332,11 @@ function statusColor(status){
 
 async function promptDestination(incidentId){
   const name = prompt('Destination name (hospital/jail/facility):'); if(!name) return;
-  const address = prompt('Destination address:') || '';
+  const street = prompt('Street address:') || '';
+  const city = prompt('City:') || '';
+  const state = prompt('State:') || '';
+  const zip = prompt('Zip:') || '';
+  const address = [street, city, state, zip].filter(Boolean).join(', ');
   const notes = {};
   const gate = prompt('Gate code:'); if(gate) notes.gate_code = gate;
   const door = prompt('Door code:'); if(door) notes.door_code = door;

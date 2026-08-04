@@ -273,7 +273,12 @@ function renderCallEntry(){
         <input id='ceCallNum' placeholder='Call #' class='bg-slate-800 border border-slate-600 rounded p-2'>
         <input id='cePriority' type='number' placeholder='Priority' class='bg-slate-800 border border-slate-600 rounded p-2' readonly>
       </div>
-      <input id='ceLoc' placeholder='Location' class='bg-slate-800 border border-slate-600 rounded p-2 w-full'>
+      <input id='ceStreet' placeholder='Street address' class='bg-slate-800 border border-slate-600 rounded p-2 w-full'>
+      <div class='grid grid-cols-3 gap-2'>
+        <input id='ceCity' placeholder='City' class='bg-slate-800 border border-slate-600 rounded p-2'>
+        <input id='ceState' placeholder='ST' maxlength='2' class='bg-slate-800 border border-slate-600 rounded p-2'>
+        <input id='ceZip' placeholder='Zip' class='bg-slate-800 border border-slate-600 rounded p-2'>
+      </div>
       <div class='grid grid-cols-2 gap-2'>
         <input id='ceCaller' placeholder='Caller' class='bg-slate-800 border border-slate-600 rounded p-2'>
         <input id='ceCallback' placeholder='Callback' class='bg-slate-800 border border-slate-600 rounded p-2'>
@@ -328,7 +333,8 @@ async function createCall(){
   if(!cat || idx==='' || !agencyId){ addLog('Call entry: select service, call type, and agency'); return; }
   const type=CONFIG[cat].callTypes[idx];
   const extra={}; document.querySelectorAll('.ce-field').forEach(el=>{ if(el.value) extra[el.dataset.key]=el.value; });
-  const body={ agency_id: agencyId, call_number: document.getElementById('ceCallNum').value || undefined, call_type: type.label, priority: type.priority, location_text: document.getElementById('ceLoc').value, caller_name: document.getElementById('ceCaller').value, callback: document.getElementById('ceCallback').value, lat: CENTER[0]+(Math.random()-.5)*.04, lng: CENTER[1]+(Math.random()-.5)*.04, extra };
+  const loc = [document.getElementById('ceStreet').value, document.getElementById('ceCity').value, document.getElementById('ceState').value, document.getElementById('ceZip').value].filter(Boolean).join(', ');
+  const body={ agency_id: agencyId, call_number: document.getElementById('ceCallNum').value || undefined, call_type: type.label, priority: type.priority, location_text: loc, caller_name: document.getElementById('ceCaller').value, callback: document.getElementById('ceCallback').value, lat: CENTER[0]+(Math.random()-.5)*.04, lng: CENTER[1]+(Math.random()-.5)*.04, extra };
   try { const i = await api('/incidents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); addLog(`Created call ${i.call_number||i.incident_number} ${i.call_type}`); await load(); } catch(e){ addLog('Create call error: '+e.message); }
 }
 

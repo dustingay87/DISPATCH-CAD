@@ -224,7 +224,12 @@ function renderIncidents(){
     </div>
     <div class='flex space-x-2'>
       <input id='cCallNum' placeholder='Call # (optional)' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 w-24'>
-      <input id='cLoc' placeholder='Location text' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 flex-1'>
+      <input id='cStreet' placeholder='Street address' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 flex-1'>
+    </div>
+    <div class='flex space-x-2'>
+      <input id='cCity' placeholder='City' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 flex-1'>
+      <input id='cState' placeholder='ST' maxlength='2' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 w-20'>
+      <input id='cZip' placeholder='Zip' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 w-24'>
       <input id='cCaller' placeholder='Caller' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 w-24'>
       <input id='cCallback' placeholder='Callback' class='bg-slate-700 border border-slate-600 rounded px-1 py-1 w-24'>
     </div>
@@ -259,7 +264,8 @@ async function createCall(){
   if(!cat || idx==='' || !agency_id){ addAlert('Select agency and call type'); return; }
   const type = CONFIG[cat].callTypes[idx];
   const extra = {}; document.querySelectorAll('.extra-field').forEach(el=>{ if(el.value) extra[el.dataset.key]=el.value; });
-  const body={ agency_id, call_number: document.getElementById('cCallNum').value || undefined, call_type: type.label, priority: type.priority, location_text: document.getElementById('cLoc').value, caller_name: document.getElementById('cCaller').value, callback: document.getElementById('cCallback').value, lat: CENTER[0]+(Math.random()-.5)*.03, lng: CENTER[1]+(Math.random()-.5)*.03, extra };
+  const loc = [document.getElementById('cStreet').value, document.getElementById('cCity').value, document.getElementById('cState').value, document.getElementById('cZip').value].filter(Boolean).join(', ');
+  const body={ agency_id, call_number: document.getElementById('cCallNum').value || undefined, call_type: type.label, priority: type.priority, location_text: loc, caller_name: document.getElementById('cCaller').value, callback: document.getElementById('cCallback').value, lat: CENTER[0]+(Math.random()-.5)*.03, lng: CENTER[1]+(Math.random()-.5)*.03, extra };
   try { await api('/incidents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); await load(); addAlert('Call created'); } catch(e){ addAlert(e.message); }
 }
 

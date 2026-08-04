@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>Unified Response - Build Agency</title>
+<script src='https://cdn.tailwindcss.com'></script>
+<style>
+  html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .card { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1rem; }
+  .btn { padding:0.4rem 0.8rem; border-radius:0.375rem; font-size:0.8rem; cursor:pointer; border:none; }
+  .btn-primary { background:#2563eb; color:#fff; }
+  .btn-primary:hover { background:#1d4ed8; }
+  .btn-slate { background:#475569; color:#fff; }
+  .btn-slate:hover { background:#334155; }
+  .btn-danger { background:#dc2626; color:#fff; }
+  .btn-danger:hover { background:#b91c1c; }
+  input, select, textarea { background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:0.4rem; border-radius:0.25rem; font-size:0.85rem; width:100%; }
+  label { display:block; font-size:0.75rem; color:#94a3b8; margin:0.5rem 0 0.2rem; }
+  .tabs { display:flex; gap:0.25rem; border-bottom:1px solid #334155; padding-bottom:0.5rem; margin-bottom:1rem; flex-wrap:wrap; }
+  .tab { padding:0.5rem 0.8rem; border-radius:0.375rem; cursor:pointer; font-size:0.8rem; }
+  .tab.active { background:#2563eb; color:#fff; }
+  .tab:hover:not(.active) { background:#334155; }
+  .hidden { display:none; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; }
+  @media (max-width:640px){ .grid-2 { grid-template-columns:1fr; } }
+  table { width:100%; border-collapse:collapse; font-size:0.8rem; }
+  th, td { padding:0.4rem; border-bottom:1px solid #334155; text-align:left; }
+  th { color:#94a3b8; }
+</style>
+<link rel='stylesheet' href='/static/theme.css'>
+<script>if(localStorage.getItem('ur_theme')==='light')document.documentElement.classList.add('light');</script>
+</head>
+<body class='p-4'>
+  <div class='max-w-6xl mx-auto'>
+    <div class='flex justify-between items-center mb-4'>
+      <div>
+        <h1 id='agencyName' class='text-2xl font-bold'>Build Agency</h1>
+        <p id='agencySub' class='text-sm text-slate-400'></p>
+      </div>
+      <div class='flex gap-2 flex-wrap'>
+        <a href='/agency-setup?agency_id='+agencyId class='btn btn-slate hidden' id='editAgencyBtn'>Edit Agency</a>
+        <button class='btn btn-primary' onclick='launchLiveModule()'>Open Live Module</button>
+        <a href='/superadmin' class='btn btn-slate'>Back</a>
+        <button class='btn btn-danger' onclick='logout()'>Logout</button>
+      </div>
+    </div>
+    <div id='msg' class='hidden mb-4 px-4 py-2 rounded text-sm'></div>
+
+    <div class='tabs'>
+      <div class='tab active' onclick='showTab("personnel")'>Crew / Personnel</div>
+      <div class='tab' onclick='showTab("units")'>Units</div>
+      <div class='tab' onclick='showTab("unitTypes")'>Unit Types</div>
+      <div class='tab' onclick='showTab("callTypes")'>Call Types</div>
+      <div class='tab' onclick='showTab("savedLocs")'>Saved Locations</div>
+      <div class='tab' onclick='showTab("destinations")'>Transport Destinations</div>
+      <div class='tab' onclick='showTab("users")'>Users</div>
+      <div class='tab' onclick='showTab("templates")'>Templates</div>
+    </div>
+
+    <div id='personnel' class='tab-panel'>
+      <form id='personnelForm' class='card grid-2'>
+        <input type='hidden' id='pId'>
+        <div><label>First Name</label><input id='pFirst' required></div>
+        <div><label>Last Name</label><input id='pLast' required></div>
+        <div><label>Radio ID</label><input id='pRadio'></div>
+        <div><label>Phone</label><input id='pPhone' type='tel'></div>
+        <div><label>Email</label><input id='pEmail' type='email'></div>
+        <div><label>Provider Level</label><input id='pLevel' placeholder='EMT-P, Firefighter'></div>
+        <div><label>Duty Status</label><select id='pDuty'><option value='on_duty'>On Duty</option><option value='off_duty'>Off Duty</option></select></div>
+        <div class='flex items-center pt-5'><label class='flex items-center gap-2 text-sm'><input type='checkbox' id='pActive' checked> Active</label></div>
+        <div class='col-span-2 flex gap-2'>
+          <button type='submit' class='btn btn-primary w-auto' id='pSubmitBtn'>Add Crew</button>
+          <button type='button' class='btn btn-slate hidden' id='pCancelBtn' onclick='resetPersonnelForm()'>Cancel</button>
+        </div>
+      </form>
+      <div id='personnelList' class='mt-4'></div>
+    </div>
+
+    <div id='units' class='tab-panel hidden'>
+      <form id='unitForm' class='card grid-2'>
+        <input type='hidden' id='uId'>
+        <div><label>Call Sign</label><input id='uCall' required></div>
+        <div><label>Name</label><input id='uName' required></div>
+        <div><label>Unit Type</label><input id='uType' placeholder='engine, patrol, ambulance' list='unitTypeOptions'></div>
+        <div><label>Radio ID</label><input id='uRadio'></div>
+        <div class='flex items-center pt-5'><label class='flex items-center gap-2 text-sm'><input type='checkbox' id='uActive' checked> Active</label></div>
+        <div class='col-span-2 flex gap-2'>
+          <button type='submit' class='btn btn-primary w-auto' id='uSubmitBtn'>Add Unit</button>
+          <button type='button' class='btn btn-slate hidden' id='uCancelBtn' onclick='resetUnitForm()'>Cancel</button>
+        </div>
+      </form>
+      <div id='unitsList' class='mt-4'></div>
+      <datalist id='unitTypeOptions'></datalist>
+    </div>
+
+    <div id='unitTypes' class='tab-panel hidden'>
+      <form id='unitTypeForm' class='card grid-2'>
+        <input type='hidden' id='utEditIndex'>
+        <div class='col-span-2'>
+          <label>Unit Type Name</label>
+          <input id='unitTypeInput' class='w-full' placeholder='e.g. Engine' required>
+        </div>
+        <div class='flex items-center pt-2'><label class='flex items-center gap-2 text-sm'><input type='checkbox' id='utActive' checked> Active</label></div>
+        <div class='flex items-end gap-2'>
+          <button type='submit' class='btn btn-primary w-auto' id='utSubmitBtn'>Add Unit Type</button>
+          <button type='button' class='btn btn-slate hidden' id='utCancelBtn' onclick='resetUnitTypeForm()'>Cancel</button>
+        </div>
+        <p class='col-span-2 text-sm text-slate-400 mt-2'>These unit types will be available when creating units. Inactive types are hidden from new unit creation.</p>
+      </form>
+      <div id='unitTypesList' class='mt-4'></div>
+    </div>
+
+    <div id='callTypes' class='tab-panel hidden'>
+      <form id='callTypeForm' class='card grid-2'>
+        <input type='hidden' id='ctEditIndex'>
+        <div><label>Call Type Label</label><input id='ctLabel' required></div>
+        <div><label>Priority</label><select id='ctPriority'><option value='1'>1 - Emergency</option><option value='2'>2 - Urgent</option><option value='3'>3 - Routine</option><option value='4'>4 - Low</option></select></div>
+        <div class='col-span-2'><label>Fields (comma separated)</label><input id='ctFields' placeholder='injuries, weapons, children'></div>
+        <div class='flex items-center pt-2'><label class='flex items-center gap-2 text-sm'><input type='checkbox' id='ctActive' checked> Active</label></div>
+        <div class='col-span-2 flex gap-2'>
+          <button type='submit' class='btn btn-primary w-auto' id='ctSubmitBtn'>Add Call Type</button>
+          <button type='button' class='btn btn-slate hidden' id='ctCancelBtn' onclick='resetCallTypeForm()'>Cancel</button>
+        </div>
+      </form>
+      <div id='callTypesList' class='mt-4'></div>
+    </div>
+
+    <div id='savedLocs' class='tab-panel hidden'>
+      <form id='savedLocForm' class='card grid-2'>
+        <input type='hidden' id='slEditId'>
+        <div><label>Location Name</label><input id='slName' required></div>
+        <div><label>Category</label><input id='slCategory' placeholder='station, hydrant, landing_zone'></div>
+        <div class='col-span-2'><label>Street Address</label><input id='slStreet'></div>
+        <div class='col-span-2 grid grid-cols-3 gap-2'>
+          <input id='slCity' placeholder='City'>
+          <input id='slState' placeholder='ST' maxlength='2'>
+          <input id='slZip' placeholder='Zip'>
+        </div>
+        <div><label>Lat</label><input id='slLat' type='number' step='any'></div>
+        <div><label>Lng</label><input id='slLng' type='number' step='any'></div>
+        <div class='col-span-2 flex items-center'><label class='flex items-center gap-2 text-sm'><input type='checkbox' id='slActive' checked> Active</label></div>
+        <div class='col-span-2'><p class='text-xs text-slate-400'>Optional tag (e.g. station, hydrant). Leaving it blank saves as "saved".</p></div>
+        <div class='col-span-2 flex gap-2'>
+          <button type='submit' class='btn btn-primary w-auto' id='slSubmitBtn'>Add Saved Location</button>
+          <button type='button' class='btn btn-slate' onclick='geocodeLoc("saved")'>Verify</button>
+          <button type='button' class='btn btn-slate hidden' id='slCancelBtn' onclick='resetSavedLocForm()'>Cancel</button>
+        </div>
+      </form>
+      <div id='savedLocsList' class='mt-4'></div>
+    </div>
+
+    <div id='destinations' class='tab-panel hidden'>
+      <form id='destForm' class='card grid-2'>
+        <input type='hidden' id='dEditId'>
+        <div><label>Destination Name</label><input id='dName' required></div>
+        <div><label>Category</label><select id='dCategory'><option value='hospital'>Hospital</option><option value='treatment'>Treatment</option><option value='other'>Other</option></select></div>
+        <div class='col-span-2'><label>Street Address</label><input id='dStreet'></div>
+        <div class='col-span-2 grid grid-cols-3 gap-2'>
+          <input id='dCity' placeholder='City'>
+          <input id='dState' placeholder='ST' maxlength='2'>
+          <input id='dZip' placeholder='Zip'>
+        </div>
+        <div><label>Lat</label><input id='dLat' type='number' step='any'></div>
+        <div><label>Lng</label><input id='dLng' type='number' step='any'></div>
+        <div class='col-span-2 flex items-center'><label class='flex items-center gap-2 text-sm'><input type='checkbox' id='dActive' checked> Active</label></div>
+        <div class='col-span-2 flex gap-2'>
+          <button type='submit' class='btn btn-primary w-auto' id='destSubmitBtn'>Add Destination</button>
+          <button type='button' class='btn btn-slate' onclick='geocodeLoc("dest")'>Verify</button>
+          <button type='button' class='btn btn-slate hidden' id='destCancelBtn' onclick='resetDestForm()'>Cancel</button>
+        </div>
+      </form>
+      <div id='destList' class='mt-4'></div>
+    </div>
+
+    <div id='users' class='tab-panel hidden'>
+      <form id='userForm' class='card grid-2'>
+        <input type='hidden' id='uEditId'>
+        <div><label>First Name</label><input id='uFirstName' type='text'></div>
+        <div><label>Last Name</label><input id='uLastName' type='text'></div>
+        <div class='col-span-2'><label>Email</label><input id='uEmail' type='email' required></div>
+        <div class='col-span-2'><label>Password</label><input id='uPassword' type='password' placeholder='Required for new users'></div>
+        <div><label>Role</label><select id='uRole'><option value='admin'>Admin</option><option value='supervisor'>Supervisor</option><option value='dispatcher'>Dispatcher</option><option value='responder' selected>Responder</option><option value='mdt'>MDT Only</option><option value='unit'>Unit</option></select></div>
+        <div class='flex items-center pt-5'><label class='flex items-center gap-2 text-sm'><input type='checkbox' id='uActive' checked> Active</label></div>
+        <div class='col-span-2 flex gap-2'>
+          <button type='submit' class='btn btn-primary w-auto' id='userSubmitBtn'>Add User</button>
+          <button type='button' class='btn btn-slate hidden' id='userCancelBtn' onclick='resetUserForm()'>Cancel</button>
+        </div>
+      </form>
+      <div id='usersList' class='mt-4'></div>
+    </div>
+
+    <div id='templates' class='tab-panel hidden'>
+      <div class='card mb-4'>
+        <h2 class='font-semibold mb-2'>CSV Setup Templates</h2>
+        <p class='text-xs text-slate-400 mb-2'>Download a template, fill it out, then upload it to bulk-import this agency's data.</p>
+        <div class='grid grid-cols-1 md:grid-cols-2 gap-2' id='templateList'></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const msg = document.getElementById('msg');
+let agency = null;
+let customer = null;
+let agencyId = new URLSearchParams(window.location.search).get('agency_id');
+
+function showMsg(text, ok=true){
+  msg.textContent = text;
+  msg.className = 'mb-4 px-4 py-2 rounded text-sm ' + (ok ? 'bg-green-900 text-green-200' : 'bg-red-900 text-red-200');
+  msg.classList.remove('hidden');
+}
+
+async function api(path, opts={}){
+  opts.credentials = 'include';
+  opts.headers = opts.headers || {};
+  if(opts.body && typeof opts.body === 'string' && !opts.headers['Content-Type']){
+    opts.headers['Content-Type'] = 'application/json';
+  }
+  const res = await fetch(path, opts);
+  if(!res.ok){
+    const txt = await res.text();
+    throw new Error(txt || 'Request failed');
+  }
+  return res.json().catch(()=>{});
+}
+
+async function logout(){
+  await fetch('/logout', {method:'POST', credentials:'include'});
+  window.location.href = '/login';
+}
+
+function showTab(id){
+  document.querySelectorAll('.tab-panel').forEach(d=>d.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  event.target.classList.add('active');
+  loadTab(id);
+}
+
+function loadTab(id){
+  if(id==='personnel') loadPersonnel();
+  if(id==='units') loadUnits();
+  if(id==='unitTypes') loadUnitTypes();
+  if(id==='callTypes') loadCallTypes();
+  if(id==='savedLocs') loadSavedLocs();
+  if(id==='destinations') loadDestinations();
+  if(id==='users') loadUsers();
+  if(id==='templates') loadTemplates();
+}
+
+(async function init(){
+  try {
+    const me = await api('/me');
+    if(!agencyId){
+      window.location.href = '/superadmin';
+      return;
+    }
+    agency = await api('/agencies/' + agencyId);
+    customer = await api('/customers/' + agency.customer_id);
+    document.getElementById('agencyName').textContent = agency.name;
+    document.getElementById('agencySub').textContent = customer.name + ' · ' + agency.agency_type + ' · ' + [agency.city, agency.state].filter(Boolean).join(', ');
+    document.getElementById('editAgencyBtn').classList.remove('hidden');
+    document.getElementById('editAgencyBtn').href = '/agency-setup?agency_id=' + agencyId;
+    loadPersonnel();
+  } catch(e){
+    window.location.href = '/login';
+  }
+})();
+
+function renderList(id, html){
+  document.getElementById(id).innerHTML = html || '<p class="text-slate-500 text-sm">None yet.</p>';
+}
+
+function normalizeActive(v){ return v === false || v === 'false' || v === 0 ? false : true; }
+
+async function loadPersonnel(){
+  try {
+    const rows = await api('/personnel?agency_id=' + agencyId);
+    renderList('personnelList', rows.length ? `<table class='card'><thead><tr><th>Name</th><th>Radio</th><th>Phone</th><th>Provider</th><th>Status</th><th>Active</th><th class='w-48'>Actions</th></tr></thead><tbody>` + rows.map(p=>{
+      const active = normalizeActive(p.is_active);
+      return `<tr class='${active?'':'text-slate-500 line-through'}'><td>${p.first_name} ${p.last_name}</td><td>${p.radio_id||'-'}</td><td>${p.phone||'-'}</td><td>${p.provider_level||'-'}</td><td>${p.duty_status}</td><td>${active?'Yes':'No'}</td><td class='space-x-1'><button class='btn btn-slate' onclick='editPersonnel(${p.id})'>Edit</button><button class='btn btn-slate' onclick='togglePersonnelActive(${p.id}, ${active})'>${active?'Make Inactive':'Make Active'}</button></td></tr>`;
+    }).join('') + `</tbody></table>` : '');
+  } catch(e){ showMsg(e.message, false); }
+}
+
+function resetPersonnelForm(){
+  document.getElementById('personnelForm').reset();
+  document.getElementById('pId').value='';
+  document.getElementById('pSubmitBtn').textContent='Add Crew';
+  document.getElementById('pCancelBtn').classList.add('hidden');
+  document.getElementById('pActive').checked=true;
+}
+
+async function editPersonnel(id){
+  try {
+    const p = await api('/personnel/' + id);
+    document.getElementById('pId').value = p.id;
+    document.getElementById('pFirst').value = p.first_name;
+    document.getElementById('pLast').value = p.last_name;
+    document.getElementById('pRadio').value = p.radio_id || '';
+    document.getElementById('pPhone').value = p.phone || '';
+    document.getElementById('pEmail').value = p.email || '';
+    document.getElementById('pLevel').value = p.provider_level || '';
+    document.getElementById('pDuty').value = p.duty_status || 'off_duty';
+    document.getElementById('pActive').checked = normalizeActive(p.is_active);
+    document.getElementById('pSubmitBtn').textContent='Update Crew';
+    document.getElementById('pCancelBtn').classList.remove('hidden');
+  } catch(err){ showMsg(err.message, false); }
+}
+
+async function togglePersonnelActive(id, active){
+  try { await api('/personnel/' + id, {method:'PUT', body:JSON.stringify({is_active:!active})}); loadPersonnel(); showMsg('Crew ' + (!active?'activated':'deactivated')); }
+  catch(err){ showMsg(err.message, false); }
+}
+
+document.getElementById('personnelForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const id = document.getElementById('pId').value;
+  const body = {
+    agency_id: parseInt(agencyId),
+    customer_id: customer.id,
+    first_name: document.getElementById('pFirst').value,
+    last_name: document.getElementById('pLast').value,
+    radio_id: document.getElementById('pRadio').value,
+    phone: document.getElementById('pPhone').value,
+    email: document.getElementById('pEmail').value,
+    provider_level: document.getElementById('pLevel').value,
+    duty_status: document.getElementById('pDuty').value,
+    is_active: document.getElementById('pActive').checked
+  };
+  try {
+    if(id){ await api('/personnel/' + id, {method:'PUT', body:JSON.stringify(body)}); showMsg('Crew updated'); }
+    else { await api('/personnel', {method:'POST', body:JSON.stringify(body)}); showMsg('Crew added'); }
+    resetPersonnelForm();
+    loadPersonnel();
+  } catch(err){ showMsg(err.message, false); }
+});
+
+async function loadUnits(){
+  try {
+    const rows = await api('/units?agency_id=' + agencyId);
+    renderList('unitsList', rows.length ? `<table class='card'><thead><tr><th>Call Sign</th><th>Name</th><th>Type</th><th>Radio</th><th>Active</th><th class='w-48'>Actions</th></tr></thead><tbody>` + rows.map(u=>{
+      const active = normalizeActive(u.is_active);
+      return `<tr class='${active?'':'text-slate-500 line-through'}'><td>${u.call_sign}</td><td>${u.name}</td><td>${u.unit_type}</td><td>${u.radio_id||'-'}</td><td>${active?'Yes':'No'}</td><td class='space-x-1'><button class='btn btn-slate' onclick='editUnit(${u.id})'>Edit</button><button class='btn btn-slate' onclick='toggleUnitActive(${u.id}, ${active})'>${active?'Make Inactive':'Make Active'}</button></td></tr>`;
+    }).join('') + `</tbody></table>` : '');
+  } catch(e){ showMsg(e.message, false); }
+}
+
+function resetUnitForm(){
+  document.getElementById('unitForm').reset();
+  document.getElementById('uId').value='';
+  document.getElementById('uSubmitBtn').textContent='Add Unit';
+  document.getElementById('uCancelBtn').classList.add('hidden');
+  document.getElementById('uActive').checked=true;
+}
+
+async function editUnit(id){
+  try {
+    const u = await api('/units/' + id);
+    document.getElementById('uId').value = u.id;
+    document.getElementById('uCall').value = u.call_sign;
+    document.getElementById('uName').value = u.name;
+    document.getElementById('uType').value = u.unit_type;
+    document.getElementById('uRadio').value = u.radio_id || '';
+    document.getElementById('uActive').checked = normalizeActive(u.is_active);
+    document.getElementById('uSubmitBtn').textContent='Update Unit';
+    document.getElementById('uCancelBtn').classList.remove('hidden');
+  } catch(err){ showMsg(err.message, false); }
+}
+
+async function toggleUnitActive(id, active){
+  try { await api('/units/' + id, {method:'PUT', body:JSON.stringify({is_active:!active})}); loadUnits(); showMsg('Unit ' + (!active?'activated':'deactivated')); }
+  catch(err){ showMsg(err.message, false); }
+}
+
+document.getElementById('unitForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const id = document.getElementById('uId').value;
+  const body = {
+    agency_id: parseInt(agencyId),
+    call_sign: document.getElementById('uCall').value,
+    name: document.getElementById('uName').value,
+    unit_type: document.getElementById('uType').value,
+    radio_id: document.getElementById('uRadio').value,
+    is_active: document.getElementById('uActive').checked
+  };
+  try {
+    if(id){ await api('/units/' + id, {method:'PUT', body:JSON.stringify(body)}); showMsg('Unit updated'); }
+    else { await api('/units', {method:'POST', body:JSON.stringify(body)}); showMsg('Unit added'); }
+    resetUnitForm();
+    loadUnits();
+  } catch(err){ showMsg(err.message, false); }
+});
+
+async function getConfig(category){
+  const rows = await api('/config?agency_id=' + agencyId + '&category=' + category);
+  const row = rows.find(r=>r.key==='defaults');
+  return row ? row.value : (category==='unit_types' ? [] : []);
+}
+
+async function saveConfig(category, value){
+  const body = {customer_id: customer.id, agency_id: parseInt(agencyId), category, key:'defaults', value};
+  return api('/config', {method:'POST', body:JSON.stringify(body)});
+}
+
+function normalizeUnitType(t){
+  if(typeof t === 'string') return {name: t, active: true};
+  if(!t) return {name: '', active: true};
+  return {name: t.name || '', active: normalizeActive(t.active)};
+}
+
+async function loadUnitTypes(){
+  const list = await getConfig('unit_types');
+  const rows = (Array.isArray(list)?list:[]).map(normalizeUnitType);
+  const activeNames = rows.filter(r=>r.active).map(r=>r.name);
+  document.getElementById('unitTypeOptions').innerHTML = activeNames.map(n=>`<option value='${n}'></option>`).join('');
+  renderList('unitTypesList', rows.length ? `<table class='card w-full'><thead><tr><th>Name</th><th>Active</th><th class='w-48'>Actions</th></tr></thead><tbody>` + rows.map((t,i)=>{
+    const active = normalizeActive(t.active);
+    return `<tr class='${active?'':'text-slate-500 line-through'}'><td>${t.name}</td><td>${active?'Yes':'No'}</td><td class='space-x-1'><button class='btn btn-slate' onclick='editUnitType(${i})'>Edit</button><button class='btn btn-slate' onclick='toggleUnitTypeActive(${i})'>${active?'Make Inactive':'Make Active'}</button></td></tr>`;
+  }).join('') + `</tbody></table>` : '');
+}
+
+function resetUnitTypeForm(){
+  document.getElementById('unitTypeForm').reset();
+  document.getElementById('utEditIndex').value='';
+  document.getElementById('utSubmitBtn').textContent='Add Unit Type';
+  document.getElementById('utCancelBtn').classList.add('hidden');
+  document.getElementById('utActive').checked=true;
+}
+
+async function editUnitType(i){
+  const list = (await getConfig('unit_types')) || [];
+  const t = normalizeUnitType(list[i]);
+  document.getElementById('utEditIndex').value = i;
+  document.getElementById('unitTypeInput').value = t.name;
+  document.getElementById('utActive').checked = normalizeActive(t.active);
+  document.getElementById('utSubmitBtn').textContent='Update Unit Type';
+  document.getElementById('utCancelBtn').classList.remove('hidden');
+}
+
+async function toggleUnitTypeActive(i){
+  const list = (await getConfig('unit_types')) || [];
+  list[i] = normalizeUnitType(list[i]);
+  list[i].active = !normalizeActive(list[i].active);
+  await saveConfig('unit_types', list);
+  loadUnitTypes();
+  showMsg('Unit type ' + (list[i].active?'activated':'deactivated'));
+}
+
+async function saveUnitType(){
+  const list = (await getConfig('unit_types')) || [];
+  const name = document.getElementById('unitTypeInput').value.trim();
+  if(!name) return;
+  const active = document.getElementById('utActive').checked;
+  const editIndex = document.getElementById('utEditIndex').value;
+  const existingIndex = list.findIndex((t,idx)=>idx!=editIndex && (typeof t==='string'?t:t.name) === name);
+  if(existingIndex >= 0){ showMsg('Unit type already exists', false); return; }
+  if(editIndex!==''){ list[editIndex] = {name, active}; }
+  else { list.push({name, active}); }
+  await saveConfig('unit_types', list);
+  resetUnitTypeForm();
+  loadUnitTypes();
+  showMsg(editIndex!==''?'Unit type updated':'Unit type added');
+}
+
+document.getElementById('unitTypeForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  try { await saveUnitType(); }
+  catch(err){ showMsg(err.message, false); }
+});
+
+async function loadCallTypes(){
+  const list = await getConfig('call_types');
+  const rows = (Array.isArray(list)?list:[]).map(c=>{ return {...c, active: normalizeActive(c.active)}; });
+  renderList('callTypesList', rows.length ? `<table class='card'><thead><tr><th>Label</th><th>Priority</th><th>Fields</th><th>Active</th><th class='w-48'>Actions</th></tr></thead><tbody>` + rows.map((c,i)=>{
+    const active = normalizeActive(c.active);
+    return `<tr class='${active?'':'text-slate-500 line-through'}'><td>${c.label}</td><td>${c.priority}</td><td>${(c.fields||[]).join(', ')}</td><td>${active?'Yes':'No'}</td><td class='space-x-1'><button class='btn btn-slate' onclick='editCallType(${i})'>Edit</button><button class='btn btn-slate' onclick='toggleCallTypeActive(${i})'>${active?'Make Inactive':'Make Active'}</button></td></tr>`;
+  }).join('') + `</tbody></table>` : '');
+}
+
+function resetCallTypeForm(){
+  document.getElementById('callTypeForm').reset();
+  document.getElementById('ctEditIndex').value='';
+  document.getElementById('ctSubmitBtn').textContent='Add Call Type';
+  document.getElementById('ctCancelBtn').classList.add('hidden');
+  document.getElementById('ctActive').checked=true;
+}
+
+async function editCallType(i){
+  const list = (await getConfig('call_types')) || [];
+  const c = list[i] || {};
+  document.getElementById('ctEditIndex').value = i;
+  document.getElementById('ctLabel').value = c.label || '';
+  document.getElementById('ctPriority').value = c.priority || 2;
+  document.getElementById('ctFields').value = (c.fields||[]).join(', ');
+  document.getElementById('ctActive').checked = normalizeActive(c.active);
+  document.getElementById('ctSubmitBtn').textContent='Update Call Type';
+  document.getElementById('ctCancelBtn').classList.remove('hidden');
+}
+
+async function toggleCallTypeActive(i){
+  const list = (await getConfig('call_types')) || [];
+  if(!list[i]) return;
+  list[i].active = !normalizeActive(list[i].active);
+  await saveConfig('call_types', list);
+  loadCallTypes();
+  showMsg('Call type ' + (list[i].active?'activated':'deactivated'));
+}
+
+async function saveCallType(){
+  const list = (await getConfig('call_types')) || [];
+  const label = document.getElementById('ctLabel').value.trim();
+  const priority = parseInt(document.getElementById('ctPriority').value);
+  const fields = document.getElementById('ctFields').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const active = document.getElementById('ctActive').checked;
+  const editIndex = document.getElementById('ctEditIndex').value;
+  const existingIndex = list.findIndex((c,idx)=>idx!=editIndex && c.label === label);
+  if(existingIndex >= 0){ showMsg('Call type already exists', false); return; }
+  const ct = {label, priority, fields, active};
+  if(editIndex!==''){ list[editIndex] = ct; }
+  else { list.push(ct); }
+  await saveConfig('call_types', list);
+  resetCallTypeForm();
+  loadCallTypes();
+  showMsg(editIndex!==''?'Call type updated':'Call type added');
+}
+
+document.getElementById('callTypeForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  try { await saveCallType(); }
+  catch(err){ showMsg(err.message, false); }
+});
+
+function buildAddress(prefix){
+  const parts = [document.getElementById(prefix+'Street').value, document.getElementById(prefix+'City').value, document.getElementById(prefix+'State').value, document.getElementById(prefix+'Zip').value].map(s=>s.trim()).filter(Boolean);
+  return parts.join(', ');
+}
+function parseAddress(addr){
+  if(!addr) return {street:'', city:'', state:'', zip:''};
+  const parts = addr.split(',').map(s=>s.trim());
+  return {street:parts[0]||'', city:parts[1]||'', state:parts[2]||'', zip:parts[3]||''};
+}
+function setAddress(prefix, addr){
+  const p = parseAddress(addr);
+  document.getElementById(prefix+'Street').value = p.street;
+  document.getElementById(prefix+'City').value = p.city;
+  document.getElementById(prefix+'State').value = p.state;
+  document.getElementById(prefix+'Zip').value = p.zip;
+}
+
+async function geocodeLoc(kind){
+  const prefix = kind==='saved'?'sl':'d';
+  const q = buildAddress(prefix);
+  if(!q){ showMsg('Enter an address', false); return; }
+  try {
+    const res = await fetch('https://nominatim.openstreetmap.org/search?' + new URLSearchParams({q, format:'json', limit:1}), {headers:{'Accept':'application/json'}});
+    const data = await res.json();
+    if(data && data.length){
+      document.getElementById(prefix+'Lat').value = parseFloat(data[0].lat).toFixed(6);
+      document.getElementById(prefix+'Lng').value = parseFloat(data[0].lon).toFixed(6);
+      showMsg('Location verified');
+    } else { showMsg('Address not found', false); }
+  } catch(e){ showMsg('Geocoding failed', false); }
+}
+
+const TRANSPORT_CATEGORIES = ['hospital','treatment','other'];
+
+async function loadSavedLocs(){
+  try {
+    const rows = (await api('/destinations?agency_id=' + agencyId + '&include_inactive=1')).filter(d=>!TRANSPORT_CATEGORIES.includes(d.category));
+    renderList('savedLocsList', rows.length ? `<table class='card'><thead><tr><th>Name</th><th>Category</th><th>Address</th><th>Active</th><th class='w-48'>Actions</th></tr></thead><tbody>` + rows.map(d=>{
+      const active = normalizeActive(d.is_active);
+      return `<tr class='${active?'':'text-slate-500 line-through'}'><td>${d.name}</td><td>${d.category||'-'}</td><td>${d.address||'-'}</td><td>${active?'Yes':'No'}</td><td class='space-x-1'><button class='btn btn-slate' onclick='editSavedLoc(${d.id})'>Edit</button><button class='btn btn-slate' onclick='toggleSavedLocActive(${d.id}, ${active})'>${active?'Make Inactive':'Make Active'}</button></td></tr>`;
+    }).join('') + `</tbody></table>` : '');
+  } catch(e){ showMsg(e.message, false); }
+}
+
+async function editSavedLoc(id){
+  try {
+    const d = await api('/destinations/' + id);
+    document.getElementById('slEditId').value = d.id;
+    document.getElementById('slName').value = d.name;
+    document.getElementById('slCategory').value = d.category || '';
+    setAddress('sl', d.address || '');
+    document.getElementById('slLat').value = d.lat != null ? d.lat.toFixed(6) : '';
+    document.getElementById('slLng').value = d.lng != null ? d.lng.toFixed(6) : '';
+    document.getElementById('slActive').checked = normalizeActive(d.is_active);
+    document.getElementById('slSubmitBtn').textContent = 'Update Saved Location';
+    document.getElementById('slCancelBtn').classList.remove('hidden');
+  } catch(err){ showMsg(err.message, false); }
+}
+
+function resetSavedLocForm(){
+  document.getElementById('savedLocForm').reset();
+  document.getElementById('slEditId').value = '';
+  document.getElementById('slSubmitBtn').textContent = 'Add Saved Location';
+  document.getElementById('slCancelBtn').classList.add('hidden');
+  document.getElementById('slActive').checked = true;
+}
+
+async function toggleSavedLocActive(id, active){
+  try { await api('/destinations/' + id, {method:'PUT', body:JSON.stringify({is_active:!active})}); loadSavedLocs(); showMsg('Saved location ' + (!active?'activated':'deactivated')); }
+  catch(err){ showMsg(err.message, false); }
+}
+
+document.getElementById('savedLocForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const id = document.getElementById('slEditId').value;
+  const body = {
+    agency_id: parseInt(agencyId),
+    name: document.getElementById('slName').value,
+    category: document.getElementById('slCategory').value || 'saved',
+    address: buildAddress('sl'),
+    lat: document.getElementById('slLat').value ? parseFloat(document.getElementById('slLat').value) : null,
+    lng: document.getElementById('slLng').value ? parseFloat(document.getElementById('slLng').value) : null,
+    is_active: document.getElementById('slActive').checked
+  };
+  try {
+    if(id){ await api('/destinations/' + id, {method:'PUT', body:JSON.stringify(body)}); showMsg('Saved location updated'); }
+    else { await api('/destinations', {method:'POST', body:JSON.stringify(body)}); showMsg('Saved location added'); }
+    e.target.reset();
+    resetSavedLocForm();
+    loadSavedLocs();
+  } catch(err){ showMsg(err.message, false); }
+});
+
+async function loadDestinations(){
+  try {
+    const rows = (await api('/destinations?agency_id=' + agencyId + '&include_inactive=1')).filter(d=>TRANSPORT_CATEGORIES.includes(d.category));
+    renderList('destList', rows.length ? `<table class='card'><thead><tr><th>Name</th><th>Category</th><th>Address</th><th>Active</th><th class='w-48'>Actions</th></tr></thead><tbody>` + rows.map(d=>{
+      const active = normalizeActive(d.is_active);
+      return `<tr class='${active?'':'text-slate-500 line-through'}'><td>${d.name}</td><td>${d.category||'-'}</td><td>${d.address||'-'}</td><td>${active?'Yes':'No'}</td><td class='space-x-1'><button class='btn btn-slate' onclick='editDest(${d.id})'>Edit</button><button class='btn btn-slate' onclick='toggleDestActive(${d.id}, ${active})'>${active?'Make Inactive':'Make Active'}</button></td></tr>`;
+    }).join('') + `</tbody></table>` : '');
+  } catch(e){ showMsg(e.message, false); }
+}
+
+async function editDest(id){
+  try {
+    const d = await api('/destinations/' + id);
+    document.getElementById('dEditId').value = d.id;
+    document.getElementById('dName').value = d.name;
+    document.getElementById('dCategory').value = d.category;
+    setAddress('d', d.address || '');
+    document.getElementById('dLat').value = d.lat != null ? d.lat.toFixed(6) : '';
+    document.getElementById('dLng').value = d.lng != null ? d.lng.toFixed(6) : '';
+    document.getElementById('dActive').checked = normalizeActive(d.is_active);
+    document.getElementById('destSubmitBtn').textContent = 'Update Destination';
+    document.getElementById('destCancelBtn').classList.remove('hidden');
+  } catch(err){ showMsg(err.message, false); }
+}
+
+function resetDestForm(){
+  document.getElementById('destForm').reset();
+  document.getElementById('dEditId').value = '';
+  document.getElementById('destSubmitBtn').textContent = 'Add Destination';
+  document.getElementById('destCancelBtn').classList.add('hidden');
+  document.getElementById('dActive').checked = true;
+}
+
+async function toggleDestActive(id, active){
+  try { await api('/destinations/' + id, {method:'PUT', body:JSON.stringify({is_active:!active})}); loadDestinations(); showMsg('Destination ' + (!active?'activated':'deactivated')); }
+  catch(err){ showMsg(err.message, false); }
+}
+
+document.getElementById('destForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const id = document.getElementById('dEditId').value;
+  const body = {
+    agency_id: parseInt(agencyId),
+    name: document.getElementById('dName').value,
+    category: document.getElementById('dCategory').value,
+    address: buildAddress('d'),
+    lat: document.getElementById('dLat').value ? parseFloat(document.getElementById('dLat').value) : null,
+    lng: document.getElementById('dLng').value ? parseFloat(document.getElementById('dLng').value) : null,
+    is_active: document.getElementById('dActive').checked
+  };
+  try {
+    if(id){ await api('/destinations/' + id, {method:'PUT', body:JSON.stringify(body)}); showMsg('Destination updated'); }
+    else { await api('/destinations', {method:'POST', body:JSON.stringify(body)}); showMsg('Transport destination added'); }
+    e.target.reset();
+    resetDestForm();
+    loadDestinations();
+  } catch(err){ showMsg(err.message, false); }
+});
+async function loadUsers(){
+  try {
+    const rows = (await api('/users')).filter(u => u.customer_id == customer.id && u.agency_id == parseInt(agencyId));
+    renderList('usersList', rows.length ? `<table class='card'><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active</th><th class='w-48'>Actions</th></tr></thead><tbody>` + rows.map(u=>`<tr class='${u.is_active?'':'text-slate-500 line-through'}'><td>${u.first_name||''} ${u.last_name||''}</td><td>${u.email}</td><td>${u.role}</td><td>${u.is_active?'Yes':'No'}</td><td class='space-x-1'><button class='btn btn-slate' onclick='editUser(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Edit</button><button class='btn btn-slate' onclick='toggleUserActive(${u.id}, ${u.is_active===true})'>${u.is_active?'Make Inactive':'Make Active'}</button></td></tr>`).join('') + `</tbody></table>` : '');
+  } catch(e){ showMsg(e.message, false); }
+}
+
+function resetUserForm(){
+  document.getElementById('userForm').reset();
+  document.getElementById('uEditId').value='';
+  document.getElementById('userSubmitBtn').textContent='Add User';
+  document.getElementById('userCancelBtn').classList.add('hidden');
+  document.getElementById('uPassword').placeholder='Required for new users';
+}
+
+function editUser(u){
+  document.getElementById('uEditId').value=u.id;
+  document.getElementById('uFirstName').value=u.first_name||'';
+  document.getElementById('uLastName').value=u.last_name||'';
+  document.getElementById('uEmail').value=u.email;
+  document.getElementById('uRole').value=u.role;
+  document.getElementById('uActive').checked=u.is_active;
+  document.getElementById('uPassword').value='';
+  document.getElementById('uPassword').placeholder='Leave blank to keep current';
+  document.getElementById('userSubmitBtn').textContent='Update User';
+  document.getElementById('userCancelBtn').classList.remove('hidden');
+}
+
+async function toggleUserActive(id, active){
+  try { await api('/users/'+id, {method:'PUT', body:JSON.stringify({is_active:!active})}); loadUsers(); showMsg('User ' + (!active?'activated':'deactivated')); }
+  catch(err){ showMsg(err.message, false); }
+}
+
+document.getElementById('userForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const body = {
+    customer_id: customer.id,
+    agency_id: parseInt(agencyId),
+    first_name: document.getElementById('uFirstName').value,
+    last_name: document.getElementById('uLastName').value,
+    email: document.getElementById('uEmail').value,
+    role: document.getElementById('uRole').value,
+    is_active: document.getElementById('uActive').checked
+  };
+  const pwd = document.getElementById('uPassword').value;
+  if(pwd) body.password = pwd;
+  const id = document.getElementById('uEditId').value;
+  try {
+    if(id){ await api('/users/'+id, {method:'PUT', body:JSON.stringify(body)}); showMsg('User updated'); }
+    else {
+      if(!pwd){ showMsg('Password is required for new users', false); return; }
+      await api('/users', {method:'POST', body:JSON.stringify(body)}); showMsg('User added');
+    }
+    resetUserForm();
+    loadUsers();
+  } catch(err){ showMsg(err.message, false); }
+});
+
+const TEMPLATES = [
+  {key:'units', title:'Units', desc:'call_sign, name, unit_type, lat, lng, taip_id, camera_url'},
+  {key:'crew-members', title:'Crew Members', desc:'agency, first_name, last_name, email, phone, unit, duty_status, provider_level, radio_id'},
+  {key:'locations', title:'Saved Locations', desc:'agency, name, location_type, address, lat, lng, notes'},
+  {key:'stations', title:'Stations', desc:'agency, name, address, lat, lng, notes'},
+  {key:'zones', title:'Zones', desc:'agency, name, zone_type, color, geojson, display_order, minimum_units, is_active'},
+  {key:'call-types', title:'Call Types', desc:'agency, label, priority, fields'},
+  {key:'ems-call-types', title:'EMS Call Types', desc:'agency, label, priority, fields'},
+  {key:'incidents', title:'Incidents', desc:'agency, call_number, call_type, priority, location_text, lat, lng, status, caller_name, callback, narrative'},
+  {key:'map-layers', title:'Map Layers', desc:'agency_id, name, type, lat, lng, geojson'}
+];
+
+async function loadTemplates(){
+  const html = TEMPLATES.map(t=>`
+    <div class='card'>
+      <h3 class='font-semibold text-sm mb-1'>${t.title}</h3>
+      <p class='text-xs text-slate-400 mb-2'>${t.desc}</p>
+      <a href='/import/template/${t.key}' class='btn btn-slate w-full text-center inline-block mb-2' download>Download Template</a>
+      <input type='file' id='tplFile_${t.key}' accept='.csv' class='text-sm text-slate-300 mb-2'>
+      <button class='btn btn-primary w-full' onclick='uploadTemplate("${t.key}")'>Upload ${t.title}</button>
+    </div>
+  `).join('');
+  document.getElementById('templateList').innerHTML = html;
+}
+
+async function uploadTemplate(key){
+  const input = document.getElementById('tplFile_'+key);
+  const file = input.files[0];
+  if(!file){ showMsg('Select a CSV file', false); return; }
+  const form = new FormData(); form.append('file', file);
+  try {
+    const res = await fetch('/import/'+key, {method:'POST', body:form, credentials:'include'});
+    if(res.status===401) return window.location.href='/login';
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.detail || res.status);
+    showMsg(`${key} imported: ${data.imported} rows`);
+    input.value='';
+    if(key==='crew-members' || key==='personnel') loadPersonnel();
+    if(key==='units') loadUnits();
+    if(key==='locations' || key==='stations') loadSavedLocs();
+    if(key==='call-types' || key==='ems-call-types') loadCallTypes();
+  } catch(err){ showMsg(err.message, false); }
+}
+
+async function launchLiveModule(){
+  try {
+    await api('/me/switch', {method:'POST', body:JSON.stringify({customer_id: customer.id, agency_id: parseInt(agencyId)})});
+    window.open('/?from_superadmin=1', '_blank');
+  } catch(err){ showMsg(err.message, false); }
+}
+</script>
+<script src="/static/theme.js"></script>
+</body>
+</html>

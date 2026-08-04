@@ -57,8 +57,10 @@
             <option value='fire'>Fire</option>
             <option value='ems'>EMS</option>
           </select>
+          <input id='aStreet' placeholder='Street Address' class='w-full'>
           <input id='aCity' placeholder='City' class='w-full'>
           <input id='aState' placeholder='State (2 chars)' maxlength='2' class='w-full'>
+          <input id='aZip' placeholder='ZIP' class='w-full'>
           <input id='aDomain' placeholder='Domain' class='w-full'>
           <div class='flex gap-2'>
             <button id='aSubmit' class='btn btn-primary text-white flex-1'>Create</button>
@@ -162,8 +164,10 @@ document.getElementById('agencyForm').addEventListener('submit', async e=>{
   const body = {
     name: document.getElementById('aName').value,
     agency_type: document.getElementById('aType').value,
+    address: document.getElementById('aStreet').value,
     city: document.getElementById('aCity').value,
     state: document.getElementById('aState').value,
+    zip_code: document.getElementById('aZip').value,
     domain: document.getElementById('aDomain').value
   };
   const id = document.getElementById('aId').value;
@@ -185,8 +189,10 @@ function editAgency(a){
   document.getElementById('aId').value=a.id;
   document.getElementById('aName').value=a.name;
   document.getElementById('aType').value=a.agency_type;
+  document.getElementById('aStreet').value=a.address||'';
   document.getElementById('aCity').value=a.city||'';
   document.getElementById('aState').value=a.state||'';
+  document.getElementById('aZip').value=a.zip_code||'';
   document.getElementById('aDomain').value=a.domain||'';
   document.getElementById('agencyFormTitle').textContent='Edit Agency';
   document.getElementById('aSubmit').textContent='Update';

@@ -28,3 +28,8 @@ test_branding.py
 .vscode/
 .idea/
 *.swp
+
+# Local test/credential artifacts
+cookies.txt
+test_api.py
+.env.*-backup
