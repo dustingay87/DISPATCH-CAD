@@ -1,5 +1,5 @@
 {
-  "version": "819ef05",
-  "date": "2026-08-03 09:16:33 -0500",
-  "message": "feat: version badge and MDT picker unit fix"
+  "version": "2df8690",
+  "date": "2026-08-05 11:47:36 +0000",
+  "message": "Make UserOut fields optional and prevent null role/is_active in customer setup"
 }
