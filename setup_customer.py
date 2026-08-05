@@ -125,12 +125,15 @@ def main():
         users = data.get('users', [])
         for user in users:
             agency_id = agency_map.get(user.get('agency')) if user.get('agency') else None
-            pwd = user.get('password') or 'changeme'
             u = session.query(app.User).filter(app.User.email == user.get('email')).first()
             if not u:
                 u = app.User(email=user.get('email'))
                 session.add(u)
-            u.hashed_password = hash_password(pwd)
+            if user.get('hashed_password'):
+                u.hashed_password = user.get('hashed_password')
+            else:
+                pwd = user.get('password') or 'changeme'
+                u.hashed_password = hash_password(pwd)
             u.role = user.get('role', 'responder')
             u.is_active = user.get('is_active', True)
             u.customer_id = customer_id
