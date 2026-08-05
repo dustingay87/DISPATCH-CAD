@@ -134,8 +134,10 @@ def main():
             else:
                 pwd = user.get('password') or 'changeme'
                 u.hashed_password = hash_password(pwd)
-            u.role = user.get('role', 'responder')
+            u.role = user.get('role') or 'responder'
             u.is_active = user.get('is_active', True)
+            if u.is_active is None:
+                u.is_active = True
             u.customer_id = customer_id
             u.agency_id = agency_id
             session.flush()

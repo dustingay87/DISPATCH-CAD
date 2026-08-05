@@ -746,11 +746,11 @@ class UserCreate(BaseModel):
 
 class UserOut(BaseModel):
     id: int
-    email: str
+    email: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    role: str
-    is_active: bool
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
     customer_id: Optional[int] = None
     agency_id: Optional[int] = None
     preferences: Optional[dict] = None
