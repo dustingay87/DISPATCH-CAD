@@ -74,14 +74,14 @@ def main():
         if customer_ids:
             session.execute(text("DELETE FROM customers WHERE id = ANY(:ids)"), {'ids': customer_ids})
 
-        session.execute(text("SET session_replication_role = 'DEFAULT';"))
         session.commit()
+        session.execute(text("SET session_replication_role = 'origin';"))
         print(f'Purged {len(customer_ids)} demo customer(s): {customer_ids}')
         print(f'Purged {len(agency_ids)} demo agency(ies): {agency_ids}')
     except Exception as e:
         session.rollback()
         try:
-            session.execute(text("SET session_replication_role = 'DEFAULT';"))
+            session.execute(text("SET session_replication_role = 'origin';"))
         except Exception:
             pass
         print('Error:', e)
