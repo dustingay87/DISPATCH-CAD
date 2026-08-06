@@ -1,5 +1,5 @@
 {
-  "version": "2df8690",
-  "date": "2026-08-05 11:47:36 +0000",
-  "message": "Make UserOut fields optional and prevent null role/is_active in customer setup"
+  "version": "7a5a004",
+  "date": "2026-08-05 20:24:34 -0500",
+  "message": "Fix theme toggle placement to avoid overlap on app-header dashboards"
 }
