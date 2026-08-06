@@ -2429,8 +2429,12 @@ def _response_goals(db, incident):
     agency = db.query(Agency).get(incident.agency_id)
     customer_id = incident.customer_id or (agency.customer_id if agency else None)
     goals = _customer_config_value(db, customer_id, agency.id if agency else None, 'response_goals', 'defaults') or {}
-    defaults = {'dispatch_seconds':60,'en_route_seconds':120,'on_scene_city_seconds':480,'on_scene_county_seconds':1800}
-    defaults.update(goals if isinstance(goals, dict) else {})
+    if not isinstance(goals, dict):
+        goals = {}
+    if 'on_scene_seconds' not in goals:
+        goals['on_scene_seconds'] = goals.get('on_scene_city_seconds') or goals.get('on_scene_county_seconds') or 480
+    defaults = {'dispatch_seconds':60,'en_route_seconds':120,'on_scene_seconds':480}
+    defaults.update(goals)
     return defaults
 
 def _incident_timers(db, incident):
@@ -3122,6 +3126,7 @@ def create_incident(request: Request, body: IncidentCreate, db: Session = Depend
     incident = Incident(**data)
     db.add(incident)
     db.flush()
+    _set_incident_destination_from_extra(db, incident)
     _validate_incident_location(db, incident)
     if incident.lat is None or incident.lng is None:
         agency = db.query(Agency).get(data.get('agency_id'))
@@ -3960,6 +3965,7 @@ def update_incident(request: Request, incident_id: int, body: IncidentUpdate, db
                     if ev is not None:
                         extra[ek] = ev
                 setattr(incident, 'extra', extra)
+                _set_incident_destination_from_extra(db, incident)
                 continue
             if k == 'call_status' and v is not None:
                 extra = _load_extra(incident.extra)
@@ -3998,6 +4004,29 @@ def update_incident(request: Request, incident_id: int, body: IncidentUpdate, db
     except Exception as e:
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
+
+def _set_incident_destination_from_extra(db, incident):
+    extra = incident.extra or {}
+    if not isinstance(extra, dict):
+        extra = {}
+    if extra.get('no_transport') or (not extra.get('transport_destination_id') and not extra.get('transport_destination_name')):
+        return
+    latest = db.query(IncidentDestination).filter_by(incident_id=incident.id).order_by(IncidentDestination.created_at.desc()).first()
+    dest_id = None
+    if extra.get('transport_destination_id'):
+        dest_id = extra['transport_destination_id']
+    elif extra.get('transport_destination_name'):
+        name = extra['transport_destination_name'].strip()
+        dest = db.query(Destination).filter(Destination.agency_id == incident.agency_id, Destination.name.ilike(name)).first()
+        if not dest:
+            dest = Destination(agency_id=incident.agency_id, name=name, is_active=True)
+            db.add(dest); db.flush()
+        dest_id = dest.id
+    if not dest_id:
+        return
+    if latest and latest.destination_id == dest_id:
+        return
+    db.add(IncidentDestination(incident_id=incident.id, destination_id=dest_id, notes={}))
 
 @app.get('/incidents/{incident_id}/location')
 def get_incident_location(incident_id: int, db: Session = Depends(get_db)):
@@ -4216,6 +4245,12 @@ def get_dispatch_packet(incident_id: int, unit_id: int, db: Session = Depends(ge
     ack = db.query(IncidentUnitAck).filter_by(incident_id=incident_id, unit_id=unit_id).first()
     idest = db.query(IncidentDestination).filter_by(incident_id=incident_id).first()
     dest = db.query(Destination).get(idest.destination_id) if idest else None
+    if not dest and incident.extra:
+        extra = incident.extra if isinstance(incident.extra, dict) else {}
+        if extra.get('transport_destination_id'):
+            dest = db.query(Destination).get(extra['transport_destination_id'])
+        elif extra.get('transport_destination_name'):
+            dest = {'name': extra['transport_destination_name'], 'address': None, 'lat': None, 'lng': None, 'category': None}
     packet = {
         'incident_id': incident.id,
         'incident_number': incident.incident_number,
@@ -4229,7 +4264,7 @@ def get_dispatch_packet(incident_id: int, unit_id: int, db: Session = Depends(ge
         'standardized_address': loc.standardized_address if loc else None,
         'cross_streets': loc.cross_streets if loc else None,
         'zone_name': loc.zone.name if loc and loc.zone else None,
-        'destination': {'name': dest.name, 'address': dest.address, 'lat': dest.lat, 'lng': dest.lng} if dest else None,
+        'destination': {'id': getattr(dest, 'id', None), 'name': dest.name, 'address': dest.address, 'lat': dest.lat, 'lng': dest.lng} if dest else None,
         'agency': {'id': agency.id, 'name': agency.name, 'agency_type': agency.agency_type} if agency else None,
         'unit': {'id': unit.id, 'call_sign': unit.call_sign, 'unit_type': unit.unit_type},
         'assigned_units': [{'id': u.id, 'call_sign': u.call_sign, 'unit_type': u.unit_type} for _, u in assigned],

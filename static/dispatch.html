@@ -211,11 +211,21 @@ function getAgencyFeatures(agencyId){
   const defaultPlanning = ['fire','police'].includes(agency.agency_type);
   return Object.assign({transport:true, mileage:false, personnel:true, fire_report:true, response_planning:defaultPlanning}, cfg.features || {});
 }
+function incidentTransportEnabled(i){
+  if(!i) return false;
+  const extra = i.extra || {};
+  const a = state.agencyMap[i.agency_id]||{};
+  if(extra.no_transport) return false;
+  if(extra.ems_call) return true;
+  if(a.agency_type === 'ems' && extra.ems_call !== false) return true;
+  if(a.agency_type === 'police' && extra.custody) return true;
+  return false;
+}
 function getResponseGoals(agencyId){
-  const a = state.agencyMap[agencyId] || {};
-  if(a.agency_type !== 'ems') return {};
-  const cfg = state.configs[agencyId] || {};
-  return Object.assign({dispatch_seconds:60, en_route_seconds:120, on_scene_city_seconds:480, on_scene_county_seconds:1800}, cfg.response_goals || {});
+  const cfg = (state.configs && state.configs[agencyId]) || {};
+  const goals = Object.assign({dispatch_seconds:60, en_route_seconds:120, on_scene_seconds:480}, cfg.response_goals || {});
+  if(!goals.on_scene_seconds) goals.on_scene_seconds = goals.on_scene_city_seconds || goals.on_scene_county_seconds || 480;
+  return goals;
 }
 const pathDisc = window.location.pathname.replace(/^\/|\/$/g,'');
 let DISCIPLINE = ['police','fire','ems'].includes(pathDisc) ? pathDisc : (new URLSearchParams(window.location.search).get('discipline') || 'all');
@@ -872,6 +882,7 @@ async function selectIncident(id){
   try { timeline = await api(`/incidents/${id}/timeline`); } catch(e){ log('Timeline error: '+e.message); }
   const a = state.agencyMap[i.agency_id]||{};
   const features = getAgencyFeatures(i.agency_id);
+  const transportEnabled = incidentTransportEnabled(i);
   const goals = getResponseGoals(i.agency_id);
   const discipline = getDisciplineFromAgency(i.agency_id);
   const assigned = state.units.filter(u=>u.current_incident_id===i.id);
@@ -906,8 +917,7 @@ async function selectIncident(id){
       <div class='flex flex-wrap gap-4 text-xs text-slate-400'>
         <span title='Time to first dispatch'>Dispatch: ${milestoneText(dispatchedAt, goals.dispatch_seconds, start)}</span>
         <span title='Time to first en route'>En Route: ${milestoneText(enRouteAt, goals.en_route_seconds, start)}</span>
-        <span title='Time to first on scene city'>On Scene City: ${milestoneText(onSceneAt, goals.on_scene_city_seconds, start)}</span>
-        <span title='Time to first on scene county'>On Scene County: ${milestoneText(onSceneAt, goals.on_scene_county_seconds, start)}</span>
+        <span title='Time to first on scene'>On Scene: ${milestoneText(onSceneAt, goals.on_scene_seconds, start)}</span>
       </div>
       <div class='text-xs text-slate-400'>Location: <b class='text-white'>${i.location_text||'-'}</b> <span id='locBadge'></span></div>
       <div id='locationPanel' class='text-xs bg-slate-900 p-1 rounded hidden'>
@@ -933,7 +943,7 @@ async function selectIncident(id){
             const ack = ackSet.has(u.id) ? `<span class='text-[10px] text-green-400 ml-1' title='Acknowledged'>ACK</span>` : '';
             return `<div class='flex flex-wrap gap-2 items-center text-xs'>
               <span class='font-bold text-white'>${u.call_sign}${ack}</span>
-              <select id='incUStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onchange='handleIncidentUnitStatusChange(${i.id},${u.id})'>${unitStatusOptions(discipline, i.agency_id, u.current_status)}</select>
+              <select id='incUStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onchange='handleIncidentUnitStatusChange(${i.id},${u.id})'>${unitStatusOptions(discipline, i.agency_id, u.current_status, i)}</select>
               <input id='incUDestSearch_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-28 hidden' placeholder='Type destination' oninput='filterIncidentDestinations(${u.id})'>
               <div id='incUDestResults_${u.id}' class='w-full bg-slate-800 border border-slate-600 rounded mt-1 max-h-32 overflow-auto hidden'></div>
               <select id='incUDest_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs hidden' onchange='incidentUnitStatusChanged(${i.id},${u.id})'>${getTransportDestinationOptions(i.agency_id, a.agency_type)}</select>
@@ -987,11 +997,11 @@ async function selectIncident(id){
         <div class='text-xs font-semibold text-slate-400 mb-1'>Next Closest Available</div>
         <div id='closest' class='space-y-1 text-xs text-slate-300'>Loading...</div>
       </div>
-      <div class='border-t border-slate-700 pt-2 ${features.transport?"":"hidden"}' id='destinationPanel'>
+      <div class='border-t border-slate-700 pt-2 ${transportEnabled?"":"hidden"}' id='destinationPanel'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Destination</div>
         <div class='text-xs text-slate-500'>Loading...</div>
       </div>
-      <div class='border-t border-slate-700 pt-2 ${features.transport?"":"hidden"}' id='transportLegsPanel'>
+      <div class='border-t border-slate-700 pt-2 ${transportEnabled?"":"hidden"}' id='transportLegsPanel'>
         <div class='text-xs font-semibold text-slate-400 mb-1'>Transport Legs</div>
         <div class='text-xs text-slate-500'>Loading...</div>
       </div>
@@ -1007,7 +1017,7 @@ async function selectIncident(id){
   await loadLocation(i.id);
   if(features.response_planning){ await loadResourceStatus(i.id); }
   await loadTimers(i.id);
-  if(features.transport){ await loadDestination(i.id); await loadTransportLegs(i.id); }
+  if(transportEnabled){ await loadDestination(i.id); await loadTransportLegs(i.id); }
   if(features.mileage){ await loadMileage(i.id); }
   if(showPersonnel){ await loadIncidentPersonnel(i.id); }
   renderMap();
@@ -1116,7 +1126,12 @@ async function loadDestination(id){
       <div class='mt-1'>${notes || '<span class="text-slate-500">No notes</span>'}</div>
       <div class='mt-1 pt-1 border-t border-slate-700'>${detailRows || '<span class="text-slate-500">No facility details</span>'}</div>
       <button class='mt-2 px-2 py-1 bg-blue-700 hover:bg-blue-600 rounded text-xs' onclick='relayDestination(${id})'>Relay to crew</button>`;
-  } catch(e){ el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Destination</div><div class='text-xs text-slate-500'>No destination set</div>`; }
+  } catch(e){
+    const inc = state.incidents.find(i=>i.id===id);
+    const extra = (inc && inc.extra) || {};
+    const name = extra.transport_destination_name || (extra.ems_call || extra.custody ? 'Destination not set' : 'No destination set');
+    el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Destination</div><div class='text-xs text-slate-300'>${name}</div>`;
+  }
 }
 
 async function getDestinationStatus(destId){
@@ -1286,6 +1301,8 @@ async function setIncidentUnitStatus(incidentId, unitId, silent=false){
   const needsDest = isTransportStatus(s);
   const needsMile = needsMileage(s) && a.agency_type === 'ems';
   const body = {status_code: s};
+  const inc = state.incidents.find(i=>i.id===incidentId);
+  if(needsDest && (!inc || !incidentTransportEnabled(inc))){ if(!silent) alert('Transport not enabled for this call'); return; }
   const at = manualStatusTime('incUTime_'+unitId);
   if(at) body.at = at;
   if(needsDest){
@@ -1557,7 +1574,8 @@ function renderUnits(){
   document.getElementById('unitCount').textContent = filtered.length;
   const rows = filtered.map(u=>{
     const a=state.agencyMap[u.agency_id]||{};
-    const inc = u.current_incident_id ? (state.incidents.find(i=>i.id===u.current_incident_id)?.call_number||u.current_incident_id) : '-';
+    const incident = u.current_incident_id ? state.incidents.find(i=>i.id===u.current_incident_id) : null;
+    const inc = incident ? (incident.call_number||incident.id) : '-';
     const onCall = ['OS','ER','TR','TH','AD','AK','dispatched','LUN','OOS','MAINT','DEL','NPF'].includes(u.current_status);
     const availIso = u.current_status==='AQ' ? (u.last_assigned_at || u.in_service_at) : '';
     const sceneIso = u.current_status==='OS' ? u.last_assigned_at : '';
@@ -1579,7 +1597,7 @@ function renderUnits(){
       <td class='timer' data-fallback='-' data-iso='${sceneIso||''}'>-</td>
       <td class='timer' data-fallback='-' data-acc='${callAcc}' data-iso='${callIso||''}'>-</td>
       <td class='timer' data-fallback='-' data-iso='${shiftIso||''}'>-</td>
-      <td onclick='event.stopPropagation()'><select id='uStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitStatusChanged(${u.id})'>${unitStatusOptions(a.agency_type, a.id, u.current_status)}</select><select id='uDest_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 hidden' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitStatusChanged(${u.id})'>${getTransportDestinationOptions(a.id, a.agency_type)}</select><input id='uDestOther_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-24 hidden' placeholder='Destination' onclick='event.stopPropagation()'><input id='uMile_${u.id}' type='number' step='0.1' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-16 hidden' placeholder='Miles' onclick='event.stopPropagation()'><select id='uReason_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 hidden' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitReasonChanged(${u.id})'><option value=''>Reason</option>${OOS_REASONS.map(r=>`<option value='${r}'>${r}</option>`).join('')}</select><input id='uReasonOther_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-24 hidden' placeholder='Other reason' onclick='event.stopPropagation()'><input id='uTime_${u.id}' type='datetime-local' step='1' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-36' placeholder='Time' onclick='event.stopPropagation()'><button class='ml-1 bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();setUnitStatus(${u.id})'>Set</button><button class='ml-1 bg-indigo-700 hover:bg-indigo-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();openCrewModal(${u.id})'>Crew</button></td>
+      <td onclick='event.stopPropagation()'><select id='uStat_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitStatusChanged(${u.id})'>${unitStatusOptions(a.agency_type, a.id, u.current_status, incident)}</select><select id='uDest_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 hidden' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitStatusChanged(${u.id})'>${getTransportDestinationOptions(a.id, a.agency_type)}</select><input id='uDestOther_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-24 hidden' placeholder='Destination' onclick='event.stopPropagation()'><input id='uMile_${u.id}' type='number' step='0.1' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-16 hidden' placeholder='Miles' onclick='event.stopPropagation()'><select id='uReason_${u.id}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 hidden' onclick='event.stopPropagation()' onchange='event.stopPropagation();unitReasonChanged(${u.id})'><option value=''>Reason</option>${OOS_REASONS.map(r=>`<option value='${r}'>${r}</option>`).join('')}</select><input id='uReasonOther_${u.id}' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-24 hidden' placeholder='Other reason' onclick='event.stopPropagation()'><input id='uTime_${u.id}' type='datetime-local' step='1' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs ml-1 w-36' placeholder='Time' onclick='event.stopPropagation()'><button class='ml-1 bg-blue-700 hover:bg-blue-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();setUnitStatus(${u.id})'>Set</button><button class='ml-1 bg-indigo-700 hover:bg-indigo-600 px-1 py-0.5 rounded text-xs' onclick='event.stopPropagation();openCrewModal(${u.id})'>Crew</button></td>
     </tr>`;
   }).join('');
   const html = rows ? `<table class='tbl'><thead><tr><th>Unit</th><th>Type</th><th>Status</th><th>Crew</th><th>Call</th><th>Avail</th><th>Scene</th><th>Call T</th><th>Shift</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class=\'p-2 text-slate-500\'>No units</div>';
@@ -1646,18 +1664,17 @@ function updateTimers(){
   });
 }
 
-function unitStatusOptions(type, agencyId, selectedCode=''){
+function unitStatusOptions(type, agencyId, selectedCode='', incident){
   const cfg = (state.configs && state.configs[agencyId]) || {};
   const custom = cfg.statuses;
-  const features = getAgencyFeatures(agencyId);
-  const showTransport = features.transport !== false;
+  const transportEnabled = incident ? incidentTransportEnabled(incident) : false;
   let list = [];
   if(custom && custom.length){
     list = custom.map(s=>typeof s === 'string' ? {code:s, label:statusLabel(s)} : s);
   } else {
     list = UNIT_STATUS_OPTIONS[type] || UNIT_STATUS_OPTIONS.ems;
   }
-  if(!showTransport){
+  if(!transportEnabled){
     list = list.filter(s=>!isTransportStatus(s.code));
   }
   // Ensure EMS units always have the Arrived at Destination option
@@ -1698,6 +1715,7 @@ window.setUnitStatus = async function(unitId){
   const needsDest = isTransportStatus(s);
   const needsMile = needsMileage(s) && a.agency_type === 'ems';
   const body = {status_code: s};
+  if(needsDest && (!inc || !incidentTransportEnabled(inc))){ alert('Transport not enabled for this call'); return; }
   const reasonEl = document.getElementById('uReason_'+unitId);
   if(reasonEl && !reasonEl.classList.contains('hidden') && reasonEl.value){
     body.reason = reasonEl.value === 'Other' ? (document.getElementById('uReasonOther_'+unitId)?.value || 'Other') : reasonEl.value;

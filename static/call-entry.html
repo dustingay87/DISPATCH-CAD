@@ -60,6 +60,21 @@
           <label class='text-xs text-slate-400 uppercase'>Callback</label>
           <input id='callback' type='text' placeholder='Phone number'>
         </div>
+        <div class='md:col-span-2 flex items-center gap-2' id='emsCallWrap'>
+          <input id='ems_call' type='checkbox' class='w-auto' onchange='toggleTransportSection()'> <label for='ems_call' class='text-xs text-slate-400'>EMS CALL</label>
+        </div>
+        <div class='md:col-span-2 hidden' id='transportSection'>
+          <div class='grid grid-cols-1 md:grid-cols-2 gap-4'>
+            <div class='flex items-center gap-2'>
+              <input id='no_transport' type='checkbox' class='w-auto' onchange='toggleTransportSection()'> <label for='no_transport' class='text-xs text-slate-400'>No Transport</label>
+            </div>
+            <div>
+              <label class='text-xs text-slate-400 uppercase'>Transport Destination</label>
+              <select id='transport_dest' onchange='transportDestChanged()'></select>
+              <input id='transport_dest_other' type='text' class='hidden' placeholder='Destination name'>
+            </div>
+          </div>
+        </div>
         <div class='md:col-span-2'>
           <label class='text-xs text-slate-400 uppercase'>Street Address</label>
           <input id='street' type='text' placeholder='Street address / intersection' required>
@@ -130,6 +145,9 @@
             </div>
             <div class='md:col-span-2 flex items-center gap-2'>
               <input id='p_in_progress' type='checkbox' class='w-auto'> <label for='p_in_progress' class='text-xs text-slate-400'>Incident in progress</label>
+            </div>
+            <div class='md:col-span-2 flex items-center gap-2'>
+              <input id='p_in_custody' type='checkbox' class='w-auto' onchange='toggleTransportSection()'> <label for='p_in_custody' class='text-xs text-slate-400'>Subject in Custody</label>
             </div>
             <div>
               <label class='text-xs text-slate-500 uppercase'># of Suspects</label>
@@ -306,17 +324,22 @@ function showMsg(text, ok=true){
   if(ok) setTimeout(()=>el.classList.add('hidden'), 4000);
 }
 
-function setDiscipline(d){
+async function setDiscipline(d){
   state.DISCIPLINE = d;
   document.querySelectorAll('#disciplineTabs .tab').forEach(t=>{ if(!t.classList.contains('hidden')) t.classList.toggle('active', t.dataset.d===d); });
-  populateAgencies(); loadConfig(); renderResponseGoals(); renderDisciplineFields();
+  populateAgencies();
+  await loadConfig();
+  document.getElementById('ems_call').checked = (d === 'ems');
+  toggleTransportSection();
+  renderTransportDestinations();
 }
 
 function renderResponseGoals(){
   const cfg = state.configs && state.configs[document.getElementById('agency').value] || {};
-  const goals = cfg.response_goals || {dispatch_seconds:60, en_route_seconds:120, on_scene_city_seconds:480, on_scene_county_seconds:1800};
+  const goals = cfg.response_goals || {dispatch_seconds:60, en_route_seconds:120, on_scene_seconds:480};
+  if(!goals.on_scene_seconds) goals.on_scene_seconds = goals.on_scene_city_seconds || goals.on_scene_county_seconds || 480;
   const el = document.getElementById('responseGoals');
-  el.innerHTML = `Dispatch: <span class='text-yellow-400'>${fmtDur(goals.dispatch_seconds)}</span> · En Route: <span class='text-yellow-400'>${fmtDur(goals.en_route_seconds)}</span> · On Scene City: <span class='text-yellow-400'>${fmtDur(goals.on_scene_city_seconds)}</span> · On Scene County: <span class='text-yellow-400'>${fmtDur(goals.on_scene_county_seconds)}</span>`;
+  el.innerHTML = `Dispatch: <span class='text-yellow-400'>${fmtDur(goals.dispatch_seconds)}</span> · En Route: <span class='text-yellow-400'>${fmtDur(goals.en_route_seconds)}</span> · On Scene: <span class='text-yellow-400'>${fmtDur(goals.on_scene_seconds)}</span>`;
 }
 
 function startTimer(){
@@ -340,11 +363,11 @@ async function loadConfig(){
   const agencyId = document.getElementById('agency').value;
   if(!agencyId) return;
   try {
-    const [ctRes, prRes, goalRes] = await Promise.all([api(`/config?agency_id=${agencyId}&category=call_types`), api(`/config?agency_id=${agencyId}&category=priorities`), api(`/config?agency_id=${agencyId}&category=response_goals`)]);
+    const [ctRes, prRes, goalRes, destRes] = await Promise.all([api(`/config?agency_id=${agencyId}&category=call_types`), api(`/config?agency_id=${agencyId}&category=priorities`), api(`/config?agency_id=${agencyId}&category=response_goals`), api(`/destinations?agency_id=${agencyId}`)]);
     const callTypes = (ctRes[0]?.value && ctRes[0].value.length) ? ctRes[0].value : DEFAULT_CALL_TYPES[state.DISCIPLINE];
     const priorities = (prRes[0]?.value && prRes[0].value.length) ? prRes[0].value : DEFAULT_PRIORITIES[state.DISCIPLINE];
-    const response_goals = (goalRes[0]?.value) ? goalRes[0].value : {dispatch_seconds:60, en_route_seconds:120, on_scene_city_seconds:480, on_scene_county_seconds:1800};
-    state.configs[agencyId] = { callTypes, priorities, response_goals };
+    const response_goals = (goalRes[0]?.value) ? goalRes[0].value : {dispatch_seconds:60, en_route_seconds:120, on_scene_seconds:480};
+    state.configs[agencyId] = { callTypes, priorities, response_goals, destinations: destRes || [] };
     const csel = document.getElementById('callType');
     csel.innerHTML = callTypes.map(c=>`<option value='${c.label}' data-priority='${c.priority}'>${c.label} (P${c.priority})</option>`).join('') || '<option value="">No call types</option>';
     const psel = document.getElementById('priority');
@@ -368,7 +391,7 @@ function renderDisciplineFields(){
 
 function collectDisciplineFields(){
   const out = {};
-  const ids = state.DISCIPLINE === 'police' ? ['p_crime_type','p_weapon','p_in_progress','p_suspect_count','p_victim_count','p_suspect_desc','p_safety_notes'] :
+  const ids = state.DISCIPLINE === 'police' ? ['p_crime_type','p_weapon','p_in_progress','p_in_custody','p_suspect_count','p_victim_count','p_suspect_desc','p_safety_notes'] :
               state.DISCIPLINE === 'fire' ? ['f_smoke_showing','f_structure_type','f_occupancy','f_visible_flames','f_hazmat','f_exposures'] :
               ['e_chief_complaint','e_patient_age','e_patient_sex','e_consciousness','e_breathing','e_bleeding'];
   ids.forEach(id=>{
@@ -381,6 +404,52 @@ function collectDisciplineFields(){
     else if(el.value.trim()){ out[id.replace(/^(p_|f_|e_)/,'')] = el.value.trim(); }
   });
   return out;
+}
+
+function collectFormFlags(){
+  const ems = document.getElementById('ems_call').checked;
+  const noTrans = document.getElementById('no_transport').checked;
+  const custody = state.DISCIPLINE === 'police' && document.getElementById('p_in_custody').checked;
+  const destEl = document.getElementById('transport_dest');
+  const otherEl = document.getElementById('transport_dest_other');
+  const out = { ems_call: ems, no_transport: noTrans, custody: custody };
+  if(ems || custody){
+    if(!noTrans){
+      if(destEl.value && destEl.value !== 'other') out.transport_destination_id = parseInt(destEl.value);
+      else if(otherEl.value.trim()) out.transport_destination_name = otherEl.value.trim();
+    }
+  }
+  return out;
+}
+
+function renderTransportDestinations(){
+  const agencyId = document.getElementById('agency').value;
+  const cfg = state.configs[agencyId] || {};
+  const list = cfg.destinations || [];
+  const sel = document.getElementById('transport_dest');
+  sel.innerHTML = `<option value=''>Select destination...</option>` + list.map(d=>`<option value='${d.id}'>${d.name}${d.address?' - '+d.address:''}</option>`).join('') + `<option value='other'>Other (type name)</option>`;
+}
+
+function transportDestChanged(){
+  const sel = document.getElementById('transport_dest');
+  const other = document.getElementById('transport_dest_other');
+  if(sel.value === 'other'){ other.classList.remove('hidden'); }
+  else { other.classList.add('hidden'); other.value=''; }
+  scheduleSave();
+}
+
+function toggleTransportSection(){
+  const ems = document.getElementById('ems_call').checked;
+  const custody = state.DISCIPLINE === 'police' && document.getElementById('p_in_custody').checked;
+  const section = document.getElementById('transportSection');
+  const noTrans = document.getElementById('no_transport');
+  const dest = document.getElementById('transport_dest');
+  const other = document.getElementById('transport_dest_other');
+  const show = ems || custody;
+  section.classList.toggle('hidden', !show);
+  if(!show){ noTrans.checked=false; dest.value=''; other.value=''; other.classList.add('hidden'); }
+  else if(noTrans.checked){ dest.disabled=true; other.disabled=true; other.classList.add('hidden'); }
+  else { dest.disabled=false; other.disabled=false; }
 }
 
 document.getElementById('disciplineTabs').addEventListener('click', e=>{ if(e.target.classList.contains('tab')) setDiscipline(e.target.dataset.d); });
@@ -444,7 +513,8 @@ function getFormBody(status='intake'){
   const lat = document.getElementById('lat').value ? parseFloat(document.getElementById('lat').value) : null;
   const lng = document.getElementById('lng').value ? parseFloat(document.getElementById('lng').value) : null;
   const agencyId = parseInt(document.getElementById('agency').value);
-  const extra = {discipline_fields: collectDisciplineFields()};
+  const extra = collectFormFlags();
+  extra.discipline_fields = collectDisciplineFields();
   return {
     agency_id: Number.isNaN(agencyId) ? null : agencyId,
     call_type: document.getElementById('callType').value,

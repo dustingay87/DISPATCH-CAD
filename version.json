@@ -1,5 +1,5 @@
 {
-  "version": "78d0613",
-  "date": "2026-08-06 18:16:53 -0500",
-  "message": "Refresh units/incidents in selectIncident when stale so MDT status changes show in call workspace"
+  "version": "79d0614",
+  "date": "2026-08-06 22:00:00 -0500",
+  "message": "Add EMS CALL flag, conditional transport/no-transport tracking, police custody transport gating, and consolidate On Scene time"
 }

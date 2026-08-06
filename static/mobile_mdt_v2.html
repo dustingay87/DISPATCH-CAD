@@ -393,8 +393,20 @@ function nextStatusCodes(u){
       TH: ['AD','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'],
       AD: ['AQ','CAN','CBY_CALLER','CBY_OTHER','CBY_DISPATCH']
     }[code];
-    if(flow) return flow;
-    return ['AQ','OOS'];
+    let codes = flow ? [...flow] : ['AQ','OOS'];
+    const inc = state.incident || (state.packet||{}).extra;
+    const extra = (inc && inc.extra) || (state.packet || {}).extra || {};
+    const a = state.agencyMap[u.agency_id]||{};
+    const emsCall = extra.ems_call || (a.agency_type==='ems' && extra.ems_call !== false);
+    const policeCustody = a.agency_type==='police' && extra.custody;
+    const transportEnabled = !extra.no_transport && (emsCall || policeCustody);
+    if(!transportEnabled){
+      codes = codes.filter(c=>!['TR','TH','AD'].includes(c));
+    }
+    if(!emsCall){
+      codes = codes.filter(c=>!['NO_TRANSPORT','PATIENT_REFUSAL','NPF','DECEASED'].includes(c));
+    }
+    return codes;
   }
   const off = {AQ:['OOS','LUN','MAINT'], AFR:['OOS','LUN','MAINT'], OOS:['AQ','LUN','MAINT'], LUN:['AQ','OOS'], MAINT:['AQ','OOS']};
   return off[code] || ['AQ','OOS'];
@@ -673,6 +685,11 @@ function openStatusModal(code){
   if(['TR','TH'].includes(code)){
     document.getElementById('statusDestWrap').classList.remove('hidden');
     document.getElementById('statusPatCountWrap').classList.remove('hidden');
+    if(state.packet && state.packet.destination){
+      document.getElementById('destSearch').value = state.packet.destination.name || '';
+      document.getElementById('destId').value = state.packet.destination.id || '';
+      document.getElementById('destName').value = state.packet.destination.name || '';
+    }
   }
   if(['CAN','NO_TRANSPORT','PATIENT_REFUSAL','NPF','CBY_CALLER','CBY_OTHER','CBY_DISPATCH'].includes(code)){
     document.getElementById('statusReasonWrap').classList.remove('hidden');
@@ -711,6 +728,13 @@ async function confirmStatus(){
   if(!pendingStatusCode || !state.unit) return;
   const u = state.unit;
   const code = pendingStatusCode;
+  const incExtra = (state.incident ? state.incident.extra : {}) || (state.packet ? state.packet.extra : {}) || {};
+  const a = state.agencyMap[u.agency_id] || {};
+  const emsCall = incExtra.ems_call || (a.agency_type==='ems' && incExtra.ems_call !== false);
+  const policeCustody = a.agency_type==='police' && incExtra.custody;
+  const transportEnabled = !incExtra.no_transport && (emsCall || policeCustody);
+  if((code==='TR' || code==='TH' || code==='AD') && !transportEnabled){ alert('Transport not enabled for this call'); return; }
+  if(['NO_TRANSPORT','PATIENT_REFUSAL','NPF','DECEASED'].includes(code) && !emsCall){ alert('This status is only for EMS calls'); return; }
   const body = {status_code: code, lat: u.lat, lng: u.lng};
   const mileage = document.getElementById('statusMileage').value;
   if(['OS','AD'].includes(code) && mileage) body.mileage = parseFloat(mileage);
