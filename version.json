@@ -1,5 +1,5 @@
 {
-  "version": "6bf7309",
-  "date": "2026-08-05 20:47:56 -0500",
-  "message": "Fix TAIP PV checksum validation to exclude ;* trailer"
+  "version": "cc9f2ec",
+  "date": "2026-08-05 21:00:30 -0500",
+  "message": "Add TAIP UDP/TCP to HTTP relay"
 }
