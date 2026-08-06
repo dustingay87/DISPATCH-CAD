@@ -1,5 +1,5 @@
 {
-  "version": "3d7b6f4",
-  "date": "2026-08-06 18:06:08 -0500",
-  "message": "Rename call Age to Duration, freeze timers on completion, add total call duration to report, and relabel Pickup to Scene"
+  "version": "78d0613",
+  "date": "2026-08-06 18:16:53 -0500",
+  "message": "Refresh units/incidents in selectIncident when stale so MDT status changes show in call workspace"
 }
