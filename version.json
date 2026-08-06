@@ -1,5 +1,5 @@
 {
-  "version": "2d14ea4",
-  "date": "2026-08-06 16:22:32 -0500",
-  "message": "Add click-to-zoom on unit markers and listings; keep map focused on selected unit during refreshes"
+  "version": "3d7b6f4",
+  "date": "2026-08-06 18:06:08 -0500",
+  "message": "Rename call Age to Duration, freeze timers on completion, add total call duration to report, and relabel Pickup to Scene"
 }
