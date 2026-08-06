@@ -1,5 +1,5 @@
 {
-  "version": "4129f28",
-  "date": "2026-08-05 22:29:13 -0500",
-  "message": "Fix TAIP reported_at to preserve timezone for Postgres WITH TIME ZONE"
+  "version": "bf22fb4",
+  "date": "2026-08-06 16:05:33 -0500",
+  "message": "Enforce 12-hour session timeout via SESSION_MAX_AGE"
 }
