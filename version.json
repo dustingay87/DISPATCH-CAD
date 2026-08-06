@@ -1,5 +1,5 @@
 {
-  "version": "af28333",
-  "date": "2026-08-05 22:20:53 -0500",
-  "message": "Fix TAIP reported time, out-of-order and jump checks for UTC/Postgres timezones"
+  "version": "4129f28",
+  "date": "2026-08-05 22:29:13 -0500",
+  "message": "Fix TAIP reported_at to preserve timezone for Postgres WITH TIME ZONE"
 }
