@@ -2322,21 +2322,35 @@ def _taip_reported_time(data: dict, received_at: datetime) -> Optional[datetime]
     sod = data.get('gps_seconds_of_day')
     if sod is None:
         return None
-    base = received_at.replace(hour=0, minute=0, second=0, microsecond=0)
-    reported = base + timedelta(seconds=sod)
-    if reported > received_at + timedelta(seconds=30):
-        reported -= timedelta(days=1)
-    return reported
+    # The GPS time-of-day field is UTC. Build candidates on the UTC day of the
+    # received timestamp and the previous UTC day, then keep the one closest to
+    # the receive time so the reported wall-clock time is correct across the
+    # day boundary and server timezones.
+    received_utc = received_at.replace(tzinfo=DEFAULT_TIMEZONE).astimezone(timezone.utc)
+    base_utc = received_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    candidates = [
+        base_utc + timedelta(seconds=sod),
+        base_utc - timedelta(days=1) + timedelta(seconds=sod),
+    ]
+    best = None
+    best_diff = None
+    for c in candidates:
+        diff = abs((c - received_utc).total_seconds())
+        if best is None or diff < best_diff:
+            best = c
+            best_diff = diff
+    return _naive_local(best)
 
 def _taip_out_of_order(unit, reported_at):
     if not unit or not unit.last_seen_at or not reported_at:
         return False
-    return reported_at < unit.last_seen_at - timedelta(seconds=TAIP_OUT_OF_ORDER_SECONDS)
+    last = _naive_local(unit.last_seen_at)
+    return reported_at < last - timedelta(seconds=TAIP_OUT_OF_ORDER_SECONDS)
 
 def _taip_jump_ok(unit, lat, lng, reported_at):
     if not unit or unit.lat is None or unit.lng is None or not reported_at:
         return True
-    last = unit.last_seen_at
+    last = _naive_local(unit.last_seen_at) if unit.last_seen_at else None
     if not last:
         return True
     distance_m = _haversine_m(unit.lat, unit.lng, lat, lng)
