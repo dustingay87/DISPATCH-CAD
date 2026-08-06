@@ -1,5 +1,5 @@
 {
-  "version": "bf22fb4",
-  "date": "2026-08-06 16:05:33 -0500",
-  "message": "Enforce 12-hour session timeout via SESSION_MAX_AGE"
+  "version": "2d14ea4",
+  "date": "2026-08-06 16:22:32 -0500",
+  "message": "Add click-to-zoom on unit markers and listings; keep map focused on selected unit during refreshes"
 }
