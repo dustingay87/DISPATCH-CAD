@@ -1,5 +1,5 @@
 {
-  "version": "34676bf",
-  "date": "2026-08-05 22:11:06 -0500",
-  "message": "Fix TAIP checksum to include ;* delimiter and accept optional age field"
+  "version": "af28333",
+  "date": "2026-08-05 22:20:53 -0500",
+  "message": "Fix TAIP reported time, out-of-order and jump checks for UTC/Postgres timezones"
 }
