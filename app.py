@@ -37,6 +37,9 @@ TAIP_OUT_OF_ORDER_SECONDS = int(os.getenv('TAIP_OUT_OF_ORDER_SECONDS', '5'))
 TAIP_MAX_JUMP_MPS = float(os.getenv('TAIP_MAX_JUMP_MPS', '89'))
 TAIP_ALLOWLIST = [ip.strip() for ip in os.getenv('TAIP_ALLOWLIST', '').split(',') if ip.strip()]
 
+# Session cookie lifetime in seconds (default 12 hours).
+SESSION_MAX_AGE = int(os.getenv('SESSION_MAX_AGE', '43200'))
+
 # Default software timezone - Central (America/Chicago). Override with DEFAULT_TIMEZONE env var.
 DEFAULT_TIMEZONE_NAME = os.getenv('DEFAULT_TIMEZONE', 'America/Chicago')
 try:
@@ -1224,7 +1227,7 @@ def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 def make_session(user):
-    exp = int(time.time()) + 86400
+    exp = int(time.time()) + SESSION_MAX_AGE
     cid = user.customer_id if user.customer_id is not None else ''
     aid = user.agency_id if user.agency_id is not None else ''
     msg = f'{user.id}:{user.role}:{cid}:{aid}:{exp}'
@@ -1439,7 +1442,7 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
         db.add(user)
         db.commit()
 
-    response.set_cookie(key='session', value=make_session(user), httponly=True, samesite='lax' if INSECURE_DEV else 'strict', secure=not INSECURE_DEV, path='/', max_age=86400)
+    response.set_cookie(key='session', value=make_session(user), httponly=True, samesite='lax' if INSECURE_DEV else 'strict', secure=not INSECURE_DEV, path='/', max_age=SESSION_MAX_AGE)
     return {'email': user.email, 'role': user.role, 'customer_id': user.customer_id, 'agency_id': user.agency_id}
 
 @app.post('/logout')
