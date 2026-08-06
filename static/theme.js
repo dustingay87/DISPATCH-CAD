@@ -2,14 +2,21 @@
   const THEME_KEY = 'ur_theme';
   const html = document.documentElement;
 
+  function isFlexRow(el){
+    if (!el || !el.classList) return false;
+    if (el.classList.contains('flex') || el.classList.contains('inline-flex')) return true;
+    const style = window.getComputedStyle(el);
+    return style.display === 'flex' || style.display === 'inline-flex';
+  }
+
   function findHeader(){
-    const h = document.querySelector('header, .d2d-header');
+    const h = document.querySelector('header, .d2d-header, .app-header, .app-sidebar-header');
     if (h) return h;
     const first = document.body && document.body.firstElementChild;
     if (!first) return null;
-    if (first.querySelector('h1') && (first.classList.contains('flex') || first.tagName === 'HEADER')) return first;
+    if (first.querySelector('h1') && (isFlexRow(first) || first.tagName === 'HEADER')) return first;
     const child = first.firstElementChild;
-    if (child && child.querySelector('h1') && child.classList.contains('flex')) return child;
+    if (child && child.querySelector('h1') && isFlexRow(child)) return child;
     return null;
   }
 
@@ -19,23 +26,31 @@
     for (let i = children.length - 1; i >= 0; i--){
       const c = children[i];
       if (!c.classList) continue;
-      const isFlex = c.classList.contains('flex') || c.classList.contains('inline-flex') ||
+      const hasInteractive = c.querySelector('a, button, select, input');
+      const isFlex = isFlexRow(c) ||
                      c.classList.contains('space-x-2') || c.classList.contains('space-x-1') ||
-                     c.classList.contains('gap-2') || c.classList.contains('gap-1');
+                     c.classList.contains('space-x-3') || c.classList.contains('space-x-4') ||
+                     c.classList.contains('gap-2') || c.classList.contains('gap-1') ||
+                     c.classList.contains('gap-3') || c.classList.contains('gap-4');
       if (!isFlex) continue;
       if (i > 0) return c;                         // likely the right-side group
-      if (c.querySelector('a, button, select')) return c; // first child is a toolbar, not a logo
+      if (hasInteractive) return c; // first child is a toolbar, not a logo
     }
-    // Header itself is flex: append to it and push to the right
-    if (header.classList && header.classList.contains('flex')) return header;
+    // Header itself is flex: append to it
+    if (header.classList && isFlexRow(header)) return header;
     // Header is not flex but first child is a flex wrapper (e.g. mobile MDT)
-    if (children[0] && children[0].classList && children[0].classList.contains('flex')) return children[0];
+    if (children[0] && isFlexRow(children[0])) return children[0];
     return null;
   }
 
   function insertToggle(){
+    // Avoid duplicate toggles if the page already has a theme control
+    if (document.getElementById('themeToggle')) return;
+    if (document.querySelector('button[onclick*="classList.toggle"][onclick*="light"], [data-ur-theme-toggle]')) return;
+
     const btn = document.createElement('button');
     btn.id = 'themeToggle';
+    btn.type = 'button';
     btn.textContent = html.classList.contains('light') ? 'Dark mode' : 'Light mode';
     btn.setAttribute('aria-label', 'Toggle light and dark mode');
 
@@ -50,17 +65,11 @@
     if (target){
       target.appendChild(btn);
       const style = window.getComputedStyle(target);
-      if (style.display === 'flex' || style.display === 'inline-flex'){
-        btn.style.marginLeft = 'auto';
+      if (target !== header && (style.display === 'flex' || style.display === 'inline-flex')){
+        btn.style.setProperty('margin-left', 'auto', 'important');
       }
-    } else {
-      // fallback: small fixed top-right, not over bottom content
-      btn.style.position = 'fixed';
-      btn.style.top = '1rem';
-      btn.style.right = '1rem';
-      btn.style.zIndex = '2147483647';
-      document.body.appendChild(btn);
     }
+    // If no safe target is found, skip rather than place a fixed toggle that could overlap content
   }
 
   if (document.readyState === 'loading'){
