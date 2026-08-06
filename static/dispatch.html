@@ -859,8 +859,14 @@ async function selectIncident(id){
   const prevSelected = state.selectedIncident;
   state.selectedIncident = id;
   state.selectedScheduledEvent = null;
-  const i = state.incidents.find(x=>x.id===id);
+  try {
+    if(Date.now() - (state.lastLoad||0) > 1000){
+      const [units, incidents] = await Promise.all([api('/units'), api('/incidents')]);
+      state.units = units; state.incidents = incidents; state.lastLoad = Date.now();
+    }
+  } catch(e){ log('Refresh error: '+e.message); }
   renderCalls();
+  const i = state.incidents.find(x=>x.id===id);
   if(!i){ document.getElementById('incidentPanel').innerHTML = '<div class=\'p-2 text-slate-400\'>Incident not found</div>'; return; }
   let timeline = {};
   try { timeline = await api(`/incidents/${id}/timeline`); } catch(e){ log('Timeline error: '+e.message); }
@@ -1981,6 +1987,7 @@ async function load(){
   try {
     const [agencies, units, incidents, scheduledEvents, messages, configs, postZones, personnel, _dests] = await Promise.all([api('/agencies'), api('/units'), api('/incidents'), api('/scheduled-events?status=scheduled&window_minutes=60'), api('/messages'), loadConfigs(), api('/post-zones'), api('/personnel'), loadAllDestinations()]);
     state.agencies = agencies; state.units = units; state.incidents = incidents; state.scheduledEvents = scheduledEvents || []; state.messages = messages; state.configs = configs; state.postZones = postZones; state.personnel = personnel;
+    state.lastLoad = Date.now();
     state.agencyMap = {}; state.agencies.forEach(a=>state.agencyMap[a.id]=a);
     const mapConfig = await api('/config?category=map_layers');
     const ml = mapConfig.find(c=>c.category==='map_layers' && c.key==='all')?.value || [];
