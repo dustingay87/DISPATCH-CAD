@@ -23,6 +23,7 @@ static/uploads/
 run_local.py
 login.json
 test_branding.py
+customer.json
 
 # IDE
 .vscode/
