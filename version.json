@@ -1,5 +1,5 @@
 {
-  "version": "7a5a004",
-  "date": "2026-08-05 20:24:34 -0500",
-  "message": "Fix theme toggle placement to avoid overlap on app-header dashboards"
+  "version": "6bf7309",
+  "date": "2026-08-05 20:47:56 -0500",
+  "message": "Fix TAIP PV checksum validation to exclude ;* trailer"
 }
