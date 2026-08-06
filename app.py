@@ -2339,13 +2339,14 @@ def _taip_reported_time(data: dict, received_at: datetime) -> Optional[datetime]
         if best is None or diff < best_diff:
             best = c
             best_diff = diff
-    return _naive_local(best)
+    return best.astimezone(DEFAULT_TIMEZONE)
 
 def _taip_out_of_order(unit, reported_at):
     if not unit or not unit.last_seen_at or not reported_at:
         return False
     last = _naive_local(unit.last_seen_at)
-    return reported_at < last - timedelta(seconds=TAIP_OUT_OF_ORDER_SECONDS)
+    rep = _naive_local(reported_at)
+    return rep < last - timedelta(seconds=TAIP_OUT_OF_ORDER_SECONDS)
 
 def _taip_jump_ok(unit, lat, lng, reported_at):
     if not unit or unit.lat is None or unit.lng is None or not reported_at:
@@ -2353,10 +2354,11 @@ def _taip_jump_ok(unit, lat, lng, reported_at):
     last = _naive_local(unit.last_seen_at) if unit.last_seen_at else None
     if not last:
         return True
+    rep = _naive_local(reported_at)
     distance_m = _haversine_m(unit.lat, unit.lng, lat, lng)
     if distance_m is None or distance_m <= 0:
         return True
-    delta_s = (reported_at - last).total_seconds()
+    delta_s = (rep - last).total_seconds()
     if delta_s <= 0:
         # Cannot trust time delta; allow if within reasonable distance
         return distance_m <= TAIP_MAX_JUMP_MPS * 10
