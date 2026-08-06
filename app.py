@@ -2154,17 +2154,16 @@ class TaipIngest(BaseModel):
 # TAIP parser
 
 TAIP_PV_RE = re.compile(
-    r'^>RPV(\d{5})([+-]\d{7})([+-]\d{8})(\d{3})(\d{3})(\d)(\d)(?:;ID=([A-Z0-9-]{1,20}))?(?:;\*([0-9A-Fa-f]{2}))?<$',
+    r'^>RPV(\d{5})([+-]\d{7})([+-]\d{8})(\d{3})(\d{3})(\d)(\d?)(?:;ID=([A-Z0-9-]{1,20}))?(?:;\*([0-9A-Fa-f]{2}))?<$',
     re.IGNORECASE
 )
 
 def _taip_checksum_ok(raw: str, checksum: str, checksum_start: int) -> bool:
     if not checksum:
         return True
+    # The checksum is computed over all characters from the leading > through and
+    # including the * delimiter that immediately precedes the two checksum digits.
     payload = raw[:checksum_start]
-    # The checksum is computed over the message up to, but not including, the ;* trailer.
-    if payload.endswith(';*'):
-        payload = payload[:-2]
     calculated = 0
     for ch in payload:
         calculated ^= ord(ch)
@@ -2185,7 +2184,7 @@ def parse_taip_pv(raw: str) -> Optional[dict]:
     speed = int(speed_text)
     heading = int(heading_text)
     gps_source = int(source_text)
-    data_age = int(age_text)
+    data_age = int(age_text or 2)
     if data_age == 0:
         raise ValueError('TAIP location data is unavailable (data_age=0)')
     if lat < -90 or lat > 90 or lng < -180 or lng > 180:
@@ -4614,7 +4613,7 @@ def verify_taip(current_user: dict = Depends(get_current_user), db: Session = De
     lat, lng = 40.0, -83.0
     time_str = '00000'
     base_sentence = f'>RPV{time_str}+4000000-0830000000000001;ID=TAIP-VERIFY'
-    checksum = _taip_compute_checksum(base_sentence)
+    checksum = _taip_compute_checksum(f'{base_sentence};*')
     valid_sentence = f'{base_sentence};*{checksum}<'
     bad_checksum_sentence = f'{base_sentence};*00<'
 
