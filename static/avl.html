@@ -151,9 +151,15 @@ function renderMap(){
   });
   if(document.getElementById('trailsToggle').checked) drawTrails();
   drawSelectedTrail();
-  if(bounds.isValid()){
-    if(state.selected){ map.fitBounds(bounds,{padding:[20,20],maxZoom:16}); }
-    else { map.fitBounds(bounds,{padding:[20,20],maxZoom:14}); }
+  if(state.selected){
+    const u = state.units.find(x=>x.id===state.selected);
+    if(u && u.lat!=null && u.lng!=null){
+      const ll=L.latLng(u.lat,u.lng);
+      const viewBounds=map.getBounds();
+      if(!viewBounds.contains(ll)) map.panTo(ll);
+    }
+  } else if(bounds.isValid()){
+    map.fitBounds(bounds,{padding:[20,20],maxZoom:14});
   } else {
     const am = state.agencies.find(a=>a.id===state.units[0]?.agency_id) || state.agencies[0];
     if(am && am.lat!=null && am.lng!=null) map.setView([am.lat,am.lng], 11);
@@ -181,9 +187,10 @@ function drawTrails(){
 }
 
 async function selectUnit(id){
-  state.selected = id; renderUnitList(); renderMap();
-  const u = state.units.find(x=>x.id===id); if(u && u.lat!=null && u.lng!=null) map.setView([u.lat,u.lng],16);
-  updateTelemetry();
+  state.selected = id; renderUnitList();
+  const u = state.units.find(x=>x.id===id);
+  if(u && u.lat!=null && u.lng!=null) map.setView([u.lat,u.lng],16);
+  renderMap(); updateTelemetry();
   try { state.selectedTrail = await api(`/units/${id}/trail?hours=8`); renderMap(); } catch(e){ state.selectedTrail = null; }
 }
 

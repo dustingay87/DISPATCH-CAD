@@ -1788,7 +1788,7 @@ window.manageSetUnitStatus = async function(unitId){
   } catch(e){ log('Unit status error: '+e.message); alert(e.message); }
 };
 
-async function selectUnit(id){ state.selectedUnit=id; await loadTrails(id); renderUnits(); renderMap(); }
+async function selectUnit(id){ state.selectedUnit=id; await loadTrails(id); renderUnits(); renderMap(); const u=state.units.find(x=>x.id===id); if(u && u.lat!=null && u.lng!=null) map.setView([u.lat,u.lng],16); }
 
 async function loadTrails(unitId){
   if(!unitId){ state.trails[unitId]=[]; return; }
@@ -1840,6 +1840,7 @@ function renderMap(){
     } else {
       m=L.circleMarker([u.lat,u.lng],{radius:6,color:col,fillColor:col,fillOpacity:0.9,weight:2}).addTo(layers.units);
       m.bindPopup(content);
+      m.on('click',()=>selectUnit(u.id));
       state.mapMarkers.units[u.id]=m;
     }
     if(state.selectedUnit===u.id){ m.openPopup(); } else { m.closePopup(); }
@@ -1930,6 +1931,14 @@ function renderMap(){
       }
     }
     state.mapFitDone = true;
+  }
+  if(state.selectedUnit){
+    const u=state.units.find(x=>x.id===state.selectedUnit);
+    if(u && u.lat!=null && u.lng!=null){
+      const ll=L.latLng(u.lat,u.lng);
+      const viewBounds=map.getBounds();
+      if(!viewBounds.contains(ll)) map.panTo(ll);
+    }
   }
 }
 

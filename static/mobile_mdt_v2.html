@@ -167,7 +167,7 @@ body { -webkit-tap-highlight-color:transparent; overscroll-behavior:none; }
 <script>
 const url = new URL(window.location.href);
 let unitId = parseInt(url.searchParams.get('unit_id')) || null;
-let state = { me:null, personnel:null, unit:null, agencies:[], agencyMap:{}, incidents:[], activeIncidents:[], historyIncidents:[], messages:[], allUnits:[], personnelList:[], config:{statuses:[],dispositions:[],callTypes:[]}, map:null, selectedIncident:null, crossAgencies:[], destinations:[] };
+let state = { me:null, personnel:null, unit:null, agencies:[], agencyMap:{}, incidents:[], activeIncidents:[], historyIncidents:[], messages:[], allUnits:[], personnelList:[], config:{statuses:[],dispositions:[],callTypes:[]}, map:null, selectedIncident:null, selectedUnit:null, crossAgencies:[], destinations:[] };
 const DEFAULT_CENTER = [39.9612,-82.9988];
 
 const ROLE_BADGE = { ems:{label:'Unified Response - EMS',color:'bg-emerald-700'}, fire:{label:'Unified Response - Fire',color:'bg-red-700'}, law:{label:'Unified Response - Law',color:'bg-blue-700'}, all:{label:'Unified Response',color:'bg-purple-700'} };
@@ -446,7 +446,7 @@ function renderUnitsTab(){
     const a = state.agencyMap[u.agency_id]||{};
     const stateLabel = u.offline ? 'Offline' : u.stale ? 'Stale' : u.current_status;
     const stateColor = u.offline ? 'text-red-400' : u.stale ? 'text-orange-400' : 'text-slate-300';
-    return `<div class='card'><div class='flex justify-between'><span class='font-bold text-white'>${u.call_sign}</span><span class='text-xs ${u.agency_id===state.me.agency_id?"text-green-400":"text-blue-300"}'>${a.agency_type||'-'}</span></div><div class='text-xs ${stateColor}'>${stateLabel} • ${u.name}</div>${crew?`<div class='text-xs text-slate-400 mt-1'>Crew: ${crew}</div>`:''}</div>`;
+    return `<div class='card cursor-pointer' onclick='selectUnit(${u.id})'><div class='flex justify-between'><span class='font-bold text-white'>${u.call_sign}</span><span class='text-xs ${u.agency_id===state.me.agency_id?"text-green-400":"text-blue-300"}'>${a.agency_type||'-'}</span></div><div class='text-xs ${stateColor}'>${stateLabel} • ${u.name}</div>${crew?`<div class='text-xs text-slate-400 mt-1'>Crew: ${crew}</div>`:''}</div>`;
   }).join('') || '<div class="text-slate-500">No units</div>';
 }
 
@@ -518,6 +518,7 @@ function serviceAreaColor(type){
   return M[type] || '#3b82f6';
 }
 function zoneColor(z){ const t = serviceAreaColor(z.zone_type); return (z.color && z.color.toLowerCase() !== '#3b82f6') ? z.color : t; }
+function selectUnit(id){ state.selectedUnit=id; renderUnitsTab(); renderMap(); const u=state.allUnits.find(x=>x.id===id); if(u && u.lat!=null && u.lng!=null) state.map.setView([u.lat,u.lng],16); }
 function renderMap(){
   initMap();
   state.map.eachLayer(l=>{ if(l instanceof L.Marker || l instanceof L.CircleMarker) state.map.removeLayer(l); });
@@ -546,6 +547,7 @@ function renderMap(){
     const last=u.last_seen_at?new Date(u.last_seen_at).toLocaleTimeString():'unknown';
     const stateLabel=u.offline?'Offline':u.stale?'Stale':statusLabel(u.current_status);
     m.bindPopup(`<b>${u.call_sign}</b><br>${stateLabel}<br><span class='text-slate-400'>Last seen: ${last}</span><br>${u.name}`);
+    m.on('click',()=>selectUnit(u.id)); if(state.selectedUnit===u.id) m.openPopup();
     bounds.extend([u.lat,u.lng]);
   });
   [...state.activeIncidents, ...state.historyIncidents].forEach(i=>{
@@ -555,7 +557,14 @@ function renderMap(){
     m.bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${i.location_text}`);
     bounds.extend([i.lat,i.lng]);
   });
-  if(bounds.isValid()){
+  if(state.selectedUnit){
+    const u=state.allUnits.find(x=>x.id===state.selectedUnit);
+    if(u && u.lat!=null && u.lng!=null){
+      const ll=L.latLng(u.lat,u.lng);
+      const viewBounds=state.map.getBounds();
+      if(!viewBounds.contains(ll)) state.map.panTo(ll);
+    }
+  } else if(bounds.isValid()){
     state.map.fitBounds(bounds,{padding:[20,20],maxZoom:15});
   } else {
     const u=state.unit, a=u ? state.agencyMap[u.agency_id] : null;
