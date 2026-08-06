@@ -2162,6 +2162,9 @@ def _taip_checksum_ok(raw: str, checksum: str, checksum_start: int) -> bool:
     if not checksum:
         return True
     payload = raw[:checksum_start]
+    # The checksum is computed over the message up to, but not including, the ;* trailer.
+    if payload.endswith(';*'):
+        payload = payload[:-2]
     calculated = 0
     for ch in payload:
         calculated ^= ord(ch)
