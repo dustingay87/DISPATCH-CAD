@@ -37,7 +37,7 @@
       <input type='hidden' id='soId'>
       <div><label class='text-xs text-slate-400'>Agency</label><select id='agency' class='form-input' onchange='agencyChanged()'></select></div>
       <div><label class='text-xs text-slate-400'>Patient Name</label><input id='patientName' class='form-input'></div>
-      <div class='md:col-span-2'><label class='text-xs text-slate-400'>Pickup Street Address</label><input id='pStreet' class='form-input' placeholder='Street address'></div>
+      <div class='md:col-span-2'><label class='text-xs text-slate-400'>Scene Street Address</label><input id='pStreet' class='form-input' placeholder='Street address'></div>
       <div class='grid grid-cols-3 gap-2 md:col-span-2'>
         <input id='pCity' class='form-input' placeholder='City'>
         <input id='pState' class='form-input' placeholder='ST' maxlength='2'>
@@ -170,7 +170,7 @@ function renderList(){
         <div>
           <div class='font-bold text-white'>${o.patient_name||'Unknown patient'} ${o.active?'<span class="tag">Active</span>':'<span class="tag bg-slate-600">Inactive</span>'}</div>
           <div class='text-slate-400'>${o.call_type} • ${o.service_level||'-'} • ${o.mobility_level||'-'}</div>
-          <div class='text-slate-500 text-xs mt-1'>Pickup: ${o.pickup_address||'-'}</div>
+          <div class='text-slate-500 text-xs mt-1'>Scene: ${o.pickup_address||'-'}</div>
           <div class='text-slate-500 text-xs'>Dest: ${o.destination_name||'-'}</div>
           <div class='text-slate-500 text-xs'>Recurrence: ${recText(o)}</div>
         </div>

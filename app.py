@@ -3547,6 +3547,15 @@ def _source_name(user, default='System'):
     name = f"{user.first_name or ''} {user.last_name or ''}".strip()
     return name or user.email or default
 
+def _fmt_dur(seconds):
+    if seconds is None or seconds < 0:
+        return None
+    seconds = int(seconds)
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return f'{h}:{m:02d}:{s:02d}'
+
 def _build_after_call_summary(db, incident):
     agency = db.query(Agency).get(incident.agency_id) if incident.agency_id else None
     loc = db.query(IncidentLocation).filter_by(incident_id=incident.id).first()
@@ -3658,12 +3667,20 @@ def _build_after_call_summary(db, incident):
         'zone': loc.zone.name if loc and loc.zone else (incident.extra.get('zone_name') if incident.extra else None),
         'verification_status': loc.verification_status if loc else 'unverified'
     }
+    duration_seconds = None
+    if incident.created_at:
+        end = incident.closed_at or tz_now()
+        duration_seconds = int((_naive_local(end) - _naive_local(incident.created_at)).total_seconds())
+        if duration_seconds < 0:
+            duration_seconds = 0
     call_info = {
         'narrative': incident.narrative,
         'caller_name': incident.caller_name,
         'callback': incident.callback,
         'response_mode': (incident.extra or {}).get('response_mode'),
-        'call_status': (incident.extra or {}).get('call_status')
+        'call_status': (incident.extra or {}).get('call_status'),
+        'total_call_duration': _fmt_dur(duration_seconds),
+        'total_call_duration_seconds': duration_seconds
     }
     return {'header': header, 'call_info': call_info, 'location': location_info, 'units': units_summary, 'timeline': timeline}
 

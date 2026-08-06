@@ -82,7 +82,7 @@ async function loadDiscipline(d){
     if(d==='ems' && r.transport_legs){
       html += `<div class='card'>
         <h3>Transport Legs</h3>
-        <table><thead><tr><th>Unit</th><th>Pickup</th><th>Pickup Miles</th><th>Dropoff</th><th>Dropoff Miles</th><th>Departed Scene</th><th>Arrived Dest</th></tr></thead><tbody>
+        <table><thead><tr><th>Unit</th><th>Scene Location</th><th>Scene Mileage</th><th>Dropoff</th><th>Dropoff Miles</th><th>Departed Scene</th><th>Arrived Dest</th></tr></thead><tbody>
           ${(r.transport_legs.length?r.transport_legs:[]).map(l=>`<tr><td>${l.unit_id}</td><td>${l.pickup_address||'-'}</td><td>${l.pickup_mileage!=null?l.pickup_mileage:'-'}</td><td>${l.dropoff_address||'-'}</td><td>${l.dropoff_mileage!=null?l.dropoff_mileage:'-'}</td><td>${fmtTime(l.departed_scene_at)}</td><td>${fmtTime(l.arrived_destination_at)}</td></tr>`).join('')}
         </tbody></table>
       </div>`;

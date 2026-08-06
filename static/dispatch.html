@@ -499,7 +499,7 @@ async function logout(){ try { await api('/logout', {method:'POST'}); } catch(e)
 function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 function toMs(iso){ return iso ? new Date(iso).getTime() : Date.now(); }
 function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
-function elapsed(iso){ return (Date.now()-toMs(iso))/1000; }
+function elapsed(iso, end){ return ((end ? toMs(end) : Date.now()) - toMs(iso))/1000; }
 function unitClass(st){
   const onScene = ['OS','AP','AD','WATER','EXT','OVER','TC','ARR','CT','BK','DECEASED','PA','INVEST','REPORT','SEARCH','WORK_TRAFFIC','FIRE_ATTACK','EXTRICATION','NO_FIRE'];
   const enRoute = ['ER','TR','TH','TRP','ED','transport'];
@@ -741,7 +741,7 @@ function renderCalls(){
     return (a.priority||2)-(b.priority||2) || new Date(b.created_at)-new Date(a.created_at);
   });
   document.getElementById('callCount').textContent = active.length;
-  const html = active.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Pickup</th><th>Zone</th><th>Dest</th><th>Units</th><th>Age</th><th>Last Status</th></tr></thead><tbody>` + active.map(item=>{
+  const html = active.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Scene Location</th><th>Zone</th><th>Dest</th><th>Units</th><th>Duration</th><th>Last Status</th></tr></thead><tbody>` + active.map(item=>{
     if(item._type==='scheduled'){
       const e = item;
       const due = e.scheduled_at ? new Date(e.scheduled_at).getTime() : 0;
@@ -778,7 +778,7 @@ function renderCalls(){
       <td>${i.extra?.zone_name||'-'}</td>
       <td>${dest}</td>
       <td>${assignedUnits}</td>
-      <td class='timer' data-iso='${i.created_at}' data-fallback='-' title='Received ${fmtTime(i.created_at)}'>-</td>
+      <td class='timer' data-iso='${i.created_at}' data-end='${i.closed_at||''}' data-fallback='-' title='Received ${fmtTime(i.created_at)}'>-</td>
       <td class='timer' data-iso='${statusIso}' data-fallback='-' title='Last status at ${fmtTime(statusIso)}'>-</td>
     </tr>`;
   }).join('') + '</tbody></table>' : `<div class='p-2 text-slate-500'>No active calls (total ${state.incidents.length}, discipline ${DISCIPLINE})<br><span class='text-slate-400 text-[10px]'>Check status/zone filters</span></div>`;
@@ -1161,7 +1161,7 @@ async function loadTransportLegs(id){
       const pickup = l.pickup_mileage != null ? l.pickup_mileage.toFixed(1) : '-';
       const dropoff = l.dropoff_mileage != null ? l.dropoff_mileage.toFixed(1) : '-';
       const patients = l.passenger_count != null ? `pts ${l.passenger_count}` : 'pts -';
-      return `<div class='text-xs text-slate-300'><b>${unitMap[l.unit_id]||'Unit '+l.unit_id}</b> -> ${dest} <span class='text-slate-400'>${statusLabel(l.status)}</span> <span class='text-slate-500'>pickup ${pickup} drop ${dropoff} ${patients}</span></div>`;
+      return `<div class='text-xs text-slate-300'><b>${unitMap[l.unit_id]||'Unit '+l.unit_id}</b> -> ${dest} <span class='text-slate-400'>${statusLabel(l.status)}</span> <span class='text-slate-500'>scene ${pickup} drop ${dropoff} ${patients}</span></div>`;
     }).join('');
     el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Transport Legs</div>${rows || '<div class="text-slate-500">No transport legs</div>'}`;
   } catch(e){ el.innerHTML = `<div class='text-xs font-semibold text-slate-400 mb-1'>Transport Legs</div><div class='text-xs text-slate-500'>No transport legs</div>`; }
@@ -1625,12 +1625,16 @@ function updateTimers(){
     if(el.dataset.timer === 'sla') return;
     const iso = el.dataset.iso;
     const acc = el.dataset.acc;
-    if(!iso) return;
+    const end = el.dataset.end;
+    if(!iso){
+      if(acc !== undefined) el.textContent = fmtDur(parseFloat(acc||0));
+      return;
+    }
     let sec = null;
     if(acc !== undefined){
-      sec = parseFloat(acc||0) + elapsed(iso);
+      sec = parseFloat(acc||0) + elapsed(iso, end);
     } else {
-      sec = elapsed(iso);
+      sec = elapsed(iso, end);
     }
     el.textContent = sec !== null ? fmtDur(sec) : (el.dataset.fallback || '-');
   });

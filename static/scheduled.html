@@ -71,14 +71,14 @@
         <input id='callType' class='form-input' value='Routine Transport'>
         <label class='text-xs text-slate-400'>Patient Name</label>
         <input id='patientName' class='form-input'>
-        <label class='text-xs text-slate-400'>Pickup Street Address</label>
+        <label class='text-xs text-slate-400'>Scene Street Address</label>
         <input id='pStreet' class='form-input' placeholder='Street address'>
         <div class='grid grid-cols-3 gap-2'>
           <input id='pCity' class='form-input' placeholder='City'>
           <input id='pState' class='form-input' placeholder='ST' maxlength='2'>
           <input id='pZip' class='form-input' placeholder='Zip'>
         </div>
-        <label class='text-xs text-slate-400'>Pickup Lat / Lng</label>
+        <label class='text-xs text-slate-400'>Scene Lat / Lng</label>
         <div class='grid grid-cols-2 gap-2'><input id='pickupLat' class='form-input' placeholder='lat'><input id='pickupLng' class='form-input' placeholder='lng'></div>
         <label class='text-xs text-slate-400'>Destination</label>
         <select id='destination' class='form-input' onchange='destChanged()'><option value=''>Select destination</option></select>
@@ -240,7 +240,7 @@ function renderList(){
         <div>
           <div class='font-bold text-white'>${t.patient_name||'Unknown patient'} <span class='${statusClass(t.status)}'>${t.status||'scheduled'}</span></div>
           <div class='text-slate-400'>${t.call_type} • ${t.service_level||'-'} • ${t.mobility_level||'-'}</div>
-          <div class='text-slate-300 mt-1'><b>Pickup:</b> ${t.pickup_address||'-'}</div>
+          <div class='text-slate-300 mt-1'><b>Scene:</b> ${t.pickup_address||'-'}</div>
           <div class='text-slate-300'><b>Destination:</b> ${t.destination_name||'-'}</div>
           <div class='text-slate-500 text-xs mt-1'>Scheduled ${fmtDateTime(t.scheduled_at)}</div>
           ${t.unit ? `<div class='text-slate-500 text-xs'>Unit ${t.unit.call_sign}</div>` : ''}

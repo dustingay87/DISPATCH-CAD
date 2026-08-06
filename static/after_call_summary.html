@@ -141,6 +141,7 @@ async function load(){
         <div><span class='text-slate-500'>Status</span> ${h.status||'-'}</div>
         <div><span class='text-slate-500'>Received</span> ${fmtTime(h.call_received_at)}</div>
         <div><span class='text-slate-500'>Closed</span> ${fmtTime(h.closed_at)}</div>
+        <div><span class='text-slate-500'>Total Call Duration</span> ${call.total_call_duration||'-'}</div>
         <div class='sm:col-span-2'><span class='text-slate-500'>Narrative</span> ${call.narrative||'-'}</div>
         ${call.caller_name?`<div><span class='text-slate-500'>Caller</span> ${call.caller_name}</div>`:''}
         ${call.callback?`<div><span class='text-slate-500'>Callback</span> ${call.callback}</div>`:''}
