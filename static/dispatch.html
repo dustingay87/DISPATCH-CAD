@@ -963,6 +963,8 @@ async function selectIncident(id){
   const assigned = state.units.filter(u=>u.current_incident_id===i.id);
   let ackSet = new Set();
   try { (await api(`/incidents/${id}/acks`)).forEach(a=>ackSet.add(a.unit_id)); } catch(e){}
+  let timeline = {events:[],logs:[],messages:[]};
+  try { timeline = await api(`/incidents/${id}/timeline`); } catch(e){}
   const availOpts = state.units.filter(u=>['AQ','Available'].includes(u.current_status)).map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
   await loadDestinations(i.agency_id);
   const destOpts = getDestinationOptions(i.agency_id);

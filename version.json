@@ -1,5 +1,5 @@
 {
-  "version": "3dd3a3f",
-  "date": "2026-08-07 09:30:00 -0500",
-  "message": "Update priority labels to EMERGENT, Urgent, Non-Emergent, Scheduled, Standby and add priority 5 support"
+  "version": "9645823",
+  "date": "2026-08-07 09:45:00 -0500",
+  "message": "Fix missing timeline variable in dispatch incident panel"
 }
