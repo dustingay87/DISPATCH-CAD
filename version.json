@@ -1,5 +1,5 @@
 {
-  "version": "01ab479",
-  "date": "2026-08-07 11:20:00 -0500",
-  "message": "Fix /users 500 by allowing UserOut and UserUpdate preferences to be any JSON value"
+  "version": "d8e48f5",
+  "date": "2026-08-07 11:35:00 -0500",
+  "message": "Add timezone offset to all API datetimes and fix dispatch milestone duration calculation"
 }

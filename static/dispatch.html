@@ -876,7 +876,7 @@ function renderCalls(){
 
 function findFirstEvent(events, codes){ return (events||[]).filter(e=>codes.includes(e.status_code)).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at))[0]?.created_at || null; }
 function milestoneText(iso, target, start){
-  const sec = iso ? elapsed(iso) : elapsed(start);
+  const sec = iso ? elapsed(start, iso) : elapsed(start);
   if(target == null) return `<span class='text-slate-400'>${fmtDur(sec)}</span>`;
   const cls = iso ? (sec>target?'text-red-400 font-bold':'text-green-400') : 'text-yellow-400';
   return `<span class='${cls}'>${fmtDur(sec)}</span> / ${fmtDur(target)}`;

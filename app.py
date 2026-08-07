@@ -1,9 +1,10 @@
 from fastapi import FastAPI, Body, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.encoders import ENCODERS_BY_TYPE
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, or_, UniqueConstraint, inspect, text, event
 from sqlalchemy.orm import declarative_base, relationship, backref, Session, sessionmaker
-from pydantic import BaseModel, computed_field, validator
+from pydantic import BaseModel as _PydanticBaseModel, ConfigDict, computed_field, validator
 from datetime import datetime, date, time as dt_time, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import List, Optional, Any, Dict
@@ -56,6 +57,20 @@ def _naive_local(dt):
     if dt is None or dt.tzinfo is None:
         return dt
     return dt.astimezone(DEFAULT_TIMEZONE).replace(tzinfo=None)
+
+def _serialize_dt(dt):
+    """Serialize datetimes with the default timezone offset so clients convert correctly."""
+    if dt is None:
+        return None
+    if getattr(dt, 'tzinfo', None) is None:
+        return dt.replace(tzinfo=DEFAULT_TIMEZONE).isoformat()
+    return dt.astimezone(DEFAULT_TIMEZONE).isoformat()
+
+class BaseModel(_PydanticBaseModel):
+    model_config = ConfigDict(json_encoders={datetime: _serialize_dt})
+
+# Make sure FastAPI's fallback encoder also emits timezone-aware ISO strings.
+ENCODERS_BY_TYPE[datetime] = _serialize_dt
 
 taip_last_packet: Dict[str, float] = {}
 
