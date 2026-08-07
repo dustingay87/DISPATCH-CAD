@@ -169,6 +169,8 @@ const url = new URL(window.location.href);
 let unitId = parseInt(url.searchParams.get('unit_id')) || null;
 let state = { me:null, personnel:null, unit:null, agencies:[], agencyMap:{}, incidents:[], activeIncidents:[], historyIncidents:[], messages:[], allUnits:[], personnelList:[], config:{statuses:[],dispositions:[],callTypes:[]}, map:null, selectedIncident:null, selectedUnit:null, crossAgencies:[], destinations:[] };
 const DEFAULT_CENTER = [39.9612,-82.9988];
+const PRIORITY_LABELS = {1:'EMERGENT',2:'Urgent',3:'Non-Emergent',4:'Scheduled',5:'Standby'};
+function priorityLabel(p){ const n=parseInt(p,10); if(!Number.isNaN(n) && PRIORITY_LABELS[n]) return PRIORITY_LABELS[n]; return p?`P${p}`:''; }
 
 const ROLE_BADGE = { ems:{label:'Unified Response - EMS',color:'bg-emerald-700'}, fire:{label:'Unified Response - Fire',color:'bg-red-700'}, law:{label:'Unified Response - Law',color:'bg-blue-700'}, all:{label:'Unified Response',color:'bg-purple-700'} };
 const ROLE_LOGO = { ems:'/static/logo-ems.png', fire:'/static/logo-fire.png', law:'/static/logo-law.png', all:'/static/d2d-logo.png' };
@@ -346,7 +348,7 @@ function renderCallPanel(){
     <div class='${flashClass} p-2 -m-2 rounded'>
     ${p.requires_ack ? "<div class='text-center font-bold text-red-400 mb-1 animate-pulse'>NEW DISPATCH - ACK REQUIRED</div>" : ''}
     <div class='font-bold text-lg text-white mb-1'>${p.call_number||p.incident_number}</div>
-    <div class='text-sm'>${p.call_type} <span class='text-slate-400'>P${p.priority}</span></div>
+    <div class='text-sm'>${p.call_type} <span class='text-slate-400'>${priorityLabel(p.priority)}</span></div>
     <div class='text-xs text-slate-300 mt-1'>${loc}</div>
     <div class='text-xs text-slate-400 mt-1'>Units: ${assigned}</div>
     <div class='text-xs text-slate-300 mt-1 bg-slate-900 p-1 rounded max-h-24 overflow-auto'>${p.narrative||'No narrative'}</div>
@@ -439,7 +441,7 @@ function renderHistory(){
 function callRow(i){
   const u = (i.assigned_units||[]).map(u=>u.call_sign||u.unit_id).join(', ') || '-';
   return `<div class='card cursor-pointer' onclick='selectIncident(${i.id})'>
-    <div class='flex justify-between'><span class='font-bold text-white'>${i.call_number||i.incident_number}</span><span class='text-slate-400'>P${i.priority}</span></div>
+    <div class='flex justify-between'><span class='font-bold text-white'>${i.call_number||i.incident_number}</span><span class='text-slate-400'>${priorityLabel(i.priority)}</span></div>
     <div class='text-sm'>${i.call_type}</div>
     <div class='text-xs text-slate-300'>${i.location_text||'-'}</div>
     <div class='text-xs text-slate-400 mt-1'>Units: ${u} • ${fmtTime(i.created_at)}</div>

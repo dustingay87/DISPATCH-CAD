@@ -298,10 +298,12 @@ const DEFAULT_CALL_TYPES = {
   ]
 };
 const DEFAULT_PRIORITIES = {
-  police: [{priority:1,label:'Emergency',target_seconds:180},{priority:2,label:'Urgent',target_seconds:420},{priority:3,label:'Routine',target_seconds:720},{priority:4,label:'Low',target_seconds:1200}],
-  fire: [{priority:1,label:'Working Fire',target_seconds:180},{priority:2,label:'Urgent',target_seconds:420},{priority:3,label:'Routine',target_seconds:720},{priority:4,label:'Low',target_seconds:1200}],
-  ems: [{priority:1,label:'Priority 1',target_seconds:180},{priority:2,label:'Priority 2',target_seconds:420},{priority:3,label:'Priority 3',target_seconds:720},{priority:4,label:'Priority 4',target_seconds:1200}]
+  police: [{priority:1,label:'EMERGENT',target_seconds:180},{priority:2,label:'Urgent',target_seconds:420},{priority:3,label:'Non-Emergent',target_seconds:720},{priority:4,label:'Scheduled',target_seconds:1200},{priority:5,label:'Standby',target_seconds:1800}],
+  fire: [{priority:1,label:'EMERGENT',target_seconds:180},{priority:2,label:'Urgent',target_seconds:420},{priority:3,label:'Non-Emergent',target_seconds:720},{priority:4,label:'Scheduled',target_seconds:1200},{priority:5,label:'Standby',target_seconds:1800}],
+  ems: [{priority:1,label:'EMERGENT',target_seconds:180},{priority:2,label:'Urgent',target_seconds:420},{priority:3,label:'Non-Emergent',target_seconds:720},{priority:4,label:'Scheduled',target_seconds:1200},{priority:5,label:'Standby',target_seconds:1800}],
 };
+const PRIORITY_LABELS = {1:'EMERGENT',2:'Urgent',3:'Non-Emergent',4:'Scheduled',5:'Standby'};
+function priorityLabel(p){ const n=parseInt(p,10); if(!Number.isNaN(n) && PRIORITY_LABELS[n]) return PRIORITY_LABELS[n]; return p?`P${p}`:''; }
 function moduleToDiscipline(m){ return {'law':'police','fire':'fire','ems':'ems'}[m] || m; }
 function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
 
@@ -355,7 +357,7 @@ async function loadConfig(){
     const response_goals = (goalRes[0]?.value) ? goalRes[0].value : {dispatch_seconds:60, en_route_seconds:120, on_scene_seconds:480};
     state.configs[agencyId] = { callTypes, priorities, response_goals };
     const csel = document.getElementById('callType');
-    csel.innerHTML = callTypes.map(c=>`<option value='${c.label}' data-priority='${c.priority}'>${c.label} (P${c.priority})</option>`).join('') || '<option value="">No call types</option>';
+    csel.innerHTML = callTypes.map(c=>`<option value='${c.label}' data-priority='${c.priority}'>${c.label} (${priorityLabel(c.priority)})</option>`).join('') || '<option value="">No call types</option>';
     const psel = document.getElementById('priority');
     psel.innerHTML = priorities.map(p=>`<option value='${p.priority}'>P${p.priority} - ${p.label}</option>`).join('') || '<option value="2">2</option>';
     updatePriority();

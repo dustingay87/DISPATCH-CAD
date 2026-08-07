@@ -15,6 +15,7 @@
   .priority-2 { background:rgba(249,115,22,0.18); border-left:5px solid #f97316; }
   .priority-3 { background:rgba(234,179,8,0.18); border-left:5px solid #eab308; }
   .priority-4 { background:rgba(34,197,94,0.18); border-left:5px solid #22c55e; }
+  .priority-5 { background:rgba(59,130,246,0.18); border-left:5px solid #3b82f6; }
   .unit-os { border-left:5px solid #ef4444; }
   .unit-er { border-left:5px solid #eab308; }
   .unit-aq { border-left:5px solid #22c55e; }
@@ -202,8 +203,9 @@ function fmtTime(iso){ if(!iso) return '-'; const d=new Date(iso); return d.toLo
 function toMs(iso){ return iso ? new Date(iso).getTime() : Date.now(); }
 function fmtDur(s){ const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; }
 function elapsed(iso){ return (Date.now()-toMs(iso))/1000; }
-function priorityClass(p){ return `priority-${Math.min(Math.max(p||2,1),4)}`; }
-function priorityTarget(p){ return {1:180,2:420,3:720,4:1200}[Math.min(Math.max(p||2,1),4)] || 420; }
+function priorityClass(p){ return `priority-${Math.min(Math.max(p||2,1),5)}`; }
+function priorityTarget(p){ return {1:180,2:420,3:720,4:1200,5:1800}[Math.min(Math.max(p||2,1),5)] || 420; }
+function priorityLabel(p){ const n=parseInt(p,10); const L={1:'EMERGENT',2:'Urgent',3:'Non-Emergent',4:'Scheduled',5:'Standby'}; if(!Number.isNaN(n) && L[n]) return L[n]; return p?`P${p}`:''; }
 function slaClass(sec,target){ return sec>target ? 'text-red-400 font-bold' : 'text-slate-400'; }
 function unitClass(st){ if(st==='OS') return 'unit-os'; if(st==='ER'||st==='TR'||st==='DEL') return 'unit-er'; if(st==='AQ') return 'unit-aq'; return 'unit-oth'; }
 function statusLabel(code){ const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'Transport',CAN:'Cancelled',NPF:'No Patient Found',DEL:'Delivered',AFR:'Available for Response',LUN:'Lunch',OOS:'Out of Service',MAINT:'Maintenance',AK:'Dispatched',dispatched:'Dispatched',open:'Open',closed:'Closed',en_route:'En Route',on_scene:'On Scene'}; return M[code]||code; }
@@ -245,7 +247,7 @@ function renderMap(){
     }
   });
   state.incidents.forEach(i=>{
-    if(i.lat!=null && i.lng!=null){ const col=i.priority===1?'#ef4444':i.priority===2?'#f97316':i.priority===3?'#eab308':'#22c55e'; L.circleMarker([i.lat,i.lng],{radius:9,color:col,fillColor:col,fillOpacity:.9}).addTo(layers.incidents).bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${i.status}`); }
+    if(i.lat!=null && i.lng!=null){ const col=i.priority===1?'#ef4444':i.priority===2?'#f97316':i.priority===3?'#eab308':i.priority===4?'#22c55e':'#3b82f6'; L.circleMarker([i.lat,i.lng],{radius:9,color:col,fillColor:col,fillOpacity:.9}).addTo(layers.incidents).bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${i.status}`); }
   });
 }
 
@@ -325,7 +327,7 @@ function updateResponsePlan(){
   if(cat==='police') rec.push('Backup recommended for robbery, assault, shots fired');
   if(cat==='ems' && type.label.includes('Cardiac')) rec.push('AED, monitor, code 3 if indicated');
   const units = state.units.filter(u=>u.agency_id===agencyId && u.current_status==='AQ').map(u=>u.call_sign).join(', ');
-  document.getElementById('responsePlan').innerHTML = `<div class='text-slate-300 mb-1'><b>${type.label}</b> (Pri ${type.priority})</div><div class='text-green-400 mb-1'>Recommended: ${rec.join(' | ')}</div><div>Available units: ${units||'none'}</div>`;
+  document.getElementById('responsePlan').innerHTML = `<div class='text-slate-300 mb-1'><b>${type.label}</b> (${priorityLabel(type.priority)})</div><div class='text-green-400 mb-1'>Recommended: ${rec.join(' | ')}</div><div>Available units: ${units||'none'}</div>`;
 }
 
 async function createCall(){
@@ -353,7 +355,7 @@ function renderActiveCalls(){
     const unitOptions = availableUnits().map(u=>`<option value='${u.id}'>${u.call_sign} (${u.unit_type||state.agencyMap[u.agency_id]?.agency_type})</option>`).join('');
     return `<div class='card ${priorityClass(i.priority)}'>
       <div class='p-2 bg-slate-950 flex justify-between items-center border-b border-slate-700'>
-        <div><b class='text-white'>${i.call_number||i.incident_number}</b> <span class='text-slate-400 ml-2'>${i.call_type}</span> <span class='text-xs text-slate-500 ml-2'>${a.name||'-'}</span> <span class='text-xs px-1.5 rounded ${priorityClass(i.priority)} text-white ml-2'>P${i.priority}</span></div>
+        <div><b class='text-white'>${i.call_number||i.incident_number}</b> <span class='text-slate-400 ml-2'>${i.call_type}</span> <span class='text-xs text-slate-500 ml-2'>${a.name||'-'}</span> <span class='text-xs px-1.5 rounded ${priorityClass(i.priority)} text-white ml-2'>${priorityLabel(i.priority)}</span></div>
         <span class='text-xs font-mono text-slate-400'>${fmtTime(i.created_at)}</span>
       </div>
       <div class='p-2 space-y-1'>

@@ -1730,10 +1730,11 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
                 {'label':'Suspicious Person', 'priority':3, 'fields':['armed']}
             ],
             'priorities': [
-                {'priority':1,'label':'Emergency','target_seconds':180},
+                {'priority':1,'label':'EMERGENT','target_seconds':180},
                 {'priority':2,'label':'Urgent','target_seconds':420},
-                {'priority':3,'label':'Routine','target_seconds':720},
-                {'priority':4,'label':'Low','target_seconds':1200}
+                {'priority':3,'label':'Non-Emergent','target_seconds':720},
+                {'priority':4,'label':'Scheduled','target_seconds':1200},
+                {'priority':5,'label':'Standby','target_seconds':1800}
             ],
             'response_plans': {
                 'Traffic Accident': ['patrol','supervisor','rescue'],
@@ -1766,10 +1767,11 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
                 {'label':'Brush Fire', 'priority':2, 'fields':['size']}
             ],
             'priorities': [
-                {'priority':1,'label':'Working Fire','target_seconds':180},
+                {'priority':1,'label':'EMERGENT','target_seconds':180},
                 {'priority':2,'label':'Urgent','target_seconds':420},
-                {'priority':3,'label':'Routine','target_seconds':720},
-                {'priority':4,'label':'Low','target_seconds':1200}
+                {'priority':3,'label':'Non-Emergent','target_seconds':720},
+                {'priority':4,'label':'Scheduled','target_seconds':1200},
+                {'priority':5,'label':'Standby','target_seconds':1800}
             ],
             'response_plans': {
                 'Structure Fire': ['engine','ladder','rescue','chief'],
@@ -1802,10 +1804,11 @@ def seed_config(body: SeedConfigRequest, current_user: dict = Depends(require_ad
                 {'label':'Overdose', 'priority':1, 'fields':['age','conscious','substance']}
             ],
             'priorities': [
-                {'priority':1,'label':'Priority 1','target_seconds':180},
-                {'priority':2,'label':'Priority 2','target_seconds':420},
-                {'priority':3,'label':'Priority 3','target_seconds':720},
-                {'priority':4,'label':'Priority 4','target_seconds':1200}
+                {'priority':1,'label':'EMERGENT','target_seconds':180},
+                {'priority':2,'label':'Urgent','target_seconds':420},
+                {'priority':3,'label':'Non-Emergent','target_seconds':720},
+                {'priority':4,'label':'Scheduled','target_seconds':1200},
+                {'priority':5,'label':'Standby','target_seconds':1800}
             ],
             'response_plans': {
                 'Cardiac Arrest': ['ambulance','medic','supervisor'],
@@ -1996,6 +1999,12 @@ class IncidentCreate(BaseModel):
             except Exception: return None
         return v
 
+    @validator('priority')
+    def _clamp_priority(cls, v):
+        if v is None: return 2
+        try: return min(max(int(v), 1), 5)
+        except Exception: return 2
+
 class IncidentOut(IncidentCreate):
     id: int
     agency_id: Optional[int] = None
@@ -2023,6 +2032,12 @@ class IncidentUpdate(BaseModel):
     caller_name: Optional[str] = None
     extra: Optional[dict] = None
     call_entry_started_at: Optional[datetime] = None
+
+    @validator('priority')
+    def _clamp_priority(cls, v):
+        if v is None: return None
+        try: return min(max(int(v), 1), 5)
+        except Exception: return None
 
 class IncidentPersonnelCreate(BaseModel):
     personnel_id: int
@@ -5122,10 +5137,11 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
                 {'label':'Suspicious Person', 'priority':3, 'fields':['armed']}
             ],
             'priorities': [
-                {'priority':1,'label':'Emergency','target_seconds':180},
+                {'priority':1,'label':'EMERGENT','target_seconds':180},
                 {'priority':2,'label':'Urgent','target_seconds':420},
-                {'priority':3,'label':'Routine','target_seconds':720},
-                {'priority':4,'label':'Low','target_seconds':1200}
+                {'priority':3,'label':'Non-Emergent','target_seconds':720},
+                {'priority':4,'label':'Scheduled','target_seconds':1200},
+                {'priority':5,'label':'Standby','target_seconds':1800}
             ],
             'response_plans': {
                 'Traffic Accident': ['patrol','supervisor','rescue'],
@@ -5158,10 +5174,11 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
                 {'label':'Brush Fire', 'priority':2, 'fields':['size']}
             ],
             'priorities': [
-                {'priority':1,'label':'Working Fire','target_seconds':180},
+                {'priority':1,'label':'EMERGENT','target_seconds':180},
                 {'priority':2,'label':'Urgent','target_seconds':420},
-                {'priority':3,'label':'Routine','target_seconds':720},
-                {'priority':4,'label':'Low','target_seconds':1200}
+                {'priority':3,'label':'Non-Emergent','target_seconds':720},
+                {'priority':4,'label':'Scheduled','target_seconds':1200},
+                {'priority':5,'label':'Standby','target_seconds':1800}
             ],
             'response_plans': {
                 'Structure Fire': ['engine','ladder','rescue','chief'],
@@ -5194,10 +5211,11 @@ def seed_pilot(current_user: dict = Depends(require_admin), db: Session = Depend
                 {'label':'Overdose', 'priority':1, 'fields':['age','conscious','substance']}
             ],
             'priorities': [
-                {'priority':1,'label':'Priority 1','target_seconds':180},
-                {'priority':2,'label':'Priority 2','target_seconds':420},
-                {'priority':3,'label':'Priority 3','target_seconds':720},
-                {'priority':4,'label':'Priority 4','target_seconds':1200}
+                {'priority':1,'label':'EMERGENT','target_seconds':180},
+                {'priority':2,'label':'Urgent','target_seconds':420},
+                {'priority':3,'label':'Non-Emergent','target_seconds':720},
+                {'priority':4,'label':'Scheduled','target_seconds':1200},
+                {'priority':5,'label':'Standby','target_seconds':1800}
             ],
             'response_plans': {
                 'Cardiac Arrest': ['medic','supervisor'],

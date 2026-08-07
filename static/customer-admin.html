@@ -204,6 +204,8 @@ th { color:#94a3b8; text-transform:uppercase; font-size:0.7rem; }
 
 <script>
 function api(path, opts={}){ return fetch(path, {...opts, credentials:'include'}).then(r=>{ if(r.status===401){ window.location.href='/login'; throw new Error('Unauthorized'); } if(!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }); }
+const PRIORITY_LABELS = {1:'EMERGENT',2:'Urgent',3:'Non-Emergent',4:'Scheduled',5:'Standby'};
+function priorityLabel(p){ const n=parseInt(p,10); if(!Number.isNaN(n) && PRIORITY_LABELS[n]) return PRIORITY_LABELS[n]; return p?`P${p}`:''; }
 
 function resizeImage(file, maxDim=1024, quality=0.85){
   return new Promise((resolve, reject)=>{
@@ -290,7 +292,7 @@ document.getElementById('saveModules').addEventListener('click', async ()=>{
 async function loadCallTypes(){
   state.call_types = (await getConfigValue('call_types') || []).map(c=>{ return {...c, active: normalizeActive(c.active)}; });
   const el = document.getElementById('callTypeList');
-  el.innerHTML = state.call_types.length ? `<table><thead><tr><th>Label</th><th>Priority</th><th>Fields</th><th>Active</th><th></th></tr></thead><tbody>${state.call_types.map((c,i)=>`<tr class='${c.active?'':'text-slate-500 line-through'}'><td>${c.label}</td><td>${c.priority}</td><td>${(c.fields||[]).join(', ')}</td><td>${c.active?'Yes':'No'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editCallType(${i})'>Edit</button><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='toggleCallTypeActive(${i})'>${c.active?'Make Inactive':'Make Active'}</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No call types.</div>';
+  el.innerHTML = state.call_types.length ? `<table><thead><tr><th>Label</th><th>Priority</th><th>Fields</th><th>Active</th><th></th></tr></thead><tbody>${state.call_types.map((c,i)=>`<tr class='${c.active?'':'text-slate-500 line-through'}'><td>${c.label}</td><td>${priorityLabel(c.priority)}</td><td>${(c.fields||[]).join(', ')}</td><td>${c.active?'Yes':'No'}</td><td class='space-x-1'><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='editCallType(${i})'>Edit</button><button class='btn bg-slate-700 hover:bg-slate-600 text-white' onclick='toggleCallTypeActive(${i})'>${c.active?'Make Inactive':'Make Active'}</button></td></tr>`).join('')}</tbody></table>` : '<div class="text-slate-500">No call types.</div>';
 }
 
 function resetCallTypeForm(){

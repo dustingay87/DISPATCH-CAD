@@ -25,6 +25,7 @@ window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason)
   .priority-2 { background:rgba(249,115,22,0.18); border-left:5px solid #f97316; }
   .priority-3 { background:rgba(234,179,8,0.18); border-left:5px solid #eab308; }
   .priority-4 { background:rgba(34,197,94,0.18); border-left:5px solid #22c55e; }
+  .priority-5 { background:rgba(59,130,246,0.18); border-left:5px solid #3b82f6; }
   .unit-os { background:rgba(239,68,68,0.18); border-left:5px solid #ef4444; }
   .unit-er { background:rgba(234,179,8,0.18); border-left:5px solid #eab308; }
   .unit-aq { background:rgba(34,197,94,0.18); border-left:5px solid #22c55e; }
@@ -192,6 +193,13 @@ const QUICK_STAMPS = {
   fire: ['Send Law Enforcement','Send EMS','Smoke Showing','Send Power Co','Entry Made','Fire Attack','Fire Out','Search','Recovery','Traffic Assistance','Road Closed','Lane Blocked','Command'],
   ems: ['Send Fire','Send Law Enforcement','Send Help','Send Coroner','Entry Made','Send HEMS','CPR In Progress','Pt Combative','No Pt Found','Pt Deceased','Public Assist Only','Road Blocked','Road Closed','Need an LZ','Need a Supervisor']
 };
+const PRIORITY_LABELS = {1:'EMERGENT',2:'Urgent',3:'Non-Emergent',4:'Scheduled',5:'Standby'};
+function priorityLabel(p){
+  const n = parseInt(p, 10);
+  if(!Number.isNaN(n) && PRIORITY_LABELS[n]) return PRIORITY_LABELS[n];
+  return p ? `P${p}` : '';
+}
+function priorityClass(i){ const n = Math.min(Math.max(parseInt(i.priority,10)||2,1),5); return `priority-${n}`; }
 const AVAILABLE_STATUSES = ['AQ','AFR','POSTING','STAGED','AT_STATION','AVAILABLE_ON_RADIO','IN_SERVICE','ON_DUTY','AVAILABLE'];
 const OUT_OF_SERVICE_STATUSES = ['OOS','MAINT','LUN','MEAL','OFF_DUTY','off_duty'];
 const OOS_REASONS = ['Mechanical','Equipment','Staffing','Fuel','Cleaning','Repair','Scheduled Maintenance','Inspection','Other'];
@@ -706,7 +714,7 @@ function renderCallFilters(){
   if(state.showClosed){ el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
   const zones = [...new Set(state.postZones.map(z=>z.name).filter(Boolean))].sort();
-  const html = `<select id='cfPriority' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All Pri</option><option value='1'>P1</option><option value='2'>P2</option><option value='3'>P3</option><option value='4'>P4</option></select>
+  const html = `<select id='cfPriority' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All Pri</option><option value='1'>P1 - EMERGENT</option><option value='2'>P2 - Urgent</option><option value='3'>P3 - Non-Emergent</option><option value='4'>P4 - Scheduled</option><option value='5'>P5 - Standby</option></select>
 <select id='cfAssigned' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All</option><option value='assigned'>Assigned</option><option value='unassigned'>Unassigned</option></select>
     ${zones.length ? `<select id='cfZone' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px]' onchange='applyCallFilters()'><option value='all'>All Zones</option>${zones.map(z=>`<option value='${z}'>${z}</option>`).join('')}</select>` : ''}
     <input id='cfSearch' type='text' class='bg-slate-800 border border-slate-600 rounded px-1 text-[10px] flex-1 min-w-[4rem]' oninput='applyCallFilters()' placeholder='Search'>`;
@@ -746,10 +754,10 @@ async function renderClosedCalls(){
     const historyControls = isHistory ? `<input id='hStart' type='date' value='${state.historySearch.start}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><input id='hEnd' type='date' value='${state.historySearch.end}' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs'><input id='hSearch' type='text' value='${escapeHtml(state.historySearch.search)}' placeholder='Search #' class='bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs w-24'><button class='bg-blue-700 hover:bg-blue-600 px-2 py-0.5 rounded text-xs' onclick='searchHistory()'>Search</button>` : '';
     const table = list.length ? `<table class='tbl'><thead><tr><th>#</th><th>Type</th><th>Pri</th><th>Agency</th><th>Closed</th><th></th></tr></thead><tbody>` + list.map(i=>{
       const a = am[i.agency_id] || {};
-      return `<tr class='priority-${Math.min(Math.max(i.priority||2,1),4)} hover:bg-slate-800' onclick='window.open("/history?incident_id=${i.id}","_blank")'>
+      return `<tr class='${priorityClass(i)} hover:bg-slate-800' onclick='window.open("/history?incident_id=${i.id}","_blank")'>
         <td class='font-bold'>${i.call_number||i.incident_number}</td>
         <td>${i.call_type}</td>
-        <td class='text-center'>P${i.priority}</td>
+        <td class='text-center'>${priorityLabel(i.priority)}</td>
         <td>${a.name||'-'}</td>
         <td>${fmtTime(i.closed_at)}</td>
         <td class='space-x-1'>
@@ -848,10 +856,10 @@ function renderCalls(){
     const unv = i.extra?.verification_status==='unverified' ? ` <span class='text-red-400 font-bold' title='UNVERIFIED LOCATION'>!</span>` : '';
     const dest = i.extra?.destination_name || '-';
     const statusIso = i.last_status_at || i.created_at;
-    return `<tr class='priority-${Math.min(Math.max(i.priority||2,1),4)} ${cls} ${dispatchedTooLong ? 'flash-red' : ''}' data-type='incident' data-id='${i.id}' title='${dispatchedTooLong ? 'Unit dispatched but not en route > 2 min' : ''}' onclick='selectIncident(${i.id})' ondragover='callDragOver(event,${i.id})' ondragleave='callDragLeave(event)' ondrop='callDrop(event,${i.id})'>
+    return `<tr class='${priorityClass(i)} ${cls} ${dispatchedTooLong ? 'flash-red' : ''}' data-type='incident' data-id='${i.id}' title='${dispatchedTooLong ? 'Unit dispatched but not en route > 2 min' : ''}' onclick='selectIncident(${i.id})' ondragover='callDragOver(event,${i.id})' ondragleave='callDragLeave(event)' ondrop='callDrop(event,${i.id})'>
       <td class='font-bold' title='${i.incident_number||''}'>${i.call_number||i.incident_number}</td>
       <td>${i.call_type}</td>
-      <td class='text-center'>P${i.priority}</td>
+      <td class='text-center'>${priorityLabel(i.priority)}</td>
       <td title='${i.location_text||''}'>${i.location_text||'-'}${unv}</td>
       <td>${i.extra?.zone_name||'-'}</td>
       <td>${dest}</td>
@@ -978,7 +986,7 @@ async function selectIncident(id){
       <div class='text-xs text-slate-300 flex flex-wrap gap-2 items-center'><span class='text-slate-500'>Units:</span> ${assignedSummary}</div>
       <div class='flex flex-wrap gap-4 text-xs text-slate-400'>
         <span>Agency: <b class='text-white'>${a.name||'-'}</b></span>
-        <span>Priority: <b class='text-white'>P${i.priority}</b></span>
+        <span>Priority: <b class='text-white'>${priorityLabel(i.priority)}</b></span>
         <span>Call Entry: <b class='text-white'>${fmtTime(start)}</b></span>
       </div>
       <div class='flex flex-wrap gap-4 text-xs text-slate-400'>

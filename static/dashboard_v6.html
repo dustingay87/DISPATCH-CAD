@@ -17,6 +17,7 @@ html,body { height:100%; margin:0; overflow:hidden; font-family: 'Inter', system
 .pri-2 { background:rgba(249,115,22,0.18); border-left:5px solid #f97316; }
 .pri-3 { background:rgba(234,179,8,0.18); border-left:5px solid #eab308; }
 .pri-4 { background:rgba(34,197,94,0.18); border-left:5px solid #22c55e; }
+.pri-5 { background:rgba(59,130,246,0.18); border-left:5px solid #3b82f6; }
 .stat-AQ { color:#22c55e; }
 .stat-OS { color:#ef4444; }
 .stat-ER,.stat-TR,.stat-DEL { color:#eab308; }
@@ -139,7 +140,8 @@ function statusLabel(c){const M={AQ:'Available',OS:'On Scene',ER:'En Route',TR:'
 function fmtTime(iso){if(!iso)return '-';const d=new Date(iso);return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
 function fmtDur(s){const h=Math.floor(s/3600);const m=Math.floor((s%3600)/60);const sec=Math.floor(s%60);return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;}
 function elapsed(iso){return iso?(Date.now()-new Date(iso).getTime())/1000:0;}
-function priorityClass(p){return `pri-${Math.min(Math.max(p||2,1),4)}`;}
+function priorityClass(p){return `pri-${Math.min(Math.max(p||2,1),5)}`;}
+function priorityLabel(p){ const n=parseInt(p,10); const L={1:'EMERGENT',2:'Urgent',3:'Non-Emergent',4:'Scheduled',5:'Standby'}; if(!Number.isNaN(n) && L[n]) return L[n]; return p?`P${p}`:''; }
 function statClass(c){if(c==='AQ')return 'stat-AQ';if(c==='OS')return 'stat-OS';if(['ER','TR','DEL'].includes(c))return 'stat-ER';return 'text-slate-400';}
 function isUserInteracting(){ const a=document.activeElement; if(!a||a===document.body) return false; return ['INPUT','SELECT','TEXTAREA','BUTTON'].includes(a.tagName) || a.closest('#openWork,#vehicleInfo,#tripSummary')!==null; }
 
@@ -377,7 +379,7 @@ function renderOpenWork(){
     const a=state.agencyMap[i.agency_id]||{};
     const assigned=state.units.filter(u=>u.current_incident_id===i.id).map(u=>`${u.call_sign} <span class='text-slate-500'>${u.current_status||''}</span>`).join(', ')||'-';
     return `<tr class='${priorityClass(i.priority)} ${state.selectedTrip===i.id?'selected':''}' onclick='selectTrip(${i.id})'>
-      <td class='font-bold'>P${i.priority}</td>
+      <td class='font-bold'>${priorityLabel(i.priority)}</td>
       <td>${i.call_type}</td>
       <td>${fmtTime(i.created_at)}</td>
       <td>${i.location_text||'-'}</td>
@@ -434,7 +436,7 @@ function renderMap(){
     return u.current_status==='OS'?'#ef4444':u.current_status==='AQ'?'#22c55e':u.current_status==='ER'||u.current_status==='TR'||u.current_status==='DEL'?'#eab308':'#64748b';
   }
   state.mapUnits.forEach(u=>{if(u.lat==null||u.lng==null)return;const col=unitColor(u);const a=state.agencyMap[u.agency_id]||{};const cross=a.agency_type && (a.agency_type!==(state.user?.selected_module==='law'?'police':state.user?.selected_module));const m=L.circleMarker([u.lat,u.lng],{radius:cross?4:6,color:col,fillColor:col,fillOpacity:0.9}).addTo(layers.units);const last=u.last_seen_at?new Date(u.last_seen_at).toLocaleTimeString():'unknown';const stateLabel=u.offline?'Offline':u.stale?'Stale':statusLabel(u.current_status);m.bindPopup(`<b>${u.call_sign}</b><br>${stateLabel}<br><span class='text-slate-400'>Last seen: ${last}</span><br>${u.speed!=null?u.speed+' mph • ':''}${u.heading!=null?u.heading+'°<br>':''}<span class='text-slate-400'>${a.name||a.agency_type||''}</span>`);m.on('click',()=>selectVehicle(u.id)); if(state.selectedVehicle===u.id) m.openPopup(); bounds.extend([u.lat,u.lng]);});
-  state.incidents.forEach(i=>{if(i.lat==null||i.lng==null)return;const col=i.priority===1?'#ef4444':i.priority===2?'#f97316':i.priority===3?'#eab308':'#22c55e';const m=L.circleMarker([i.lat,i.lng],{radius:8,color:col,fillColor:col,fillOpacity:0.6}).addTo(layers.incidents);m.bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${statusLabel(i.status)}`);bounds.extend([i.lat,i.lng]);});
+  state.incidents.forEach(i=>{if(i.lat==null||i.lng==null)return;const col=i.priority===1?'#ef4444':i.priority===2?'#f97316':i.priority===3?'#eab308':i.priority===4?'#22c55e':'#3b82f6';const m=L.circleMarker([i.lat,i.lng],{radius:8,color:col,fillColor:col,fillOpacity:0.6}).addTo(layers.incidents);m.bindPopup(`<b>${i.call_number||i.incident_number}</b><br>${i.call_type}<br>${statusLabel(i.status)}`);bounds.extend([i.lat,i.lng]);});
   if(state.selectedVehicle){ const u=state.units.find(x=>x.id===state.selectedVehicle); if(u && u.lat!=null && u.lng!=null){ const ll=L.latLng(u.lat,u.lng); const viewBounds=map.getBounds(); if(!viewBounds.contains(ll)) map.panTo(ll); } } else if(bounds.isValid()){ map.fitBounds(bounds,{padding:[20,20],maxZoom:16}); }
   else { const a=state.user?.agency_id ? state.agencyMap[state.user.agency_id] : null; if(a && a.lat!=null && a.lng!=null){ map.setView([a.lat,a.lng],11); } else { map.setView(CENTER,11); } }
 }
@@ -448,7 +450,7 @@ function renderTripSummary(){
     const opts=state.units.filter(u=>u.current_status==='AQ'||u.current_status==='Available').map(u=>`<option value='${u.id}'>${u.call_sign}</option>`).join('');
     el.innerHTML=`<div class='space-y-1'>
       <div class='font-bold text-white'>${i.call_number||i.incident_number}</div>
-      <div>${i.call_type} <span class='text-slate-400'>P${i.priority}</span></div>
+      <div>${i.call_type} <span class='text-slate-400'>${priorityLabel(i.priority)}</span></div>
       <div><span class='text-slate-400'>Location:</span> ${i.location_text||'-'}</div>
       <div><span class='text-slate-400'>Agency:</span> ${a.name||'-'}</div>
       <div><span class='text-slate-400'>Status:</span> ${statusLabel(i.status)}</div>

@@ -1,5 +1,5 @@
 {
-  "version": "3f1f08d",
-  "date": "2026-08-07 09:00:00 -0500",
-  "message": "Move No Transport and destination controls from call entry to the dispatch incident workspace"
+  "version": "3dd3a3f",
+  "date": "2026-08-07 09:30:00 -0500",
+  "message": "Update priority labels to EMERGENT, Urgent, Non-Emergent, Scheduled, Standby and add priority 5 support"
 }
