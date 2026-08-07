@@ -756,7 +756,7 @@ class UserOut(BaseModel):
     is_active: Optional[bool] = None
     customer_id: Optional[int] = None
     agency_id: Optional[int] = None
-    preferences: Optional[dict] = None
+    preferences: Optional[Any] = None
     created_at: Optional[datetime] = None
     class Config:
         from_attributes = True
@@ -770,7 +770,7 @@ class UserUpdate(BaseModel):
     customer_id: Optional[int] = None
     agency_id: Optional[int] = None
     is_active: Optional[bool] = None
-    preferences: Optional[dict] = None
+    preferences: Optional[Any] = None
 
 class CustomerCreate(BaseModel):
     name: str

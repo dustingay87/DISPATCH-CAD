@@ -1,5 +1,5 @@
 {
-  "version": "9645823",
-  "date": "2026-08-07 09:45:00 -0500",
-  "message": "Fix missing timeline variable in dispatch incident panel"
+  "version": "01ab479",
+  "date": "2026-08-07 11:20:00 -0500",
+  "message": "Fix /users 500 by allowing UserOut and UserUpdate preferences to be any JSON value"
 }
