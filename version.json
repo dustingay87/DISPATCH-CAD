@@ -1,5 +1,5 @@
 {
-  "version": "79d0614",
-  "date": "2026-08-06 22:00:00 -0500",
-  "message": "Add EMS CALL flag, conditional transport/no-transport tracking, police custody transport gating, and consolidate On Scene time"
+  "version": "3f1f08d",
+  "date": "2026-08-07 09:00:00 -0500",
+  "message": "Move No Transport and destination controls from call entry to the dispatch incident workspace"
 }
